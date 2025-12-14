@@ -1,0 +1,131 @@
+{% extends 'base.html' %}
+{%block morestyle %}
+/* basic styles copied from previous editor */
+body { font-family: system-ui, sans-serif; padding:20px; }
+.seg { display:inline-block; margin:2px; padding:4px 6px; background:white; border-radius:6px; box-shadow:0 1px 2px rgba(0,0,0,.1); min-width:20px; vertical-align:top; }
+.orig { font-weight:600; white-space:pre; }
+.reg { margin-top:2px; font-size:0.9em; color:#444; white-space:pre; }
+.editable { outline:none; cursor:text; }
+.space { background:#eee; }
+button { font-size:0.7em; margin-top:2px; margin-left:2px; }
+.newLine { display:block; }
+{% endblock %}
+
+{%block content %}
+<div id="app">
+  <h2>Line Editor</h2>
+
+<!--  <div v-for="line in lines" :key="line.id" style="margin-bottom:20px;">-->
+	<div>Original: [[ line.original_text ]]</div>
+      <span v-for="seg in line.segs" :key="seg.id" class="seg" :class="{ space: seg.orig===' ' && !seg.reg }">
+        <div class="orig">[[ seg.orig ]]</div>
+      <!-- REG -->
+      <div
+        v-if="seg.reg !== null || !isSpace(seg)"
+        class="reg editable"
+        contenteditable
+        @blur="editReg(seg, $event)"
+      >[[ seg.reg || '' ]]</div>
+
+      <!-- CONTROLS -->
+      <div>
+        <button class="delete" v-if="isSpace(seg)" @click="deleteSpace(seg)">❌</button>
+        <button class="delete" v-if="seg.reg !== null && !isSpace(seg)" @click="dismissReg(seg)">❌</button>
+      </div>
+      <br v-if="hasMarker(seg)" />
+      </span>
+    </div>
+    <button @click="saveLine(line)">Save</button>
+<!--  </div>-->
+</div>
+
+<script>
+// simple parser from XML to JS segs
+function parseSegXML(xml) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(xml, "text/xml");
+    const segElems = doc.querySelectorAll("seg");
+    let id = 0;
+    return Array.from(segElems).map(s => {
+        const origElem = s.querySelector("orig");
+        const regElem = s.querySelector("reg");
+        if (origElem) {
+	        id++;
+	        return {
+	            id,
+	            orig: origElem.textContent,
+	            reg: regElem ? regElem.textContent : null
+	        }
+	    } else {
+	        id++;
+	        return {
+	            id,
+	            orig: s.textContent,
+	            reg: null
+	        }
+	    }
+    });
+}
+
+// serialize back to XML
+function serializeSegs(segs) {
+    let xml = "<text>\n";
+    for (const s of segs) {
+        xml += "  <seg>";
+        if (s.orig) xml += `<orig>${s.orig}</orig>`;
+        if (s.reg !== null) xml += `<reg>${s.reg}</reg>`;
+        xml += "</seg>\n";
+    }
+    xml += "</text>";
+    return xml;
+}
+
+const { createApp } = Vue;
+
+createApp({
+    data() {
+        return {
+            line: {{ line|tojson }}
+        }
+    },
+    delimiters: ["[[", "]]"],  // <-- add this
+    created() {
+        // parse XML into JS segs
+        this.line.segs = parseSegXML(this.line.xml);
+    },
+	  methods: {
+	    hasMarker(seg) {
+            return typeof seg.orig === "string" && (seg.orig.includes("¶") || seg.orig.includes(":"));
+	    },
+	    isSpace(seg) {
+	      return seg.orig === " " && seg.reg === null;
+	    },
+
+	    // Always update reg, never orig
+	    editReg(seg, evt) {
+	      const text = evt.target.textContent;
+	      seg.reg = text || null;
+	    },
+
+	    dismissReg(seg) {
+	      seg.reg = null;
+	    },
+
+	    deleteSpace(seg) {
+	      seg.reg = "";
+	    },
+        saveLine(line) {
+            const xml = serializeSegs(line.segs);
+            fetch("/save", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({id: line.id, xml})
+            }).then(r => r.json()).then(data => {
+                if(data.status==="ok") alert("Saved");
+            });
+        }
+    }
+}).mount("#app");
+</script>
+
+{% endblock %}

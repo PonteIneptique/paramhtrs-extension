@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Abbreviarium{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        @font-face {
+            font-family: 'JunicodeVF';
+            src: url('{{ url_for("static", filename="fonts/JunicodeVF-Roman.woff2") }}') format('woff2');
+            font-weight: normal;
+            font-style: normal;
+        }
+        body {
+            display: flex;
+        }
+        .importedtext td {
+            background-color: #D3D3D3;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 60px;
+            height: 100vh;
+            position: fixed;
+            left: 0;
+            top: 0;
+            background-color: #343a40;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-top: 20px;
+            transition: width 0.3s ease;
+            overflow: hidden;
+        }
+
+        .sidebar:hover {
+            width: 180px; /* Expand the sidebar on hover */
+        }
+
+        .sidebar a {
+            color: white;
+            text-decoration: none;
+            padding: 15px;
+            display: flex;
+            align-items: center;
+            width: 100%;
+            transition: background-color 0.3s;
+            white-space: nowrap;
+        }
+
+        .sidebar a:hover {
+            background-color: #495057;
+            border-radius: 10px;
+        }
+
+        .sidebar i {
+            font-size: 24px;
+            margin-right: 10px;
+        }
+
+        /* Hide text by default and show when sidebar expands */
+        .sidebar span {
+            display: none;
+            transition: opacity 0.3s ease;
+        }
+
+        .sidebar:hover span {
+            display: inline;
+            opacity: 1;
+        }
+        #document-text-container, .junicode {
+            font-family: 'JunicodeVF', serif;
+        }
+        #document-text-container {
+            position: sticky;
+            top: 0;
+            background: white;
+            padding: 10px;
+            box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+            z-index: 1;
+        }
+
+        /* Ensure content doesn't get hidden */
+        .content-container {
+            margin-top: 3em;
+        }
+
+        /* Highlight when focused */
+        .highlight {
+            background-color: yellow;
+            font-weight: bold;
+        }
+
+        /* Editable table cells */
+        td[contenteditable="true"] {
+            cursor: text;
+            min-width: 150px;
+        }
+
+        .table-pending td[contenteditable="true"] {
+            background-color: #fff8dc;
+        }
+
+        td[contenteditable="true"]:focus {
+            outline: 2px solid #007bff;
+        }
+        .table-muted td {
+            background-color: rgba(108, 117, 125, 0.2); /* Light gray (Bootstrap secondary) */
+            color: #6c757d; /* Muted text color */
+        }
+
+        .example {
+            background-color: #f4f4f4;
+            padding: 10px;
+            border-left: 4px solid #007BFF;
+            margin: 10px 0;
+            font-family: monospace;
+        }
+{% block morestyle %}{% endblock%}
+    </style>
+
+</head>
+<body class="bg-light">
+    <div class="sidebar">
+        <a href="{{ url_for('bp_main.index_route') }}" aria-label="Home">
+            <i class="fas fa-home"></i> <span>Home</span>
+        </a>
+        <a href="{{ url_for('bp_main.lines_list_route') }}" aria-label="Lines">
+            <i class="fa-solid fa-list"></i> <span>Lines</span>
+        </a>
+    </div>
+    <div class="container mt-5">
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="alert alert-{{ messages[0][0] }} mt-4">
+                    {{ messages[0][1] }}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
