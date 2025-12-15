@@ -2,11 +2,13 @@ import difflib
 import json
 import unicodedata
 from typing import List, Tuple, Optional
+from xml.sax.saxutils import escape
 
 import click
+import os
 
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-from flask import current_app
+from flask import current_app, Response
 
 from .models import Line, db
 
@@ -71,13 +73,13 @@ def align_to_segs(src: str, tgt: str) -> str:
     out = []
     for o, r in segments:
         if o == r:
-            out.append(f"<seg>{o}</seg>")
+            out.append(f"<seg>{escape(o)}</seg>")
         elif o is None:
-            out.append(f"<seg><reg>{r}</reg></seg>")
+            out.append(f"<seg><reg>{escape(r)}</reg></seg>")
         elif r is None:
-            out.append(f"<seg><orig>{o}</orig></seg>")
+            out.append(f"<seg><orig>{escape(o)}</orig></seg>")
         else:
-            out.append(f"<seg><orig>{o}</orig><reg>{r}</reg></seg>")
+            out.append(f"<seg><orig>{escape(o)}</orig><reg>{escape(r)}</reg></seg>")
     return "<text>"+"".join(out)+"</text>"
 
 
@@ -87,6 +89,24 @@ def get_model_and_tokenizer() -> Tuple[AutoModelForSeq2SeqLM, AutoTokenizer]:
         AutoModelForSeq2SeqLM.from_pretrained(model_name),
         AutoTokenizer.from_pretrained(model_name)
     )
+
+
+def from_xml_to_tei(xml_string: str) -> str:
+    import saxonche
+    import lxml.etree as ET
+    processor = saxonche.PySaxonProcessor()
+    xslt_proc = processor.new_xslt30_processor()
+    xslt_proc.set_cwd(".")
+    transformer = xslt_proc.compile_stylesheet(stylesheet_file=os.path.join(
+        current_app.root_path, "..",
+        "utils", "to_tei.xsl"
+    ))
+    document_builder = processor.new_document_builder()
+    transformed = transformer.transform_to_string(
+        xdm_node=document_builder.parse_xml(xml_text=xml_string)
+    )
+    return Response(str(transformed), mimetype="text/xml")
+
 
 # -------------------------
 # CLI import function

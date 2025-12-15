@@ -23,8 +23,12 @@
             {% for line in lines %}
                 <li class="list-group-item
                     {% if line.status == 'done'%} list-group-item-success
-                    {% elif line.status == 'active' > 0 %} list-group-item-warning
+                    {% elif line.status == 'active' %} list-group-item-warning
                     {% endif %}">
+                    {% if line.status == 'pending' %}<i class="fa-solid fa-battery-empty"></i>
+                    {% elif line.status == 'active' %}<i class="fa-solid fa-battery-half"></i>
+                    {% else %}<i class="fa-solid fa-battery-full"></i>
+                    {% endif %}
                     <a href="{{ url_for('bp_main.line_route', line_id=line.id) }}">
                         {{ line.original_text[:80] }}
                     </a>

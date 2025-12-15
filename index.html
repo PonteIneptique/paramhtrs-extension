@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Seg Editor with Constant Orig</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+  <style>
+    body { font-family: system-ui, sans-serif; padding:20px; background:#fafafa; }
+    .seg { display:inline-block; vertical-align:top; margin:2px; padding:4px 6px; border-radius:6px; background:white; box-shadow:0 1px 2px rgba(0,0,0,.1); min-width:20px;}
+    .space { background:#ddd; }
+    .orig { font-weight:600; white-space:pre;}
+    .orig, .reg {  padding: .2em .3em; }
+    .reg { margin-top:2px; font-size:0.9em; color:#444; white-space:pre; border-radius: 3px; }
+    .editable { 
+  outline: none;
+  cursor: text;
+  background-color: #eee;  padding: .1em .2em;}
+    button.delete { font-size:0.7em; margin-top:2px; margin-left:2px; background-color: transparent; border: 0;}
+    #tei-output { margin-top:20px; background:#f4f4f4; padding:10px; border-radius:6px; white-space:pre-wrap; font-family:monospace; }
+  </style>
+</head>
+<body>
+
+<div id="app">
+  <h2>Seg Editor</h2>
+
+  <div>
+    <span v-for="seg in segs" :key="seg.id" class="seg" :class="{ space: isSpace(seg) }">
+      <!-- ORIG (constant) -->
+      <div class="orig">{{ seg.orig }}</div>
+
+      <!-- REG -->
+      <div
+        v-if="seg.reg !== null || !isSpace(seg)"
+        class="reg editable"
+        contenteditable
+        @blur="editReg(seg, $event)"
+      >{{ seg.reg || '' }}</div>
+
+      <!-- CONTROLS -->
+      <div>
+        <button class="delete" v-if="isSpace(seg)" @click="deleteSpace(seg)">❌</button>
+        <button class="delete" v-if="seg.reg !== null && !isSpace(seg)" @click="dismissReg(seg)">❌</button>
+      </div>
+    </span>
+  </div>
+
+  <div style="margin-top:20px;">
+    <button @click="dumpTEI">Show TEI</button>
+  </div>
+
+  <pre id="tei-output">{{ teiDump }}</pre>
+</div>
+
+<script>
+const { createApp } = Vue;
+
+createApp({
+  data() {
+    return {
+      segs: [
+        { id: 1, orig: "Ne", reg: "ne" },
+        { id: 2, orig: " ", reg: null },
+        { id: 3, orig: "soyez", reg: "soiez" },
+        { id: 4, orig: " ", reg: null },
+        { id: 5, orig: "laietde", reg: "laiet de" }
+      ],
+      teiDump: ""
+    };
+  },
+
+  methods: {
+    isSpace(seg) {
+      return seg.orig === " " && seg.reg === null;
+    },
+
+    // Always update reg, never orig
+    editReg(seg, evt) {
+      const text = evt.target.textContent;
+      seg.reg = text || null;
+    },
+
+    dismissReg(seg) {
+      seg.reg = null;
+    },
+
+    deleteSpace(seg) {
+      seg.reg = "";
+    },
+
+    dumpTEI() {
+      let xml = "<text>\n";
+      for (const seg of this.segs) {
+        xml += "  <seg>";
+        if (this.isSpace(seg)) {
+          xml += "<orig> </orig>";
+        } else {
+          if (seg.orig !== null) xml += `<orig>${seg.orig}</orig>`;
+          if (seg.reg !== null) xml += `<reg>${seg.reg}</reg>`;
+        }
+        xml += "</seg>\n";
+      }
+      xml += "</text>";
+      this.teiDump = xml;
+    }
+  }
+}).mount("#app");
+</script>
+
+</body>
+</html>

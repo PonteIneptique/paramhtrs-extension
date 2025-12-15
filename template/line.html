@@ -1,6 +1,5 @@
 {% extends 'base.html' %}
-{%block morestyle %}
-/* basic styles copied from previous editor */
+{% block morestyle %}
 body { font-family: system-ui, sans-serif; padding:20px; }
 .seg { display:inline-block; margin:2px; padding:4px 6px; background:white; border-radius:6px; box-shadow:0 1px 2px rgba(0,0,0,.1); min-width:20px; vertical-align:top; }
 .orig { font-weight:600; white-space:pre; }
@@ -9,38 +8,104 @@ body { font-family: system-ui, sans-serif; padding:20px; }
 .space { background:#eee; }
 button { font-size:0.7em; margin-top:2px; margin-left:2px; }
 .newLine { display:block; }
+
+/* flash card */
+.flash-card {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: #4caf50;
+    color: white;
+    padding: 10px 15px;
+    border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+.flash-card.show {
+    opacity: 1;
+}
 {% endblock %}
 
-{%block content %}
+{% block content %}
 <div id="app">
   <h2>Line Editor</h2>
+    <div class="btn-group btn-group-sm" role="group" aria-label="Status selector">
+  <!-- Prefix -->
+  <button class="btn btn-secondary disabled" disabled>
+    Status:
+  </button>
 
-<!--  <div v-for="line in lines" :key="line.id" style="margin-bottom:20px;">-->
-	<div>Original: [[ line.original_text ]]</div>
-      <span v-for="seg in line.segs" :key="seg.id" class="seg" :class="{ space: seg.orig===' ' && !seg.reg }">
-        <div class="orig">[[ seg.orig ]]</div>
-      <!-- REG -->
-      <div
-        v-if="seg.reg !== null || !isSpace(seg)"
-        class="reg editable"
-        contenteditable
-        @blur="editReg(seg, $event)"
-      >[[ seg.reg || '' ]]</div>
+  <!-- Pending -->
+  <button
+    type="button"
+    class="btn"
+    :class="line.status === 'pending'
+      ? 'btn-danger'
+      : 'btn-outline-primary'"
+    @click="line.status = 'pending'"
+  >
+    Pending
+  </button>
 
-      <!-- CONTROLS -->
-      <div>
-        <button class="delete" v-if="isSpace(seg)" @click="deleteSpace(seg)">❌</button>
-        <button class="delete" v-if="seg.reg !== null && !isSpace(seg)" @click="dismissReg(seg)">❌</button>
-      </div>
-      <br v-if="hasMarker(seg)" />
-      </span>
+  <!-- In review -->
+  <button
+    type="button"
+    class="btn"
+    :class="line.status === 'active'
+      ? 'btn-warning'
+      : 'btn-outline-primary'"
+    @click="line.status = 'active'"
+  >
+    In the work
+  </button>
+
+  <!-- Done -->
+  <button
+    type="button"
+    class="btn"
+    :class="line.status === 'done'
+      ? 'btn-success'
+      : 'btn-outline-primary'"
+    @click="line.status = 'done'"
+  >
+    Done
+  </button>
+</div>
+
+    <hr />
+    <div><h2>Original</h2> [[ line.original_text ]]</div>
+    <hr />
+    <h2>Metadata</h2>
+    <ul><li v-for="(value, key) in line.metadata_json" :key="key">
+      <b>[[ key ]]:</b> [[ value ]]
+    </li>
+    </ul>
+    <hr />
+    <h2>Line</h2>
+  <span v-for="seg in line.segs" :key="seg.id" class="seg" :class="{ space: seg.orig===' ' && !seg.reg }">
+    <div class="orig">[[ seg.orig ]]</div>
+    <div
+      v-if="seg.reg !== null || !isSpace(seg)"
+      class="reg editable"
+      contenteditable
+      @blur="editReg(seg, $event)"
+    >[[ seg.reg || '' ]]</div>
+
+    <div>
+      <button class="delete" v-if="isSpace(seg)" @click="deleteSpace(seg)">❌</button>
+      <button class="delete" v-if="seg.reg !== null && !isSpace(seg)" @click="dismissReg(seg)">❌</button>
     </div>
-    <button @click="saveLine(line)">Save</button>
-<!--  </div>-->
+    <br v-if="hasMarker(seg)" />
+  </span>
+  <br>
+  <button @click="saveLine(line)" class="btn btn-primary">Save</button>
+
+  <!-- flash card -->
+  <div class="flash-card" ref="flashCard">Saved!</div>
 </div>
 
 <script>
-// simple parser from XML to JS segs
 function parseSegXML(xml) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(xml, "text/xml");
@@ -67,7 +132,6 @@ function parseSegXML(xml) {
     });
 }
 
-// serialize back to XML
 function serializeSegs(segs) {
     let xml = "<text>\n";
     for (const s of segs) {
@@ -88,44 +152,51 @@ createApp({
             line: {{ line|tojson }}
         }
     },
-    delimiters: ["[[", "]]"],  // <-- add this
+    delimiters: ["[[", "]]"],
     created() {
-        // parse XML into JS segs
         this.line.segs = parseSegXML(this.line.xml);
     },
-	  methods: {
-	    hasMarker(seg) {
+    methods: {
+        hasMarker(seg) {
             return typeof seg.orig === "string" && (seg.orig.includes("¶") || seg.orig.includes(":"));
-	    },
-	    isSpace(seg) {
-	      return seg.orig === " " && seg.reg === null;
-	    },
-
-	    // Always update reg, never orig
-	    editReg(seg, evt) {
-	      const text = evt.target.textContent;
-	      seg.reg = text || null;
-	    },
-
-	    dismissReg(seg) {
-	      seg.reg = null;
-	    },
-
-	    deleteSpace(seg) {
-	      seg.reg = "";
-	    },
+        },
+        isSpace(seg) {
+            return seg.orig === " " && seg.reg === null;
+        },
+        editReg(seg, evt) {
+            const text = evt.target.textContent;
+            seg.reg = text || null;
+        },
+        dismissReg(seg) {
+            seg.reg = null;
+        },
+        deleteSpace(seg) {
+            seg.reg = "";
+        },
+        showFlash(message) {
+            const card = this.$refs.flashCard;
+            card.textContent = message;
+            card.classList.add("show");
+            setTimeout(() => card.classList.remove("show"), 1500);
+        },
         saveLine(line) {
             const xml = serializeSegs(line.segs);
-            fetch("/save", {
+            fetch("{{url_for('bp_main.line_route', line_id=line.id)}}", {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({id: line.id, xml})
-            }).then(r => r.json()).then(data => {
-                if(data.status==="ok") alert("Saved");
+                body: JSON.stringify({id: line.id, xml: xml, status: line.status})
+            })
+            .then(r => r.json())
+            .then(data => {
+                if(data.status==="ok") {
+                    this.showFlash("Saved!");
+                    // reload line from server to reflect updates
+                    this.line = data.updatedLine;
+                    this.line.segs = parseSegXML(this.line.xml);
+                }
             });
         }
     }
 }).mount("#app");
 </script>
-
 {% endblock %}

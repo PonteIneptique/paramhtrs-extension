@@ -9,10 +9,10 @@ db = SQLAlchemy()
 # -------------------------
 class Line(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    original_text = db.Column(db.Text, nullable=False)
+    original_text = db.Column(db.Text, nullable=False, unique=True)
     xml = db.Column(db.Text, nullable=False)
     status = db.Column(db.String, nullable=False)
-    metadata_json = db.Column(db.Text, nullable=False)
+    metadata_json = db.Column(db.JSON, nullable=False)
 
     __table_args__ = (
         CheckConstraint(
