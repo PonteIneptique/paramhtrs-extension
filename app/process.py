@@ -1,16 +1,11 @@
 import difflib
-import json
 import unicodedata
 from typing import List, Tuple, Optional
 from xml.sax.saxutils import escape
-
-import click
 import os
 
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from flask import current_app, Response
-
-from .models import Line, db
 
 
 def normalize_line(input_text: str, model: AutoModelForSeq2SeqLM, tokenizer: AutoTokenizer) -> str:
@@ -91,9 +86,8 @@ def get_model_and_tokenizer() -> Tuple[AutoModelForSeq2SeqLM, AutoTokenizer]:
     )
 
 
-def from_xml_to_tei(xml_string: str) -> str:
+def from_xml_to_tei(xml_string: str, plaintext: bool=False) -> str:
     import saxonche
-    import lxml.etree as ET
     processor = saxonche.PySaxonProcessor()
     xslt_proc = processor.new_xslt30_processor()
     xslt_proc.set_cwd(".")
@@ -102,29 +96,15 @@ def from_xml_to_tei(xml_string: str) -> str:
         "utils", "to_tei.xsl"
     ))
     document_builder = processor.new_document_builder()
-    transformed = transformer.transform_to_string(
-        xdm_node=document_builder.parse_xml(xml_text=xml_string)
+    source_node = document_builder.parse_xml(xml_text=xml_string)
+    value = transformer.transform_to_string(
+        xdm_node=source_node
     )
-    return Response(str(transformed), mimetype="text/xml")
-
-
-# -------------------------
-# CLI import function
-# -------------------------
-@click.command("import-text")
-@click.argument("file_path")
-def import_text(file_path):
-    """Import a plain text file into the DB."""
-    model, tokenizer = get_model_and_tokenizer()
-
-    with current_app.app_context():
-        with open(file_path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                normalized = normalize_line(line, model, tokenizer)
-                xml = align_to_segs(line, normalized)
-                db.session.add(Line(original_text=line, xml=xml, status='pending', metadata_json=json.dumps({})))
-        db.session.commit()
-        click.echo(f"Imported {file_path} into DB.")
+    if plaintext:
+        transformer2 = xslt_proc.compile_stylesheet(stylesheet_file=os.path.join(
+            current_app.root_path, "..",
+            "utils", "to_plaintext.xsl"
+        ))
+        value = document_builder.parse_xml(xml_text=value)
+        value = transformer2.transform_to_string(xdm_node=value)
+    return str(value)

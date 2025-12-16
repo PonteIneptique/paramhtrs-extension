@@ -30,6 +30,9 @@ button { font-size:0.7em; margin-top:2px; margin-left:2px; }
 {% block content %}
 <div id="app">
   <h2>Line Editor</h2>
+    <div class="row">
+        <div class="col-md-4">
+
     <div class="btn-group btn-group-sm" role="group" aria-label="Status selector">
   <!-- Prefix -->
   <button class="btn btn-secondary disabled" disabled>
@@ -72,6 +75,12 @@ button { font-size:0.7em; margin-top:2px; margin-left:2px; }
     Done
   </button>
 </div>
+        </div>
+        <div class="col-md-4 text-start"><a href="{{url_for('bp_main.line_route', line_id=line.id, format='tei')}}"
+                             class="btn btn-sm btn-info"><i class="fa-solid  fa-download"></i> Download the line</a></div>
+        <div class="col-md-4 text-end"><a href="{{url_for('bp_main.delete_route', line_id=line.id)}}"
+          class="btn btn-sm btn-danger"><i class="fa-solid  fa-remove"></i> Delete the line</a></div>
+    </div>
 
     <hr />
     <div><h2>Original</h2> [[ line.original_text ]]</div>

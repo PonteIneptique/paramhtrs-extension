@@ -2,6 +2,8 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import CheckConstraint
 from flask import current_app
 import click
+import json
+from .process import from_xml_to_tei
 db = SQLAlchemy()
 
 # -------------------------
@@ -20,6 +22,20 @@ class Line(db.Model):
             name="check_status_valid"
         ),
     )
+
+    @property
+    def json_compatible(self):
+        return {
+            'metadata': json.loads(self.metadata_json),
+            'id': self.id,
+            'orig': self.original_text,
+            'norm': self.normalized_text,
+            'status': self.status
+        }
+
+    @property
+    def normalized_text(self):
+        return from_xml_to_tei(self.xml, plaintext=True)
 
 # -------------------------
 # Flask CLI command to init DB

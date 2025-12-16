@@ -1,6 +1,6 @@
 import json
 
-from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash
+from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, Response
 import os
 import lxml.etree as et
 
@@ -22,21 +22,31 @@ def index_route():
 @bp_main.route("/lines")
 def lines_list_route():
     search_query = request.args.get('search', '')
-    hide_query = request.args.get('hide', 0, type=int)
+    current_filter = request.args.get('filter', 'all', type=str)
 
     query = Line.query
     if search_query:
         query = query.filter(Line.original_text.like("%" + search_query + "%"))
 
+    if current_filter in {'pending', 'active', 'done'}:
+        query = query.filter(Line.status == current_filter)
+
+    if request.args.get("download", default=None, type=str):
+        return jsonify(
+            [line.json_compatible for line in query.all()]
+        )
+
     query = query.paginate(page=request.args.get("page", type=int, default=1),
                         per_page=request.args.get("per_page", type=int, default=20))
+
+
 
     return render_template(
         "lines.html",
         search_query=search_query,
-        hide=hide_query,
         lines=query.items,
-        pagination=query
+        pagination=query,
+        current_filter=current_filter
     )
 
 @bp_main.route("/normalize", methods=["POST"])
@@ -83,13 +93,22 @@ def new_line_route():
     # GET
     return render_template("create.html")
 
+@bp_main.route("/lines/<int:line_id>/delete", methods=["GET"])
+def delete_route(line_id):
+    line = Line.query.get(line_id)
+    if request.args.get("confirm", type=bool, default=False):
+        db.session.delete(line)
+        db.session.commit()
+        flash("Successfully deleted line!", "success")
+        return redirect(url_for("bp_main.lines_list_route"))
+    return render_template("delete.html", line=line)
 
 @bp_main.route("/lines/<int:line_id>", methods=["POST", "GET"])
 def line_route(line_id):
     line = Line.query.get_or_404(line_id)
     if request.args.get("format") == "tei":
         from .process import from_xml_to_tei
-        return from_xml_to_tei(line.xml)
+        return Response(str(from_xml_to_tei(line.xml)), mimetype="text/xml")
     if request.method == "POST":
         from .process import align_to_segs
         data = request.json
