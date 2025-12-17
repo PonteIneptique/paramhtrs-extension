@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="container mt-4">
+
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3">Projects</h1>
+    <a class="btn btn-primary" href="{{ url_for('bp_project.project_create') }}">
+      <i class="fa-solid fa-plus"></i> New project
+    </a>
+  </div>
+
+  {% if projects %}
+    <div class="list-group">
+      {% for p in projects %}
+        <a
+          href="{{ url_for('bp_project.project_browse', project_id=p.id) }}"
+          class="list-group-item list-group-item-action"
+        >
+          <i class="fa-regular fa-folder-open me-2"></i> {{ p.name }}
+        </a>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="alert alert-info">
+      No projects found.
+    </div>
+  {% endif %}
+
+</div>
+
+{% endblock %}

@@ -8,9 +8,18 @@ db = SQLAlchemy()
 
 
 class Project(db.Model):
-    __tablename__ = 'projects'
+    __tablename__ = "projects"
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
+    name = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+
+    normalizations = db.relationship(
+        "Normalization",
+        backref="project",
+        cascade="all, delete-orphan",
+        lazy=True,
+    )
+
 
 
 # -------------------------
@@ -22,7 +31,7 @@ class Normalization(db.Model):
     xml = db.Column(db.Text, nullable=False)
     status = db.Column(db.String, nullable=False)
     metadata_json = db.Column(db.JSON, nullable=False)
-    # project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
+    project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
 
     __table_args__ = (
         CheckConstraint(
@@ -30,6 +39,10 @@ class Normalization(db.Model):
             name="check_status_valid"
         ),
     )
+
+    @property
+    def name(self):
+        return self.original_text[:80]
 
     @property
     def json_compatible(self):

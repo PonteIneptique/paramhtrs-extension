@@ -130,6 +130,12 @@
         <a href="{{ url_for('bp_main.index_route') }}" aria-label="Home">
             <i class="fas fa-home"></i> <span>Home</span>
         </a>
+        <a href="{{ url_for('bp_project.project_lists') }}" aria-label="Projects">
+            <i class="fa-solid fa-folder-tree"></i> <span>Projects</span>
+        </a>
+        <a href="{{ url_for('bp_project.project_create') }}" aria-label="Create a project">
+            <i class="fa-solid fa-folder-plus"></i> <span>New Project</span>
+        </a>
         <hr />
         <a href="{{ url_for('bp_main.normalization_list_route') }}" aria-label="Normalizations">
             <i class="fa-solid fa-list"></i> <span>Normalizations</span>

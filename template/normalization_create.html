@@ -6,10 +6,53 @@
   <!-- =====================
        INPUT STEP
        ===================== -->
+
   <div v-if="step === 'input'" class="card shadow-sm">
+
     <div class="card-body">
 
       <h5 class="card-title mb-3">New Normalizations</h5>
+
+<div class="mb-3 row">
+  <label class="form-label col-12">Project</label>
+
+  <!-- Left column: selected project -->
+  <div class="col-md-4 mb-2">
+    <div v-if="selectedProject" class="card p-2">
+      <strong>
+        <i class="fa-regular fa-folder-open"></i>
+        [[ selectedProject.name ]]
+      </strong>
+    </div>
+    <div v-else class="text-muted p-2">No project selected</div>
+  </div>
+
+  <!-- Right column: search + list -->
+  <div class="col-md-8">
+    <div class="input-group mb-2">
+      <span class="input-group-text"><i class="fa-solid fa-magnifying-glass"></i></span>
+      <input
+        class="form-control"
+        v-model="projectQuery"
+        @input="searchProjects"
+        placeholder="Search project…"
+      >
+    </div>
+
+    <div v-if="projects.length" class="list-group">
+      <button
+        type="button"
+        class="list-group-item list-group-item-action list-group-item-secondary"
+        v-for="p in projects"
+        :key="p.id"
+        @click="selectProject(p)"
+      >
+        <i class="fa-regular fa-folder-open"></i> [[ p.name ]]
+      </button>
+    </div>
+  </div>
+</div>
+
 
       <div class="mb-3">
         <label class="form-label">Document name</label>
@@ -133,10 +176,33 @@ createApp({
       qid: '',
       inputtext: '',
 
+      projectQuery: '',
+      projects: [],
+      selectedProject: null,
+
       results: []
     }
   },
+  mounted() {
+    // Fetch all projects on page load
+    this.searchProjects()
+  },
   methods: {
+    async searchProjects() {
+
+      const response = await fetch(
+        "{{ url_for('bp_project.project_lists', format='json') }}&search=" +
+          encodeURIComponent(this.projectQuery || '')
+      )
+
+      this.projects = await response.json()
+    },
+
+    selectProject(project) {
+      this.selectedProject = project
+      this.projectQuery = project.name
+      this.projects = []
+    },
     normalizeTextarea(preview = false) {
         let text = this.inputtext || ""
 
@@ -161,6 +227,10 @@ createApp({
         }
       },
     async normalize() {
+      if (!this.selectedProject) {
+        alert("Please select a project first.")
+        return
+      }
       this.step = 'loading'
 
       const response = await fetch(
@@ -171,6 +241,7 @@ createApp({
           body: JSON.stringify({
             document_name: this.document_name,
             manuscript_name: this.manuscript_name,
+            project_id: this.selectedProject.id,
             language: this.language,
             qid: this.qid,
             inputtext: this.inputtext
@@ -183,6 +254,10 @@ createApp({
     },
 
     async save() {
+      if (!this.selectedProject) {
+        alert("No project selected.")
+        return
+      }
       await fetch(
         "{{ url_for('bp_main.normalization_new_route') }}",
         {
@@ -190,6 +265,7 @@ createApp({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             document_name: this.document_name,
+            project_id: this.selectedProject.id,
             manuscript_name: this.manuscript_name,
             language: this.language,
             qid: this.qid,

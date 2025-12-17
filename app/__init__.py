@@ -36,8 +36,10 @@ def import_text(file_path):
         db.session.commit()
         click.echo(f"Imported {file_path} into DB.")
 
-from .bp_main import bp_main
+from .bp_normalization import bp_main
 app.register_blueprint(bp_main)
+from .bp_project import bp_project
+app.register_blueprint(bp_project)
 
 if __name__ == "__main__":
     app.run(debug=True)

@@ -82,7 +82,7 @@ def normalization_new_route():
             })
         for r in results:
             db.session.add(Normalization(original_text=r["input"], xml=r["xml"], status="pending",
-                                         metadata_json=json.dumps(metadata)))
+                                         metadata_json=json.dumps(metadata), project_id=form["project_id"]))
         db.session.commit()
         flash("Successfully created a new line!", "success")
         return redirect(url_for("bp_main.normalization_list_route"))
@@ -147,3 +147,4 @@ def normalization_edit_route(normalization_id):
                 "status": normalization.status
             }
         )
+
