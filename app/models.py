@@ -1,10 +1,28 @@
-from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import CheckConstraint
 from flask import current_app
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import UserMixin
+from werkzeug.security import generate_password_hash, check_password_hash
+
 import click
 import json
 from .process import from_xml_to_tei
+
+
 db = SQLAlchemy()
+
+class User(db.Model, UserMixin):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password_hash = db.Column(db.String(128), nullable=False)
+    is_admin = db.Column(db.Boolean, default=False)
+    is_approved = db.Column(db.Boolean, default=False)
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
 
 
 class Project(db.Model):
@@ -67,9 +85,31 @@ def db_cli():
     """Database management commands"""
     return ""
 
-@db_cli.command("init")
-def init_db_command():
-    """Initialize the database."""
+@db_cli.command("create")
+@click.option("--admin/--no-admin", is_flag=True, default=True)
+@click.option("--admin-name", type=str, default="admin")
+@click.option("--admin-password", type=str, default="qwerty")
+def db_create(admin, admin_name, admin_password):
     with current_app.app_context():
         db.create_all()
-        click.echo("Initialized the database.")
+        click.echo("DB Created")
+        if admin:
+            admin = User(username=admin_name, is_admin=True, is_approved=True)
+            admin.set_password(admin_password)
+            db.session.add(admin)
+            db.session.commit()
+            click.echo("Admin created")
+
+
+@db_cli.command("reset")
+def db_create():
+    with current_app.app_context():
+        db.drop_all()
+        db.create_all()
+    click.echo("DB Recreated")
+
+@db_cli.command("drop")
+def db_create():
+    with current_app.app_context():
+        db.drop_all()
+    click.echo("DB Dropped")

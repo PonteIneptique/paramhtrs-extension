@@ -127,9 +127,20 @@
 </head>
 <body class="bg-light">
     <div class="sidebar">
-        <a href="{{ url_for('bp_main.index_route') }}" aria-label="Home">
+        <a href="{{ url_for('index_route') }}" aria-label="Home">
             <i class="fas fa-home"></i> <span>Home</span>
         </a>
+        <a href="{{ url_for('guidelines_route') }}" aria-label="Guidelines">
+            <i class="fa-solid fa-question"></i> <span>Guidelines</span>
+        </a>
+        {% if current_user.is_anonymous %}
+        <a href="{{ url_for('bp_auth.login') }}" aria-label="Login">
+            <i class="fa-solid fa-right-to-bracket"></i> <span>Login</span>
+        </a>
+        <a href="{{ url_for('bp_auth.register') }}" aria-label="Register">
+            <i class="fa-solid fa-user-plus"></i> <span>Register</span>
+        </a>
+        {% else %}
         <a href="{{ url_for('bp_project.project_lists') }}" aria-label="Projects">
             <i class="fa-solid fa-folder-tree"></i> <span>Projects</span>
         </a>
@@ -137,12 +148,24 @@
             <i class="fa-solid fa-folder-plus"></i> <span>New Project</span>
         </a>
         <hr />
-        <a href="{{ url_for('bp_main.normalization_list_route') }}" aria-label="Normalizations">
+        <a href="{{ url_for('bp_norm.normalization_list_route') }}" aria-label="Normalizations">
             <i class="fa-solid fa-list"></i> <span>Normalizations</span>
         </a>
-        <a href="{{ url_for('bp_main.normalization_new_route') }}" aria-label="Normalize">
+        <a href="{{ url_for('bp_norm.normalization_new_route') }}" aria-label="Normalize">
             <i class="fa-solid fa-file-circle-plus"></i> <span>Normalize</span>
         </a>
+        <a href="{{ url_for('bp_auth.logout') }}" aria-label="Logout">
+            <i class="fa-solid fa-right-from-bracket"></i> <span>Logout</span>
+        </a>
+        <a href="{{ url_for('bp_auth.change_password') }}" aria-label="Change Password">
+            <i class="fa-solid fa-key"></i> <span>Change Password</span>
+        </a>
+        {% if current_user.is_admin %}
+        <a href="{{ url_for('bp_auth.admin_panel') }}" aria-label="Admin Panel">
+            <i class="fa-solid fa-users"></i> <span>Admin Panel</span>
+        </a>
+        {% endif %}
+        {% endif %}
     </div>
     <div class="container mt-5">
 

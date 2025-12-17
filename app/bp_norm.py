@@ -6,19 +6,16 @@ import lxml.etree as et
 
 from .models import db, Normalization
 
-bp_main = Blueprint("bp_main", __name__,
-    template_folder=os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "template"),
-    static_folder=os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "static"),
-    static_url_path='')
+bp_norm = Blueprint("bp_norm", __name__,
+                    template_folder=os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "template"),
+                    static_folder=os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "static"),
+                    static_url_path='')
 
 # -------------------------
 # Flask routes
 # -------------------------
-@bp_main.route("/")
-def index_route():
-    return render_template("index.html")
 
-@bp_main.route("/normalizations")
+@bp_norm.route("/normalizations")
 def normalization_list_route():
     search_query = request.args.get('search', '')
     current_filter = request.args.get('filter', 'all', type=str)
@@ -39,14 +36,14 @@ def normalization_list_route():
                         per_page=request.args.get("per_page", type=int, default=20))
 
     return render_template(
-        "normalization_list.html",
+        "normalization/list.html",
         search_query=search_query,
         normalizations=query.items,
         pagination=query,
         current_filter=current_filter
     )
 
-@bp_main.route("/normalizations/process", methods=["POST"])
+@bp_norm.route("/normalizations/process", methods=["POST"])
 def normalization_process_route():
     from .process import normalize_line, get_model_and_tokenizer
     model, tokenizer = get_model_and_tokenizer()
@@ -65,7 +62,7 @@ def normalization_process_route():
     return jsonify(results)
 
 
-@bp_main.route("/normalizations/new", methods=["POST", "GET"])
+@bp_norm.route("/normalizations/new", methods=["POST", "GET"])
 def normalization_new_route():
     if request.method == "POST":
         from .process import align_to_segs
@@ -85,22 +82,22 @@ def normalization_new_route():
                                          metadata_json=json.dumps(metadata), project_id=form["project_id"]))
         db.session.commit()
         flash("Successfully created a new line!", "success")
-        return redirect(url_for("bp_main.normalization_list_route"))
+        return redirect(url_for("bp_norm.normalization_list_route"))
 
     # GET
-    return render_template("normalization_create.html")
+    return render_template("normalization/create.html")
 
-@bp_main.route("/normalizations/<int:normalization_id>/delete", methods=["GET"])
+@bp_norm.route("/normalizations/<int:normalization_id>/delete", methods=["GET"])
 def normalization_delete_route(normalization_id):
     normalization = Normalization.query.get(normalization_id)
     if request.args.get("confirm", type=bool, default=False):
         db.session.delete(normalization)
         db.session.commit()
         flash("Successfully deleted line!", "success")
-        return redirect(url_for("bp_main.normalization_list_route"))
-    return render_template("normalization_delete.html", normalization=normalization)
+        return redirect(url_for("bp_norm.normalization_list_route"))
+    return render_template("normalization/delete.html", normalization=normalization)
 
-@bp_main.route("/normalizations/<int:normalization_id>", methods=["POST", "GET"])
+@bp_norm.route("/normalizations/<int:normalization_id>", methods=["POST", "GET"])
 def normalization_edit_route(normalization_id):
     normalization = Normalization.query.get_or_404(normalization_id)
     if request.args.get("format") == "tei":
@@ -138,7 +135,7 @@ def normalization_edit_route(normalization_id):
         }})
     else:
         return render_template(
-            "normalization_edit.html",
+            "normalization/edit.html",
             normalization={
                 "xml": normalization.xml,
                 "original_text": normalization.original_text,

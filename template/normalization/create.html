@@ -234,7 +234,7 @@ createApp({
       this.step = 'loading'
 
       const response = await fetch(
-        "{{ url_for('bp_main.normalization_process_route') }}",
+        "{{ url_for('bp_norm.normalization_process_route') }}",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -259,7 +259,7 @@ createApp({
         return
       }
       await fetch(
-        "{{ url_for('bp_main.normalization_new_route') }}",
+        "{{ url_for('bp_norm.normalization_new_route') }}",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

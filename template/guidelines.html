@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<body>
+    <h1>Text Normalization Guidelines</h1>
+
+    <p>Some examples will be provided in pseudo-XML to clarify the alternative between original text (&lt;orig/&gt;) and corrected text (&lt;reg/&gt;).</p>
+
+    <h2>1. Space and Character Normalization</h2>
+    <p>Normalize spaces between words and remove doubled consonants in specific language practices like Italian.</p>
+    <div class="example">
+        &lt;choice&gt;&lt;orig&gt;arriva&lt;/orig&gt;&lt;reg&gt;a riva&lt;/reg&gt;&lt;/choice&gt;
+    </div>
+
+    <h2>2. Normalization of Letters</h2>
+    <p>Convert u/v and i/j according to modern spelling conventions.</p>
+
+    <h2>3. Abbreviation Resolution</h2>
+    <p>Expand abbreviations where possible. If uncertain (because of a lack of context, specifically for names), retain a modern abbreviation.</p>
+    <div class="example">
+        &lt;choice&gt;&lt;orig&gt;.S. .B.&lt;/orig&gt;&lt;reg&gt;Sanctus B.&lt;/reg&gt;&lt;/choice&gt;
+    </div>
+
+    <h2>4. Hyphen and Line Break Handling</h2>
+    <p>Remove hyphens at the end of lines and click merge on the next line.</p>
+
+    <h2>5. Accent Normalization</h2>
+    <p>Introduce accents where applicable to the language.</p>
+
+    <h2>6. Apostrophe Addition</h2>
+    <p>For languages that use apostrophes, restore them where necessary.</p>
+    <div class="example">
+        &lt;choice&gt;&lt;orig&gt;larive&lt;/orig&gt;&lt;reg&gt;l'arivé&lt;/reg&gt;&lt;/choice&gt;
+    </div>
+
+    <h2>7. Missing Letter Restoration</h2>
+    <p>Add inferred missing letters, such as initials, if they can be easily deduced.</p>
+
+    <h2>8. Punctuation Spacing</h2>
+    <p>Ensure the normalisation of spacing around punctuation marks: remove any space before them and restore a space after if necessary.</p>
+
+    <h2>9. Regional Variations</h2>
+    <p>Consider regional variations when resolving abbreviations or spelling inconsistencies.</p>
+    <div class="example">
+        &lt;choice&gt;&lt;orig&gt;q̃e&lt;/orig&gt;&lt;reg&gt;que&lt;/reg&gt;&lt;/choice&gt;
+    </div>
+
+    <h2>10. HTR Inference Correction</h2>
+    <p>Correct the text only if it is easily correctable and improves readability.</p>
+
+{% endblock %}

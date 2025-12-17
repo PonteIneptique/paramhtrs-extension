@@ -1,9 +1,12 @@
-from flask import Flask, current_app
+from flask import Flask, current_app, render_template
+from flask_login import LoginManager
 import click
 import os
 
 app = Flask(
-    __name__
+    __name__,
+    static_folder=os.path.join(os.path.dirname(__file__), '..', 'static'),
+    template_folder=os.path.join(os.path.dirname(__file__), '..', 'templates'),
 )
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///./lines.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -36,10 +39,23 @@ def import_text(file_path):
         db.session.commit()
         click.echo(f"Imported {file_path} into DB.")
 
-from .bp_normalization import bp_main
-app.register_blueprint(bp_main)
+@app.route("/")
+def index_route():
+    return render_template("index.html")
+
+@app.route("/guidelines")
+def guidelines_route():
+    return render_template("guidelines.html")
+
+from .bp_norm import bp_norm
+app.register_blueprint(bp_norm)
+
 from .bp_project import bp_project
 app.register_blueprint(bp_project)
+
+from .bp_auth import login_manager, bp_auth
+app.register_blueprint(bp_auth)
+login_manager.init_app(app)
 
 if __name__ == "__main__":
     app.run(debug=True)

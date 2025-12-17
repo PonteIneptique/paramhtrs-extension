@@ -22,8 +22,8 @@
     <p>{{normalization.original_text}}</p>
     <p class="text-small"><small>{{normalization.xml | replace('orig>', 'tei-orig>') | replace('reg>', 'tei-reg>') | safe}}</small></p>
     <p>
-        <a href="{{url_for('bp_main.normalization_delete_route', normalization_id=normalization.id, confirm=True)}}" class="btn btn-danger">Delete</a>
-        <a href="{{url_for('bp_main.normalization_list_route')}}" class="btn btn-secondary">Back to line</a>
+        <a href="{{url_for('bp_norm.normalization_delete_route', normalization_id=normalization.id, confirm=True)}}" class="btn btn-danger">Delete</a>
+        <a href="{{url_for('bp_norm.normalization_list_route')}}" class="btn btn-secondary">Back to line</a>
     </p>
 </div>
 {% endblock %}

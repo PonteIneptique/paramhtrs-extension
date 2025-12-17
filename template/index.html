@@ -1,5 +1,21 @@
 {% extends "base.html" %}
 
 {% block content %}
-Hello :)
+
+
+<h1>Welcome on the Abbreviarium</h1>
+
+<img src="{{url_for('static', filename='images/welcome.png')}}" class="rounded mx-auto d-block" style="max-height:300px;" />
+
+<p>Unlock the secrets of medieval manuscripts with Abbreviarium, your trusted tool for deciphering and verifying
+    historical abbreviations. Whether you're a researcher, student, or enthusiast of paleography, our
+    application helps you navigate the intricate world of medieval script with accuracy and ease.</p>
+
+<ul class="list-unstyled">
+    <li>🖋️ Effortless Abbreviation Resolution – Automatically expand and interpret medieval abbreviations.</li>
+    <li>📜 Manuscript-Friendly Analysis – Designed to work seamlessly with historical documents.</li>
+    <li>🔍 Verify with Confidence – Cross-check results to ensure scholarly precision.</li>
+</ul>
+
+<p>Start exploring now and bring medieval texts to life!</p>
 {% endblock %}

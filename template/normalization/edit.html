@@ -2,13 +2,13 @@
 {% block morestyle %}
 <style>
 body { font-family: system-ui, sans-serif; padding:20px; }
-.seg { display:inline-block; margin:2px; padding:4px 6px; background:white; border-radius:6px; box-shadow:0 1px 2px rgba(0,0,0,.1); min-width:20px; vertical-align:top; }
+.seg { display:innormalization.-block; margin:2px; padding:4px 6px; background:white; border-radius:6px; box-shadow:0 1px 2px rgba(0,0,0,.1); min-width:20px; vertical-align:top; }
 .orig { font-weight:600; white-space:pre; }
 .reg { margin-top:2px; font-size:0.9em; color:#444; white-space:pre; }
-.editable { outline:none; cursor:text; }
+.editable { outnormalization.:none; cursor:text; }
 .space { background:#eee; }
 button { font-size:0.7em; margin-top:2px; margin-left:2px; }
-.newLine { display:block; }
+.newnormalization. { display:block; }
 
 /* flash card */
 .flash-card {
@@ -47,7 +47,7 @@ button { font-size:0.7em; margin-top:2px; margin-left:2px; }
     class="btn"
     :class="normalization.status === 'pending'
       ? 'btn-danger'
-      : 'btn-outline-primary'"
+      : 'btn-outnormalization.-primary'"
     @click="normalization.status = 'pending'"
   >
     Pending
@@ -59,7 +59,7 @@ button { font-size:0.7em; margin-top:2px; margin-left:2px; }
     class="btn"
     :class="normalization.status === 'active'
       ? 'btn-warning'
-      : 'btn-outline-primary'"
+      : 'btn-outnormalization.-primary'"
     @click="normalization.status = 'active'"
   >
     In the work
@@ -71,16 +71,16 @@ button { font-size:0.7em; margin-top:2px; margin-left:2px; }
     class="btn"
     :class="normalization.status === 'done'
       ? 'btn-success'
-      : 'btn-outline-primary'"
+      : 'btn-outnormalization.-primary'"
     @click="normalization.status = 'done'"
   >
     Done
   </button>
 </div>
         </div>
-        <div class="col-md-4 text-start"><a href="{{url_for('bp_main.normalization_edit_route', normalization_id=normalization.id, format='tei')}}"
+        <div class="col-md-4 text-start"><a href="{{url_for('bp_norm.normalization_edit_route', normalization_id=normalization.id, format='tei')}}"
                              class="btn btn-sm btn-info"><i class="fa-solid  fa-download"></i> Download this normalization</a></div>
-        <div class="col-md-4 text-end"><a href="{{url_for('bp_main.normalization_delete_route', normalization_id=normalization.id)}}"
+        <div class="col-md-4 text-end"><a href="{{url_for('bp_norm.normalization_delete_route', normalization_id=normalization.id)}}"
           class="btn btn-sm btn-danger"><i class="fa-solid  fa-remove"></i> Delete</a></div>
     </div>
 
@@ -192,7 +192,7 @@ createApp({
         },
         saveNormalization(normalization) {
             const xml = serializeSegs(normalization.segs);
-            fetch("{{url_for('bp_main.normalization_edit_route', normalization_id=normalization.id)}}", {
+            fetch("{{url_for('bp_norm.normalization_edit_route', normalization_id=normalization.id)}}", {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({id: normalization.id, xml: xml, status: normalization.status})
@@ -201,7 +201,7 @@ createApp({
             .then(data => {
                 if(data.status==="ok") {
                     this.showFlash("Saved!");
-                    // reload line from server to reflect updates
+                    // reload normalization. from server to reflect updates
                     this.normalization = data.content;
                     this.normalization.segs = parseSegXML(this.normalization.xml);
                 }
