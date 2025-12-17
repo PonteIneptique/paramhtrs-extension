@@ -6,15 +6,23 @@ import json
 from .process import from_xml_to_tei
 db = SQLAlchemy()
 
+
+class Project(db.Model):
+    __tablename__ = 'projects'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+
+
 # -------------------------
 # Database model
 # -------------------------
-class Line(db.Model):
+class Normalization(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     original_text = db.Column(db.Text, nullable=False, unique=True)
     xml = db.Column(db.Text, nullable=False)
     status = db.Column(db.String, nullable=False)
     metadata_json = db.Column(db.JSON, nullable=False)
+    # project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
 
     __table_args__ = (
         CheckConstraint(

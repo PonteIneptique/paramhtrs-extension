@@ -4,7 +4,7 @@ from flask import Blueprint, render_template, request, jsonify, redirect, url_fo
 import os
 import lxml.etree as et
 
-from .models import db, Line
+from .models import db, Normalization
 
 bp_main = Blueprint("bp_main", __name__,
     template_folder=os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "template"),
@@ -16,41 +16,38 @@ bp_main = Blueprint("bp_main", __name__,
 # -------------------------
 @bp_main.route("/")
 def index_route():
-    # lines = Line.query.all()
     return render_template("index.html")
 
-@bp_main.route("/lines")
-def lines_list_route():
+@bp_main.route("/normalizations")
+def normalization_list_route():
     search_query = request.args.get('search', '')
     current_filter = request.args.get('filter', 'all', type=str)
 
-    query = Line.query
+    query = Normalization.query
     if search_query:
-        query = query.filter(Line.original_text.like("%" + search_query + "%"))
+        query = query.filter(Normalization.original_text.like("%" + search_query + "%"))
 
     if current_filter in {'pending', 'active', 'done'}:
-        query = query.filter(Line.status == current_filter)
+        query = query.filter(Normalization.status == current_filter)
 
     if request.args.get("download", default=None, type=str):
         return jsonify(
-            [line.json_compatible for line in query.all()]
+            [normalization.json_compatible for normalization in query.all()]
         )
 
     query = query.paginate(page=request.args.get("page", type=int, default=1),
                         per_page=request.args.get("per_page", type=int, default=20))
 
-
-
     return render_template(
-        "lines.html",
+        "normalization_list.html",
         search_query=search_query,
-        lines=query.items,
+        normalizations=query.items,
         pagination=query,
         current_filter=current_filter
     )
 
-@bp_main.route("/normalize", methods=["POST"])
-def normalize_route():
+@bp_main.route("/normalizations/process", methods=["POST"])
+def normalization_process_route():
     from .process import normalize_line, get_model_and_tokenizer
     model, tokenizer = get_model_and_tokenizer()
     data = request.json
@@ -68,47 +65,47 @@ def normalize_route():
     return jsonify(results)
 
 
-@bp_main.route("/lines/new", methods=["POST", "GET"])
-def new_line_route():
+@bp_main.route("/normalizations/new", methods=["POST", "GET"])
+def normalization_new_route():
     if request.method == "POST":
-        from .process import normalize_line, get_model_and_tokenizer, align_to_segs
+        from .process import align_to_segs
         form = request.json
         metadata = {key: value for key, value in form.items() if key != 'lines'}
 
         results = []
 
-        for line in form["lines"]:
+        for normalization in form["normalizations"]:
             results.append({
-                "input": line["orig"],
-                "normalized": line["reg"],
-                "xml": align_to_segs(line["orig"], line["reg"])
+                "input": normalization["orig"],
+                "normalized": normalization["reg"],
+                "xml": align_to_segs(normalization["orig"], normalization["reg"])
             })
         for r in results:
-            db.session.add(Line(original_text=r["input"], xml=r["xml"], status="pending",
-                                metadata_json=json.dumps(metadata)))
+            db.session.add(Normalization(original_text=r["input"], xml=r["xml"], status="pending",
+                                         metadata_json=json.dumps(metadata)))
         db.session.commit()
         flash("Successfully created a new line!", "success")
-        return redirect(url_for("bp_main.lines_list_route"))
+        return redirect(url_for("bp_main.normalization_list_route"))
 
     # GET
-    return render_template("create.html")
+    return render_template("normalization_create.html")
 
-@bp_main.route("/lines/<int:line_id>/delete", methods=["GET"])
-def delete_route(line_id):
-    line = Line.query.get(line_id)
+@bp_main.route("/normalizations/<int:normalization_id>/delete", methods=["GET"])
+def normalization_delete_route(normalization_id):
+    normalization = Normalization.query.get(normalization_id)
     if request.args.get("confirm", type=bool, default=False):
-        db.session.delete(line)
+        db.session.delete(normalization)
         db.session.commit()
         flash("Successfully deleted line!", "success")
-        return redirect(url_for("bp_main.lines_list_route"))
-    return render_template("delete.html", line=line)
+        return redirect(url_for("bp_main.normalization_list_route"))
+    return render_template("normalization_delete.html", normalization=normalization)
 
-@bp_main.route("/lines/<int:line_id>", methods=["POST", "GET"])
-def line_route(line_id):
-    line = Line.query.get_or_404(line_id)
+@bp_main.route("/normalizations/<int:normalization_id>", methods=["POST", "GET"])
+def normalization_edit_route(normalization_id):
+    normalization = Normalization.query.get_or_404(normalization_id)
     if request.args.get("format") == "tei":
         from .process import from_xml_to_tei
-        return Response(str(from_xml_to_tei(line.xml)), mimetype="text/xml")
+        return Response(str(from_xml_to_tei(normalization.xml)), mimetype="text/xml")
     if request.method == "POST":
         from .process import align_to_segs
         data = request.json
@@ -128,37 +125,25 @@ def line_route(line_id):
             else:
                 normz += origElem[0].text
 
-        line.xml = align_to_segs(source, normz)
-        line.status = data.get("status", line.status)
-        db.session.add(line)
+        normalization.xml = align_to_segs(source, normz)
+        normalization.status = data.get("status", normalization.status)
+        db.session.add(normalization)
         db.session.commit()
-        return jsonify({"status": "ok", "updatedLine": {
-            "id": line.id,
-            "original_text": line.original_text,
-            "metadata_json": json.loads(line.metadata_json),
-            "xml": line.xml,
-            "status": line.status
+        return jsonify({"status": "ok", "content": {
+            "id": normalization.id,
+            "original_text": normalization.original_text,
+            "metadata_json": json.loads(normalization.metadata_json),
+            "xml": normalization.xml,
+            "status": normalization.status
         }})
     else:
         return render_template(
-            "line.html",
-            line={
-                "xml": line.xml,
-                "original_text": line.original_text,
-            "metadata_json": json.loads(line.metadata_json),
-                "id": line.id,
-                "status": line.status
+            "normalization_edit.html",
+            normalization={
+                "xml": normalization.xml,
+                "original_text": normalization.original_text,
+                "metadata_json": json.loads(normalization.metadata_json),
+                "id": normalization.id,
+                "status": normalization.status
             }
         )
-
-@bp_main.route("/save", methods=["POST"])
-def save_line():
-    data = request.json
-    line_id = data["id"]
-    xml = data["xml"]
-    line = Line.query.get(line_id)
-    if line:
-        line.xml = xml
-        db.session.commit()
-        return jsonify({"status": "ok"})
-    return jsonify({"status": "error"}), 404

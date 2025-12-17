@@ -79,10 +79,9 @@ def align_to_segs(src: str, tgt: str) -> str:
 
 
 def get_model_and_tokenizer() -> Tuple[AutoModelForSeq2SeqLM, AutoTokenizer]:
-    model_name = "../model-small/"
     return (
-        AutoModelForSeq2SeqLM.from_pretrained(model_name),
-        AutoTokenizer.from_pretrained(model_name)
+        AutoModelForSeq2SeqLM.from_pretrained(current_app.config["SEQ2SEQ_MODEL"]),
+        AutoTokenizer.from_pretrained(current_app.config["SEQ2SEQ_MODEL"])
     )
 
 

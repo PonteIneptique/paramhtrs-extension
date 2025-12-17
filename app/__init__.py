@@ -1,14 +1,16 @@
 from flask import Flask, current_app
 import click
+import os
 
 app = Flask(
     __name__
 )
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///./lines.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SEQ2SEQ_MODEL'] = os.path.join(app.root_path, '..', 'model')
 app.config['SECRET_KEY'] = 'jfbqh2brbsefonp12294810i23hrisnbfdhbdiauOJSOBSDFDU9 209IEWR'
 
-from .models import db, db_cli, Line
+from .models import db, db_cli, Normalization
 db.init_app(app)
 app.cli.add_command(db_cli)
 
@@ -30,7 +32,7 @@ def import_text(file_path):
                     continue
                 normalized = normalize_line(line, model, tokenizer)
                 xml = align_to_segs(line, normalized)
-                db.session.add(Line(original_text=line, xml=xml, status='pending', metadata_json=json.dumps({})))
+                db.session.add(Normalization(original_text=line, xml=xml, status='pending', metadata_json=json.dumps({})))
         db.session.commit()
         click.echo(f"Imported {file_path} into DB.")
 

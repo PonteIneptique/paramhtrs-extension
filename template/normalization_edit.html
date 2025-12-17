@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block morestyle %}
+<style>
 body { font-family: system-ui, sans-serif; padding:20px; }
 .seg { display:inline-block; margin:2px; padding:4px 6px; background:white; border-radius:6px; box-shadow:0 1px 2px rgba(0,0,0,.1); min-width:20px; vertical-align:top; }
 .orig { font-weight:600; white-space:pre; }
@@ -25,11 +26,12 @@ button { font-size:0.7em; margin-top:2px; margin-left:2px; }
 .flash-card.show {
     opacity: 1;
 }
+</style>
 {% endblock %}
 
 {% block content %}
 <div id="app">
-  <h2>Line Editor</h2>
+  <h2>Normalization Editor</h2>
     <div class="row">
         <div class="col-md-4">
 
@@ -43,10 +45,10 @@ button { font-size:0.7em; margin-top:2px; margin-left:2px; }
   <button
     type="button"
     class="btn"
-    :class="line.status === 'pending'
+    :class="normalization.status === 'pending'
       ? 'btn-danger'
       : 'btn-outline-primary'"
-    @click="line.status = 'pending'"
+    @click="normalization.status = 'pending'"
   >
     Pending
   </button>
@@ -55,10 +57,10 @@ button { font-size:0.7em; margin-top:2px; margin-left:2px; }
   <button
     type="button"
     class="btn"
-    :class="line.status === 'active'
+    :class="normalization.status === 'active'
       ? 'btn-warning'
       : 'btn-outline-primary'"
-    @click="line.status = 'active'"
+    @click="normalization.status = 'active'"
   >
     In the work
   </button>
@@ -67,32 +69,32 @@ button { font-size:0.7em; margin-top:2px; margin-left:2px; }
   <button
     type="button"
     class="btn"
-    :class="line.status === 'done'
+    :class="normalization.status === 'done'
       ? 'btn-success'
       : 'btn-outline-primary'"
-    @click="line.status = 'done'"
+    @click="normalization.status = 'done'"
   >
     Done
   </button>
 </div>
         </div>
-        <div class="col-md-4 text-start"><a href="{{url_for('bp_main.line_route', line_id=line.id, format='tei')}}"
-                             class="btn btn-sm btn-info"><i class="fa-solid  fa-download"></i> Download the line</a></div>
-        <div class="col-md-4 text-end"><a href="{{url_for('bp_main.delete_route', line_id=line.id)}}"
-          class="btn btn-sm btn-danger"><i class="fa-solid  fa-remove"></i> Delete the line</a></div>
+        <div class="col-md-4 text-start"><a href="{{url_for('bp_main.normalization_edit_route', normalization_id=normalization.id, format='tei')}}"
+                             class="btn btn-sm btn-info"><i class="fa-solid  fa-download"></i> Download this normalization</a></div>
+        <div class="col-md-4 text-end"><a href="{{url_for('bp_main.normalization_delete_route', normalization_id=normalization.id)}}"
+          class="btn btn-sm btn-danger"><i class="fa-solid  fa-remove"></i> Delete</a></div>
     </div>
 
     <hr />
-    <div><h2>Original</h2> [[ line.original_text ]]</div>
+    <div><h2>Original</h2> [[ normalization.original_text ]]</div>
     <hr />
     <h2>Metadata</h2>
-    <ul><li v-for="(value, key) in line.metadata_json" :key="key">
+    <ul><li v-for="(value, key) in normalization.metadata_json" :key="key">
       <b>[[ key ]]:</b> [[ value ]]
     </li>
     </ul>
     <hr />
-    <h2>Line</h2>
-  <span v-for="seg in line.segs" :key="seg.id" class="seg" :class="{ space: seg.orig===' ' && !seg.reg }">
+    <h2>Normalization</h2>
+  <span v-for="seg in normalization.segs" :key="seg.id" class="seg" :class="{ space: seg.orig===' ' && !seg.reg }">
     <div class="orig">[[ seg.orig ]]</div>
     <div
       v-if="seg.reg !== null || !isSpace(seg)"
@@ -108,7 +110,7 @@ button { font-size:0.7em; margin-top:2px; margin-left:2px; }
     <br v-if="hasMarker(seg)" />
   </span>
   <br>
-  <button @click="saveLine(line)" class="btn btn-primary">Save</button>
+  <button @click="saveNormalization(normalization)" class="btn btn-primary">Save</button>
 
   <!-- flash card -->
   <div class="flash-card" ref="flashCard">Saved!</div>
@@ -158,12 +160,12 @@ const { createApp } = Vue;
 createApp({
     data() {
         return {
-            line: {{ line|tojson }}
+            normalization: {{ normalization|tojson }}
         }
     },
     delimiters: ["[[", "]]"],
     created() {
-        this.line.segs = parseSegXML(this.line.xml);
+        this.normalization.segs = parseSegXML(this.normalization.xml);
     },
     methods: {
         hasMarker(seg) {
@@ -188,20 +190,20 @@ createApp({
             card.classList.add("show");
             setTimeout(() => card.classList.remove("show"), 1500);
         },
-        saveLine(line) {
-            const xml = serializeSegs(line.segs);
-            fetch("{{url_for('bp_main.line_route', line_id=line.id)}}", {
+        saveNormalization(normalization) {
+            const xml = serializeSegs(normalization.segs);
+            fetch("{{url_for('bp_main.normalization_edit_route', normalization_id=normalization.id)}}", {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({id: line.id, xml: xml, status: line.status})
+                body: JSON.stringify({id: normalization.id, xml: xml, status: normalization.status})
             })
             .then(r => r.json())
             .then(data => {
                 if(data.status==="ok") {
                     this.showFlash("Saved!");
                     // reload line from server to reflect updates
-                    this.line = data.updatedLine;
-                    this.line.segs = parseSegXML(this.line.xml);
+                    this.normalization = data.content;
+                    this.normalization.segs = parseSegXML(this.normalization.xml);
                 }
             });
         }

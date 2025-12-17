@@ -121,8 +121,8 @@
             margin: 10px 0;
             font-family: monospace;
         }
-{% block morestyle %}{% endblock%}
     </style>
+{% block morestyle %}{% endblock%}
 
 </head>
 <body class="bg-light">
@@ -130,11 +130,12 @@
         <a href="{{ url_for('bp_main.index_route') }}" aria-label="Home">
             <i class="fas fa-home"></i> <span>Home</span>
         </a>
-        <a href="{{ url_for('bp_main.lines_list_route') }}" aria-label="Lines">
-            <i class="fa-solid fa-list"></i> <span>Lines</span>
+        <hr />
+        <a href="{{ url_for('bp_main.normalization_list_route') }}" aria-label="Normalizations">
+            <i class="fa-solid fa-list"></i> <span>Normalizations</span>
         </a>
-        <a href="{{ url_for('bp_main.new_line_route') }}" aria-label="Process">
-            <i class="fa-solid fa-file-circle-plus"></i> <span>Process</span>
+        <a href="{{ url_for('bp_main.normalization_new_route') }}" aria-label="Normalize">
+            <i class="fa-solid fa-file-circle-plus"></i> <span>Normalize</span>
         </a>
     </div>
     <div class="container mt-5">
