@@ -1,7 +1,9 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash
+from functools import wraps
+from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
 from flask_login import login_user, logout_user, current_user
 from .models import User, db
 from flask_login import LoginManager, login_required
+
 
 
 login_manager = LoginManager()
@@ -146,3 +148,41 @@ def admin_panel():
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
+
+
+def requires_access(cls, id_arg_name: str):
+    """
+    Flask decorator to require access to an object of class `cls` based on an ID from the route.
+
+    Args:
+        cls: The SQLAlchemy model class (e.g., Project, Alignment).
+        id_arg_name: The name of the argument in the route that contains the object's ID.
+
+    Returns:
+        The object is passed as the first argument to the decorated function if access is allowed.
+    """
+
+    def decorator(f):
+        @wraps(f)
+        def wrapped(*args, **kwargs):
+            # Get the ID from kwargs
+            obj_id = kwargs.get(id_arg_name)
+            if obj_id is None:
+                abort(400, f"Missing {id_arg_name} in route")
+
+            # Retrieve the object
+            obj = cls.query.get(obj_id)
+            if obj is None:
+                abort(404, f"{cls.__name__} with id {obj_id} not found")
+
+            # Check access (you can customize this logic)
+            if not obj.user_has_access(current_user):
+                abort(403, f"You do not have access to this {cls.__name__}")
+
+            # Remove the ID from kwargs and replace with the object
+            kwargs.pop(id_arg_name)
+            return f(obj, *args, **kwargs)
+
+        return wrapped
+
+    return decorator

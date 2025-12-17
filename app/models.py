@@ -1,7 +1,7 @@
 from sqlalchemy import CheckConstraint
 from flask import current_app
 from flask_sqlalchemy import SQLAlchemy
-from flask_login import UserMixin
+from flask_login import UserMixin, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 
 import click
@@ -12,6 +12,7 @@ from .process import from_xml_to_tei
 db = SQLAlchemy()
 
 class User(db.Model, UserMixin):
+    __tablename__ = "users"
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     password_hash = db.Column(db.String(128), nullable=False)
@@ -25,11 +26,18 @@ class User(db.Model, UserMixin):
         return check_password_hash(self.password_hash, password)
 
 
+class ProjectUser(db.Model):
+    __tablename__ = "project_user"
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey("projects.id"), primary_key=True)
+
+
 class Project(db.Model):
     __tablename__ = "projects"
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text, nullable=False)
+    creator_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
 
     normalizations = db.relationship(
         "Normalization",
@@ -38,6 +46,17 @@ class Project(db.Model):
         lazy=True,
     )
 
+    users = db.relationship(
+        "User",
+        secondary="project_user",
+        backref="projects",
+        lazy="dynamic"
+    )
+
+    def user_has_access(self, user: User) -> bool:
+        if self.creator_id == user.id:
+            return True
+        return ProjectUser.query.filter(ProjectUser.project_id == self.id, ProjectUser.user_id==user.id).count() > 0
 
 
 # -------------------------
@@ -75,6 +94,10 @@ class Normalization(db.Model):
     @property
     def normalized_text(self):
         return from_xml_to_tei(self.xml, plaintext=True)
+
+    def user_has_access(self, user: User):
+        project = Project.query.filter_by(id=self.project_id).first()
+        return project.user_has_access(user)
 
 # -------------------------
 # Flask CLI command to init DB

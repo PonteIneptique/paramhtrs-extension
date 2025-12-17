@@ -36,10 +36,11 @@
         v-model="projectQuery"
         @input="searchProjects"
         placeholder="Search project…"
+        :disabled="fixedProjectId"
       >
     </div>
 
-    <div v-if="projects.length" class="list-group">
+    <div v-if="projects.length && !fixedProjectId" class="list-group">
       <button
         type="button"
         class="list-group-item list-group-item-action list-group-item-secondary"
@@ -180,12 +181,24 @@ createApp({
       projects: [],
       selectedProject: null,
 
+      {% if project %}
+      fixedProjectId: {{ project.id|tojson }},
+      fixedProjectName: {{ project.name|tojson }},
+      {% endif %}
+
       results: []
     }
   },
   mounted() {
-    // Fetch all projects on page load
-    this.searchProjects()
+    if (this.fixedProjectId) {
+      this.selectedProject = {
+        id: this.fixedProjectId,
+        name: this.fixedProjectName
+      }
+      this.projectQuery = this.fixedProjectName
+    } else {
+      this.searchProjects()
+    }
   },
   methods: {
     async searchProjects() {
@@ -199,6 +212,7 @@ createApp({
     },
 
     selectProject(project) {
+      if (this.fixedProjectId) return
       this.selectedProject = project
       this.projectQuery = project.name
       this.projects = []
@@ -258,7 +272,7 @@ createApp({
         alert("No project selected.")
         return
       }
-      await fetch(
+      const response = await fetch(
         "{{ url_for('bp_norm.normalization_new_route') }}",
         {
           method: "POST",
@@ -273,8 +287,11 @@ createApp({
           })
         }
       )
+      const j = await response.json()
+      if (j.status == 'success') {
+        window.location.href = j.redirect;
+      }
 
-      window.location.reload()
     }
   }
 }).mount("#app")

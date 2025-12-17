@@ -7,8 +7,12 @@ from flask import (
     flash,
     jsonify
 )
+from sqlalchemy import or_
+from flask_login import login_required, current_user
 import os
 from .models import Project, db, Normalization
+from .bp_auth import requires_access
+
 
 bp_project = Blueprint(
     "bp_project",
@@ -21,13 +25,15 @@ bp_project = Blueprint(
     ),
     static_url_path="",
 )
+
 @bp_project.route("/projects/new", methods=["GET", "POST"])
+@login_required
 def project_create():
     if request.method == "POST":
         name = request.form["name"]
         description = request.form.get("description", "")
 
-        project = Project(name=name, description=description)
+        project = Project(name=name, description=description, creator_id=current_user.id)
         db.session.add(project)
         db.session.commit()
 
@@ -37,9 +43,8 @@ def project_create():
     return render_template("projects/new.html")
 
 @bp_project.route("/projects/<int:project_id>", methods=["GET"])
-def project_browse(project_id):
-    project = Project.query.get_or_404(project_id)
-
+@requires_access(Project, 'project_id')
+def project_browse(project: Project):
     page = request.args.get("page", 1, type=int)
     per_page = min(request.args.get("per_page", 20, type=int), 50)
     search = request.args.get("search", "")
@@ -58,16 +63,15 @@ def project_browse(project_id):
     )
 
     return render_template(
-        "projects/browse.html",
+        "projects/edit.html",
         project=project,
         pagination=pagination,
         search=search,
     )
 
 @bp_project.route("/projects/<int:project_id>/edit", methods=["POST"])
-def project_update(project_id):
-    project = Project.query.get_or_404(project_id)
-
+@requires_access(Project, 'project_id')
+def project_update(project: Project):
     project.name = request.form["name"]
     project.description = request.form.get("description", "")
 
@@ -77,9 +81,8 @@ def project_update(project_id):
     return redirect(url_for("bp_project.project_browse", project_id=project.id))
 
 @bp_project.route("/projects/<int:project_id>/delete", methods=["GET"])
-def project_delete(project_id):
-    project = Project.query.get_or_404(project_id)
-
+@requires_access(Project, 'project_id')
+def project_delete(project: Project):
     if request.args.get("confirm", type=bool, default=False):
         db.session.delete(project)
         db.session.commit()
@@ -99,11 +102,16 @@ def project_lists():
     if search:
         query = query.filter(Project.name.ilike(f"%{search}%"))
 
-    projects = query.order_by(Project.name).all()
+    query = query.outerjoin(Project.users).filter(
+        or_(
+            Project.creator_id == current_user.id,
+            Project.users.any(id=current_user.id)
+        )
+    )
 
     if request.args.get("format", default=None, type=str) == "json":
         return jsonify([
             {"id": project.id, "name": project.name}
-            for project in projects
+            for project in query
         ])
-    return render_template("projects/list.html", projects=projects)
+    return render_template("projects/list.html", projects=query)

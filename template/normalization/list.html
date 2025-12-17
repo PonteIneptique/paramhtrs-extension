@@ -3,25 +3,22 @@
 {% block content %}
     <div class="container mt-5">
         <h2>Select a Document</h2>
-
         <!-- Search Filter Form -->
-        <form method="get" action="{{ url_for('bp_norm.normalization_list_route', filter=current_filter) }}">
-            <input type="text" name="search" class="form-control" placeholder="Search by title" value="{{ search_query }}">
+        <form method="get" action="{{ url_for('bp_norm.normalization_list_route', project_id=project_id, filter=current_filter) }}">
+            <input type="text" name="search" class="form-control" placeholder="Search by title" value="{{ search_query }}" />
         </form>
         <hr/>
         <p>
-            <a class="btn btn-primary btn-sm" href="{{url_for('bp_norm.normalization_list_route', filter=current_filter, download=True)}}"><i class="fa-solid fa-file-arrow-down"></i> Download all fully corrected document</a>
+            <a class="btn btn-primary btn-sm" href="{{url_for('bp_norm.normalization_list_route', project_id=project_id, filter=current_filter, download=True)}}"><i class="fa-solid fa-file-arrow-down"></i> Download all fully corrected document</a>
         </p>
-        <p>
     <div class="btn-group btn-group-sm" role="group" aria-label="Status selector">
       <!-- Prefix -->
       <a class="btn btn-secondary disabled" href="#">Filter by status:</a>
-      <a href="{{url_for('bp_norm.normalization_list_route', filter='pending', search=search_query)}}" class="btn btn{% if current_filter != 'pending'%}-outline{%endif%}-danger">Pending</a>
-      <a href="{{url_for('bp_norm.normalization_list_route', filter='active', search=search_query)}}" class="btn btn{% if current_filter != 'active'%}-outline{%endif%}-warning">Active</a>
-      <a href="{{url_for('bp_norm.normalization_list_route', filter='done', search=search_query)}}" class="btn btn{% if current_filter != 'done'%}-outline{%endif%}-success">Done</a>
-      <a href="{{url_for('bp_norm.normalization_list_route', filter='all', search=search_query)}}" class="btn btn{% if current_filter != 'all'%}-outline{%endif%}-primary">All</a>
+      <a href="{{url_for('bp_norm.normalization_list_route', project_id=project_id, filter='pending', search=search_query)}}" class="btn btn{% if current_filter != 'pending'%}-outline{%endif%}-danger">Pending</a>
+      <a href="{{url_for('bp_norm.normalization_list_route', project_id=project_id, filter='active', search=search_query)}}" class="btn btn{% if current_filter != 'active'%}-outline{%endif%}-warning">Active</a>
+      <a href="{{url_for('bp_norm.normalization_list_route', project_id=project_id, filter='done', search=search_query)}}" class="btn btn{% if current_filter != 'done'%}-outline{%endif%}-success">Done</a>
+      <a href="{{url_for('bp_norm.normalization_list_route', project_id=project_id, filter='all', search=search_query)}}" class="btn btn{% if current_filter != 'all'%}-outline{%endif%}-primary">All</a>
     </div>
-        </p>
         <hr/>
         <ul class="list-group mt-3">
             {% for normalization in normalizations %}
@@ -45,7 +42,7 @@
             <ul class="pagination justify-content-center">
                 {% if pagination.has_prev %}
                     <li class="page-item">
-                        <a class="page-link" href="{{ url_for('bp_norm.normalization_list_route', page=pagination.prev_num, search=search_query, filter=current_filter) }}" aria-label="Previous">
+                        <a class="page-link" href="{{ url_for('bp_norm.normalization_list_route', project_id=project_id, page=pagination.prev_num, search=search_query, filter=current_filter) }}" aria-label="Previous">
                             <span aria-hidden="true">&laquo;</span>
                         </a>
                     </li>
@@ -54,7 +51,7 @@
                 {% for page_num in pagination.iter_pages() %}
                     {% if page_num %}
                         <li class="page-item {% if page_num == pagination.page %}active{% endif %}">
-                            <a class="page-link" href="{{ url_for('bp_norm.normalization_list_route', page=page_num, search=search_query, filter=current_filter) }}">{{ page_num }}</a>
+                            <a class="page-link" href="{{ url_for('bp_norm.normalization_list_route', project_id=project_id, page=page_num, search=search_query, filter=current_filter) }}">{{ page_num }}</a>
                         </li>
                     {% else %}
                         <li class="page-item disabled"><span class="page-link">...</span></li>
@@ -63,7 +60,7 @@
 
                 {% if pagination.has_next %}
                     <li class="page-item">
-                        <a class="page-link" href="{{ url_for('bp_norm.normalization_list_route', page=pagination.next_num, search=search_query, filter=current_filter) }}" aria-label="Next">
+                        <a class="page-link" href="{{ url_for('bp_norm.normalization_list_route', project_id=project_id, page=pagination.next_num, search=search_query, filter=current_filter) }}" aria-label="Next">
                             <span aria-hidden="true">&raquo;</span>
                         </a>
                     </li>

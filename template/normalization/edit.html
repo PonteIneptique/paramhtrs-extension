@@ -1,14 +1,14 @@
 {% extends 'base.html' %}
 {% block morestyle %}
-<style>
+<style type="text/css">
 body { font-family: system-ui, sans-serif; padding:20px; }
-.seg { display:innormalization.-block; margin:2px; padding:4px 6px; background:white; border-radius:6px; box-shadow:0 1px 2px rgba(0,0,0,.1); min-width:20px; vertical-align:top; }
+.seg { display:inline-block; margin:2px; padding:4px 6px; background:white; border-radius:6px; box-shadow:0 1px 2px rgba(0,0,0,.1); min-width:20px; vertical-align:top; }
 .orig { font-weight:600; white-space:pre; }
 .reg { margin-top:2px; font-size:0.9em; color:#444; white-space:pre; }
-.editable { outnormalization.:none; cursor:text; }
+.editable { outline:none; cursor:text; }
 .space { background:#eee; }
 button { font-size:0.7em; margin-top:2px; margin-left:2px; }
-.newnormalization. { display:block; }
+.newline { display:block; }
 
 /* flash card */
 .flash-card {
@@ -47,7 +47,7 @@ button { font-size:0.7em; margin-top:2px; margin-left:2px; }
     class="btn"
     :class="normalization.status === 'pending'
       ? 'btn-danger'
-      : 'btn-outnormalization.-primary'"
+      : 'btn-outline-primary'"
     @click="normalization.status = 'pending'"
   >
     Pending
@@ -59,7 +59,7 @@ button { font-size:0.7em; margin-top:2px; margin-left:2px; }
     class="btn"
     :class="normalization.status === 'active'
       ? 'btn-warning'
-      : 'btn-outnormalization.-primary'"
+      : 'btn-outline-primary'"
     @click="normalization.status = 'active'"
   >
     In the work
@@ -71,7 +71,7 @@ button { font-size:0.7em; margin-top:2px; margin-left:2px; }
     class="btn"
     :class="normalization.status === 'done'
       ? 'btn-success'
-      : 'btn-outnormalization.-primary'"
+      : 'btn-outline-primary'"
     @click="normalization.status = 'done'"
   >
     Done
