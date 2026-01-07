@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4" id="project-users-app">
+  <h2>Project access – {{ project.name }}</h2>
+
+  <table class="table table-striped mt-3">
+    <thead>
+      <tr>
+        <th>User</th>
+        <th>Access</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr v-for="user in users" :key="user.id">
+        <td>[[ user.username ]]</td>
+        <td>
+          <button
+            v-if="!user.has_access"
+            class="btn btn-sm btn-success"
+            @click="grant(user)"
+          >
+            Grant
+          </button>
+
+          <button
+            v-else
+            class="btn btn-sm btn-danger"
+            @click="revoke(user)"
+            :disabled="user.id === creatorId"
+          >
+            Revoke
+          </button>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<script>
+const { createApp } = Vue
+
+createApp({
+  data() {
+    return {
+      users: [],
+      projectId: {{ project.id }},
+      creatorId: {{ project.creator_id }},
+    }
+  },
+  delimiters: ["[[", "]]"],
+  mounted() {
+    this.refresh()
+  },
+  methods: {
+    async refresh() {
+      const r = await fetch(`{{url_for('.api_project_users', project_id=project.id)}}`)
+      const data = await r.json()
+      this.users = data.users
+    },
+    async grant(user) {
+      await fetch(
+        `{{url_for('.api_project_users', project_id=project.id)}}/${user.id}`,
+        { method: "POST" }
+      )
+      this.refresh()
+    },
+    async revoke(user) {
+      await fetch(
+        `{{url_for('.api_project_users', project_id=project.id)}}/${user.id}`,
+        { method: "DELETE" }
+      )
+      this.refresh()
+    }
+  }
+}).mount("#project-users-app")
+</script>
+{% endblock %}

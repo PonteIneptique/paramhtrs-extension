@@ -8,6 +8,7 @@
   <button class="btn btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#editProjectForm" aria-expanded="false" aria-controls="editProjectForm">
     Edit Project
   </button>
+  {% if can_edit %}<a class="btn btn-outline-warning mb-3">Manage access</a>{% endif %}
 
   <!-- Edit Project Form (collapsed by default) -->
   <div class="collapse" id="editProjectForm">

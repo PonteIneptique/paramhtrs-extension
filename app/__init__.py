@@ -10,7 +10,7 @@ app = Flask(
 )
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///./lines.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SEQ2SEQ_MODEL'] = os.path.join(app.root_path, '..', 'model')
+app.config['SEQ2SEQ_MODEL'] = "comma-project/normalization-byt5-small"
 app.config['SECRET_KEY'] = 'jfbqh2brbsefonp12294810i23hrisnbfdhbdiauOJSOBSDFDU9 209IEWR'
 
 from .models import db, db_cli, Normalization

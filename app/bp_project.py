@@ -5,12 +5,13 @@ from flask import (
     redirect,
     url_for,
     flash,
+    abort,
     jsonify
 )
 from sqlalchemy import or_
 from flask_login import login_required, current_user
 import os
-from .models import Project, db, Normalization
+from .models import Project, db, Normalization, User, ProjectUser
 from .bp_auth import requires_access
 
 
@@ -25,6 +26,13 @@ bp_project = Blueprint(
     ),
     static_url_path="",
 )
+
+def require_project_admin(project: Project):
+    if not (
+        current_user.is_admin
+        or project.creator_id == current_user.id
+    ):
+        abort(403)
 
 @bp_project.route("/projects/new", methods=["GET", "POST"])
 @login_required
@@ -61,12 +69,13 @@ def project_browse(project: Project):
         per_page=per_page,
         error_out=False,
     )
-
+    print(require_project_admin(project))
     return render_template(
         "projects/edit.html",
         project=project,
         pagination=pagination,
         search=search,
+        can_edit=(current_user.is_admin or project.creator_id == current_user.id)
     )
 
 @bp_project.route("/projects/<int:project_id>/edit", methods=["POST"])
@@ -115,3 +124,70 @@ def project_lists():
             for project in query
         ])
     return render_template("projects/list.html", projects=query)
+
+@bp_project.route("/projects/<int:project_id>/users")
+def project_users(project_id):
+    project = Project.query.get_or_404(project_id)
+    require_project_admin(project)
+
+    users = User.query.order_by(User.username).all()
+    project_user_ids = {u.id for u in project.users}
+
+    return render_template(
+        "projects/users.html",
+        project=project,
+        users=users,
+        project_user_ids=project_user_ids,
+    )
+
+@bp_project.route("/api/projects/<int:project_id>/users")
+def api_project_users(project_id):
+    project = Project.query.get_or_404(project_id)
+    require_project_admin(project)
+
+    return {
+        "project_id": project.id,
+        "users": [
+            {
+                "id": u.id,
+                "username": u.username,
+                "has_access": project.user_has_access(u),
+            }
+            for u in User.query.all()
+        ],
+    }
+
+@bp_project.route("/api/projects/<int:project_id>/users/<int:user_id>", methods=["POST"])
+def api_add_user(project_id, user_id):
+    project = Project.query.get_or_404(project_id)
+    require_project_admin(project)
+
+    if project.creator_id == user_id:
+        abort(400)
+
+    exists = ProjectUser.query.filter_by(
+        project_id=project_id,
+        user_id=user_id,
+    ).first()
+
+    if not exists:
+        db.session.add(ProjectUser(
+            project_id=project_id,
+            user_id=user_id,
+        ))
+        db.session.commit()
+
+    return {"status": "ok"}
+
+@bp_project.route("/api/projects/<int:project_id>/users/<int:user_id>", methods=["DELETE"])
+def api_remove_user(project_id, user_id):
+    project = Project.query.get_or_404(project_id)
+    require_project_admin(project)
+
+    ProjectUser.query.filter_by(
+        project_id=project_id,
+        user_id=user_id,
+    ).delete()
+
+    db.session.commit()
+    return {"status": "ok"}
