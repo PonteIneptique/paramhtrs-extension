@@ -8,6 +8,7 @@ import lxml.etree as et
 
 from .models import db, Normalization, Project
 from .bp_auth import requires_access
+from .aligner import align_and_markup
 
 bp_norm = Blueprint("bp_norm", __name__,
                     template_folder=os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "template"),
@@ -73,7 +74,6 @@ def normalization_process_route():
 @login_required
 def normalization_new_route():
     if request.method == "POST":
-        from .process import align_to_segs
         form = request.json
         project = Project.query.get_or_404(form["project_id"])
         if not project.user_has_access(current_user):
@@ -86,7 +86,7 @@ def normalization_new_route():
             results.append({
                 "input": normalization["orig"],
                 "normalized": normalization["reg"],
-                "xml": align_to_segs(normalization["orig"], normalization["reg"])
+                "xml": align_and_markup(normalization["orig"], normalization["reg"])
             })
         for r in results:
             db.session.add(Normalization(original_text=r["input"], xml=r["xml"], status="pending",
@@ -125,7 +125,6 @@ def normalization_edit_route(normalization: Normalization):
         from .process import from_xml_to_tei
         return Response(str(from_xml_to_tei(normalization.xml)), mimetype="text/xml")
     if request.method == "POST":
-        from .process import align_to_segs
         data = request.json
         # Recompute alignment
         source = ""
@@ -143,7 +142,7 @@ def normalization_edit_route(normalization: Normalization):
             else:
                 normz += origElem[0].text
 
-        normalization.xml = align_to_segs(source, normz)
+        normalization.xml = align_and_markup(source, normz)
         normalization.status = data.get("status", normalization.status)
         db.session.add(normalization)
         db.session.commit()

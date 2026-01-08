@@ -24,7 +24,8 @@ app.cli.add_command(db_cli)
 @click.argument("file_path")
 def import_text(file_path):
     """Import a plain text file into the DB."""
-    from .process import get_model_and_tokenizer, normalize_line, align_to_segs
+    from .process import get_model_and_tokenizer, normalize_line
+    from .aligner import align_and_markup
     model, tokenizer = get_model_and_tokenizer()
 
     with current_app.app_context():
@@ -34,7 +35,7 @@ def import_text(file_path):
                 if not line:
                     continue
                 normalized = normalize_line(line, model, tokenizer)
-                xml = align_to_segs(line, normalized)
+                xml = align_and_markup(line, normalized)
                 db.session.add(Normalization(original_text=line, xml=xml, status='pending', metadata_json=json.dumps({})))
         db.session.commit()
         click.echo(f"Imported {file_path} into DB.")
