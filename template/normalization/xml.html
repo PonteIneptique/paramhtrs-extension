@@ -1,0 +1,138 @@
+{% extends 'base.html' %}
+{% block morestyle %}
+  <!-- Prism.js -->
+  <link
+    href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism.css"
+    rel="stylesheet"
+  >
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-markup.min.js"></script>
+
+  <style>
+    .editor-wrapper {
+      position: relative;
+      font-family: monospace;
+      font-size: 0.9rem;
+    }
+
+    .editor-wrapper textarea,
+    .editor-wrapper pre {
+      margin: 0;
+      width: 100%;
+      min-height: 400px;
+      padding: 1rem;
+      line-height: 1.4;
+      font-family: monospace;
+      font-size: 0.9rem;
+    }
+
+    .editor-wrapper textarea {
+      position: absolute;
+      top: 0;
+      left: 0;
+      background: transparent;
+      color: transparent;
+      caret-color: black;
+      resize: vertical;
+      z-index: 2;
+    }
+
+    .editor-wrapper pre {
+      pointer-events: none;
+      z-index: 1;
+      overflow: auto;
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+
+<div id="app" class="container">
+
+  <h4 class="mb-3">Edit XML</h4>
+
+  <div v-if="xmlError" class="alert alert-danger">
+    [[ xmlError ]]
+  </div>
+
+  <form method="POST">
+
+    <input type="hidden" name="xml" :value="cleanXml">
+
+    <div class="editor-wrapper mb-3">
+      <textarea
+        v-model="displayXml"
+        @input="onInput"
+        spellcheck="false"
+      ></textarea>
+
+      <pre class="language-markup">
+<code v-html="highlightedXml"></code>
+      </pre>
+    </div>
+
+    <button
+      class="btn btn-primary"
+      :disabled="!!xmlError"
+    >
+      Save
+    </button>
+
+  </form>
+</div>
+
+<script>
+const { createApp } = Vue;
+
+createApp({
+  delimiters: ['[[', ']]'],
+
+  data() {
+    return {
+      rawXml: `{{ normalization.xml | safe }}`,
+      displayXml: '',
+      xmlError: null
+    };
+  },
+
+  computed: {
+    cleanXml() {
+      return this.displayXml.replaceAll('</seg>\n', '</seg>');
+    },
+
+    highlightedXml() {
+      return Prism.highlight(
+        this.displayXml,
+        Prism.languages.markup,
+        'markup'
+      );
+    }
+  },
+
+  methods: {
+    prettify(xml) {
+      return xml.replaceAll('</seg>', '</seg>\n');
+    },
+
+    validateXml(xml) {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(xml, "application/xml");
+      const errorNode = doc.querySelector("parsererror");
+
+      this.xmlError = errorNode
+        ? errorNode.textContent
+        : null;
+    },
+
+    onInput() {
+      this.validateXml(this.cleanXml);
+    }
+  },
+
+  mounted() {
+    this.displayXml = this.prettify(this.rawXml);
+    this.validateXml(this.rawXml);
+  }
+}).mount('#app');
+</script>
+{% endblock %}

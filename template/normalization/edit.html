@@ -144,15 +144,15 @@ function parseSegXML(xml) {
 }
 
 function serializeSegs(segs) {
-    let xml = "<text>\n";
-    for (const s of segs) {
-        xml += "  <seg>";
-        if (s.orig) xml += `<orig>${s.orig}</orig>`;
-        if (s.reg !== null) xml += `<reg>${s.reg}</reg>`;
-        xml += "</seg>\n";
-    }
-    xml += "</text>";
-    return xml;
+    let segObjects = segs.map(s => {
+        const seg = {};
+
+        if (s.orig) seg.orig = s.orig;
+        if (s.reg !== null) seg.reg = s.reg;
+
+        return seg;
+    });
+    return segObjects;
 }
 
 const { createApp } = Vue;
@@ -191,11 +191,11 @@ createApp({
             setTimeout(() => card.classList.remove("show"), 1500);
         },
         saveNormalization(normalization) {
-            const xml = serializeSegs(normalization.segs);
+            const segObjects = serializeSegs(normalization.segs);
             fetch("{{url_for('bp_norm.normalization_edit_route', normalization_id=normalization.id)}}", {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({id: normalization.id, xml: xml, status: normalization.status})
+                body: JSON.stringify({id: normalization.id, json: segObjects, status: normalization.status})
             })
             .then(r => r.json())
             .then(data => {

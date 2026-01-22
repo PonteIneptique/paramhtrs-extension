@@ -6,6 +6,13 @@ from flask_login import login_required, current_user
 import os
 import lxml.etree as et
 
+def validate_xml(xml: str) -> tuple[bool, str | None]:
+    try:
+        et.fromstring(xml.encode("utf-8"))
+        return True, None
+    except et.XMLSyntaxError as e:
+        return False, str(e)
+
 from .models import db, Normalization, Project
 from .bp_auth import requires_access
 from .aligner import align_and_markup
@@ -129,18 +136,18 @@ def normalization_edit_route(normalization: Normalization):
         # Recompute alignment
         source = ""
         normz = ""
-        for seg in et.fromstring(data["xml"]).xpath("//seg"):
-            origElem = seg.xpath("./orig")
-            regElem = seg.xpath("./reg")
-            if origElem:
-                source += origElem[0].text
+        for seg in data["json"]:
+            origElem = seg.get("orig")
+            regElem = seg.get("reg")
+            if origElem is not None:
+                source += origElem
 
             # If reg is not present, we keep orig
             # However, if reg is empty, we map to an empty string
-            if regElem:
-                normz += regElem[0].text or ''
+            if regElem is not None:
+                normz += regElem or ''
             else:
-                normz += origElem[0].text
+                normz += origElem
 
         normalization.xml = align_and_markup(source, normz)
         normalization.status = data.get("status", normalization.status)
@@ -165,3 +172,25 @@ def normalization_edit_route(normalization: Normalization):
             }
         )
 
+@bp_norm.route("/normalizations/<int:normalization_id>/edit-xml", methods=["GET", "POST"])
+@requires_access(Normalization, 'normalization_id')
+def edit_normalization(normalization):
+    error = None
+
+    if request.method == "POST":
+        raw_xml = request.form.get("xml", "")
+
+        # remove UI formatting
+        cleaned_xml = raw_xml.replace("</seg>\n", "</seg>")
+
+        is_valid, error = validate_xml(cleaned_xml)
+
+        if is_valid:
+            normalization.xml = cleaned_xml
+            db.session.commit()
+            return redirect(url_for(".edit_normalization", norm_id=norm.id))
+
+    return render_template(
+        "normalization/xml.html",
+        normalization=normalization
+    )

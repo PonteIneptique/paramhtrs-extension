@@ -1,3 +1,5 @@
+import json
+
 from flask import (
     Blueprint,
     render_template,
@@ -13,6 +15,7 @@ from flask_login import login_required, current_user
 import os
 from .models import Project, db, Normalization, User, ProjectUser
 from .bp_auth import requires_access
+from .aligner import align_and_markup
 
 
 bp_project = Blueprint(
@@ -69,7 +72,7 @@ def project_browse(project: Project):
         per_page=per_page,
         error_out=False,
     )
-    print(require_project_admin(project))
+
     return render_template(
         "projects/edit.html",
         project=project,
@@ -140,6 +143,16 @@ def project_users(project_id):
         project_user_ids=project_user_ids,
     )
 
+@bp_project.route("/projects/<int:project_id>/upload")
+def project_upload(project_id):
+    project = Project.query.get_or_404(project_id)
+    require_project_admin(project)
+
+    return render_template(
+        "projects/upload.html",
+        project=project,
+    )
+
 @bp_project.route("/api/projects/<int:project_id>/users")
 def api_project_users(project_id):
     project = Project.query.get_or_404(project_id)
@@ -191,3 +204,46 @@ def api_remove_user(project_id, user_id):
 
     db.session.commit()
     return {"status": "ok"}
+
+
+@bp_project.route("/api/projects/<int:project_id>/upload", methods=["POST"])
+@login_required
+def api_project_upload(project_id):
+    project = Project.query.get_or_404(project_id)
+    require_project_admin(project)
+
+    data = request.get_json(force=True)
+
+    source = data.get("source")
+    target = data.get("target")
+
+    if not source or not target:
+        return jsonify({"error": "Missing source or target"}), 400
+
+    # example XML stub
+    xml = align_and_markup(source, target)
+
+    norm = Normalization.query.filter_by(
+        original_text=source,
+        project_id=project.id
+    ).first()
+
+    if norm:
+        norm.metadata_json = {"updated": True}
+    else:
+        metadata = {
+            k: v for k, v in data.items()
+            if k not in {"source", "target"}
+        }
+        norm = Normalization(
+            original_text=source,
+            xml=xml,
+            project_id=project.id,
+            metadata_json=json.dumps(metadata),
+            status='pending'
+        )
+        db.session.add(norm)
+
+    db.session.commit()
+
+    return jsonify({"status": "ok"})

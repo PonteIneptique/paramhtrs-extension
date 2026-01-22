@@ -12,8 +12,7 @@ class String:
     reg: str
     processed: bool = False
 
-
-TOKEN_RE = re.compile(r"\s+|[^\s]+")
+TOKEN_RE = re.compile(r"\s+|\.|[^\s\.]+")
 
 
 def tokenize(s: str) -> list[str]:
@@ -28,22 +27,37 @@ def common_hapaxes_normalized(raw: list[str], reg: list[str], max_distance: int)
     raw_norm = [normalize(t) for t in raw]
     reg_norm = [normalize(t) for t in reg]
 
-    raw_counts = Counter(raw_norm)
-    reg_counts = Counter(reg_norm)
+    results: list[tuple[str, int, int]] = []
+    j = 0
+    dist = 0
+    for i, tok in enumerate(raw_norm):
+        # suffix-aware counts
+        raw_suffix = raw_norm[i:]
+        reg_suffix = reg_norm[j:]
 
-    return sorted([
-        (tok, raw_norm.index(tok), reg_norm.index(tok))
-        for tok, c in raw_counts.items()
-        if c == 1 and reg_counts.get(tok) == 1 and raw_norm.index(tok) - reg_norm.index(tok) <= max_distance
-    ], key=lambda x: x[1])
+        raw_counts = Counter(raw_suffix)
+        reg_counts = Counter(reg_suffix)
+
+        if raw_counts[tok] != 1 or reg_counts.get(tok) != 1:
+            continue
+
+        j = reg_norm.index(tok)
+
+        if abs(i - j) <= (max_distance+dist):
+            results.append((tok, i, j))
+
+        j += 1
+        dist = abs(j-i)
+
+    return results
 
 
-def local_align(raw, reg, max_distance=10):
+
+def local_align(raw, reg, max_distance=20):
     raw_toks: list[str] = tokenize(raw)
     reg_toks: list[str] = tokenize(reg)
 
     # Simplify the task by splitting around common happaxes
-    print()
     strings = []
 
     raw_cursor, reg_cursor = 0, 0

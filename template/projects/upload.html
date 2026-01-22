@@ -1,0 +1,134 @@
+{% extends 'base.html'%}
+{% block morestyle%}
+<!-- PapaParse (CSV parsing) -->
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+{% endblock %}
+{% block content %}
+<div id="app" class="container">
+  <h3>Upload normalizations CSV</h3>
+
+  <div class="mb-3">
+    <input type="file" class="form-control" accept=".csv" @change="handleFile">
+  </div>
+
+  <button
+    class="btn btn-primary"
+    :disabled="!rows.length || uploading"
+    @click="startUpload"
+  >
+    [[ uploading ? "Uploading…" : "Start upload" ]]
+  </button>
+
+  <div class="progress my-3" v-if="rows.length">
+    <div
+      class="progress-bar"
+      role="progressbar"
+      :style="{ width: progressPercent + '%' }"
+    >
+      [[ uploadedCount ]] / [[ rows.length ]]
+    </div>
+  </div>
+
+  <table class="table table-sm mt-3" v-if="rows.length">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Source</th>
+        <th>Target</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr v-for="(row, i) in rows" :key="i">
+        <td>[[ i + 1 ]]</td>
+        <td>[[ row.source ]]</td>
+        <td>[[ row.target ]]</td>
+        <td>
+          <span v-if="row.status === 'pending'" class="text-muted">pending</span>
+          <span v-if="row.status === 'ok'" class="text-success">✔</span>
+          <span v-if="row.status === 'error'" class="text-danger">✖ [[ row.error ]]</span>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+const { createApp } = Vue;
+
+createApp({
+  data() {
+    return {
+      rows: [],
+      uploading: false,
+      uploadedCount: 0,
+      projectId: {{project.id}}, // ← inject from Flask template
+    }
+  },
+  delimiters: ["[[", "]]"],
+
+  computed: {
+    progressPercent() {
+      return Math.round((this.uploadedCount / this.rows.length) * 100) || 0;
+    }
+  },
+
+  methods: {
+    handleFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          this.rows = results.data.map(r => ({
+            source: r.source,
+            target: r.target,
+            status: 'pending',
+            error: null
+          }));
+          this.uploadedCount = 0;
+        }
+      });
+    },
+
+    async startUpload() {
+      this.uploading = true;
+
+      for (let i = 0; i < this.rows.length; i++) {
+        const row = this.rows[i];
+
+        try {
+          const response = await fetch(
+            '{{ url_for('.api_project_upload', project_id=project.id)}}',
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify(row) // ← full row
+            }
+          );
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || "Server error");
+          }
+
+          row.status = "ok";
+        } catch (err) {
+          row.status = "error";
+          row.error = err.message;
+        }
+
+        this.uploadedCount++;
+      }
+
+      this.uploading = false;
+    }
+  }
+}).mount('#app');
+</script>
+{% endblock %}
