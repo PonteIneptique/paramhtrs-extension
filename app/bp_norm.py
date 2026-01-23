@@ -146,9 +146,10 @@ def normalization_edit_route(normalization: Normalization):
             # However, if reg is empty, we map to an empty string
             if regElem is not None:
                 normz += regElem or ''
-            else:
+            elif origElem is not None:
                 normz += origElem
-
+        print(source)
+        print(normz)
         normalization.xml = align_and_markup(source, normz)
         normalization.status = data.get("status", normalization.status)
         db.session.add(normalization)

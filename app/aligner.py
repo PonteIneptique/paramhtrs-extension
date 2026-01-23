@@ -29,6 +29,7 @@ def common_hapaxes_normalized(raw: list[str], reg: list[str], max_distance: int)
 
     results: list[tuple[str, int, int]] = []
     j = 0
+    last_i, last_j =0, 0
     dist = 0
     for i, tok in enumerate(raw_norm):
         # suffix-aware counts
@@ -41,10 +42,12 @@ def common_hapaxes_normalized(raw: list[str], reg: list[str], max_distance: int)
         if raw_counts[tok] != 1 or reg_counts.get(tok) != 1:
             continue
 
-        j = reg_norm.index(tok)
+        j = reg_norm[last_j:].index(tok) + last_j
 
         if abs(i - j) <= (max_distance+dist):
             results.append((tok, i, j))
+            last_i = i
+            last_j = j
 
         j += 1
         dist = abs(j-i)

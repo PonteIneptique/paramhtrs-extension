@@ -16,7 +16,10 @@
 {% block content %}
 <div id="app" class="container">
 
-  <h4 class="mb-3">Edit XML</h4>
+  <div class="row">
+    <div class="col-md-4"><h4 class="mb-3">Edit XML</h4></div>
+    <div class="col-md-4"><a href="{{url_for('.normalization_edit_route', normalization_id=normalization.id)}}" class="btn btn-sm btn-warning">Back to graphic editor</a></div>
+  </div>
 
   <div v-if="xmlError" class="alert alert-danger">
     [[ xmlError ]]
