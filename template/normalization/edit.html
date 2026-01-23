@@ -3,10 +3,10 @@
 <style type="text/css">
 body { font-family: system-ui, sans-serif; padding:20px; }
 .seg { display:inline-block; margin:2px; padding:4px 6px; background:white; border-radius:6px; box-shadow:0 1px 2px rgba(0,0,0,.1); min-width:20px; vertical-align:top; }
-.orig { font-weight:600; white-space:pre; min-height: 1em; }
-.reg { margin-top:2px; font-size:0.9em; color:#444; white-space:pre; }
+.orig { font-weight:600; white-space:pre; min-height: 1em; text-decoration: underline; text-decoration-color: #ddd; }
+.reg { margin-top:2px; font-size:0.9em; color:#444; white-space:pre; text-decoration: underline; text-decoration-color: #ddd; }
 .editable { outline:none; cursor:text; }
-.space { background:#eee; }
+.space { background:white; text-decoration-color: #000!important; }
 button { font-size:0.7em; margin-top:2px; margin-left:2px; }
 .newline { display:block; }
 
@@ -101,7 +101,7 @@ button { font-size:0.7em; margin-top:2px; margin-left:2px; }
     <div
       v-if="seg.reg !== null || !isSpace(seg)"
       class="reg editable"
-      contenteditable
+      contenteditable spellcheck="false"
       @blur="editReg(seg, $event)"
     >[[ seg.reg || '' ]]</div>
 
@@ -120,7 +120,7 @@ button { font-size:0.7em; margin-top:2px; margin-left:2px; }
   <hr />
 <div class="btn-group" role="group">
     {% if normalization.prev %}
-        <a id="prev_normalization" href="{{ url_for('.normalization_xml_edit', normalization_id=normalization.prev.id) }}" class="btn btn-primary">
+        <a id="prev_normalization" href="{{ url_for('.normalization_edit_route', normalization_id=normalization.prev.id) }}" class="btn btn-primary">
             &laquo; Previous
         </a>
     {% else %}
@@ -128,7 +128,7 @@ button { font-size:0.7em; margin-top:2px; margin-left:2px; }
     {% endif %}
 
     {% if normalization.next %}
-        <a id="next_normalization" href="{{ url_for('.normalization_xml_edit', normalization_id=normalization.next.id) }}" class="btn btn-primary">
+        <a id="next_normalization" href="{{ url_for('.normalization_edit_route', normalization_id=normalization.next.id) }}" class="btn btn-primary">
             Next &raquo;
         </a>
     {% else %}
@@ -230,7 +230,32 @@ createApp({
             seg.reg = null;
         },
         deleteSpace(seg) {
-            seg.reg = "";
+            const segs = this.normalization.segs;
+            const idx = segs.indexOf(seg);
+
+            // must have prev + next
+            if (idx <= 0 || idx >= segs.length - 1) {
+                return;
+            }
+
+            const prev = segs[idx - 1];
+            const next = segs[idx + 1];
+
+            // merge orig
+            let orig, reg;
+            orig = (prev.orig || "") + seg.orig + (next.orig || "");
+
+            // merge reg
+            if (prev.reg !== null || next.reg !== null) {
+                reg = (prev.reg ?? prev.orig) + (next.reg ?? next.orig);
+            } else {
+                reg = null;
+            }
+            prev.orig = orig;
+            prev.reg = reg;
+
+            // remove space + next seg
+            segs.splice(idx, 2);
         },
         showFlash(message) {
             const card = this.$refs.flashCard;
