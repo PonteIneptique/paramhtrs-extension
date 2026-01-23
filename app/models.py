@@ -78,6 +78,24 @@ class Normalization(db.Model):
     )
 
     @property
+    def prev(self):
+        return (
+            Normalization.query
+            .filter(Normalization.project_id == self.project_id, Normalization.id < self.id)
+            .order_by(Normalization.id.desc())
+            .first()
+        )
+
+    @property
+    def next(self):
+        return (
+            Normalization.query
+            .filter(Normalization.project_id == self.project_id, Normalization.id > self.id)
+            .order_by(Normalization.id.asc())
+            .first()
+        )
+
+    @property
     def name(self):
         return self.original_text[:80]
 

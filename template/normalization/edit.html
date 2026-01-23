@@ -78,9 +78,11 @@ button { font-size:0.7em; margin-top:2px; margin-left:2px; }
   </button>
 </div>
         </div>
+        <div class="col-md-2 text-start"><a href="{{url_for('bp_norm.normalization_xml_edit', normalization_id=normalization.id, format='tei')}}"
+                             class="btn btn-sm btn-primary"><i class="fa-solid  fa-code"></i> XML Editor</a></div>
         <div class="col-md-4 text-start"><a href="{{url_for('bp_norm.normalization_edit_route', normalization_id=normalization.id, format='tei')}}"
                              class="btn btn-sm btn-info"><i class="fa-solid  fa-download"></i> Download this normalization</a></div>
-        <div class="col-md-4 text-end"><a href="{{url_for('bp_norm.normalization_delete_route', normalization_id=normalization.id)}}"
+        <div class="col-md-2 text-end"><a href="{{url_for('bp_norm.normalization_delete_route', normalization_id=normalization.id)}}"
           class="btn btn-sm btn-danger"><i class="fa-solid  fa-remove"></i> Delete</a></div>
     </div>
 
@@ -115,6 +117,45 @@ button { font-size:0.7em; margin-top:2px; margin-left:2px; }
   <!-- flash card -->
   <div class="flash-card" ref="flashCard">Saved!</div>
 </div>
+  <hr />
+<div class="btn-group" role="group">
+    {% if normalization.prev %}
+        <a id="prev_normalization" href="{{ url_for('.normalization_xml_edit', normalization_id=normalization.prev.id) }}" class="btn btn-primary">
+            &laquo; Previous
+        </a>
+    {% else %}
+        <button class="btn btn-secondary" disabled>&laquo; Previous</button>
+    {% endif %}
+
+    {% if normalization.next %}
+        <a id="next_normalization" href="{{ url_for('.normalization_xml_edit', normalization_id=normalization.next.id) }}" class="btn btn-primary">
+            Next &raquo;
+        </a>
+    {% else %}
+        <button class="btn btn-secondary" disabled>Next &raquo;</button>
+    {% endif %}
+</div>
+
+</div>
+<script type="text/javascript">
+
+document.addEventListener('keydown', function(e) {
+    // PageUp
+    if (e.key === 'PageUp') {
+        const prevLink = document.getElementById('prev_normalization');
+        if (prevLink && prevLink.href) {
+            window.location.href = prevLink.href;
+        }
+    }
+    // PageDown
+    if (e.key === 'PageDown') {
+        const nextLink = document.getElementById('next_normalization');
+        if (nextLink && nextLink.href) {
+            window.location.href = nextLink.href;
+        }
+    }
+});
+</script>
 
 <script>
 function parseSegXML(xml) {

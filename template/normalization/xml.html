@@ -1,52 +1,19 @@
 {% extends 'base.html' %}
+
 {% block morestyle %}
-  <!-- Prism.js -->
-  <link
-    href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism.css"
-    rel="stylesheet"
-  >
-  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-markup.min.js"></script>
+<script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
 
-  <style>
-    .editor-wrapper {
-      position: relative;
-      font-family: monospace;
-      font-size: 0.9rem;
-    }
-
-    .editor-wrapper textarea,
-    .editor-wrapper pre {
-      margin: 0;
-      width: 100%;
-      min-height: 400px;
-      padding: 1rem;
-      line-height: 1.4;
-      font-family: monospace;
-      font-size: 0.9rem;
-    }
-
-    .editor-wrapper textarea {
-      position: absolute;
-      top: 0;
-      left: 0;
-      background: transparent;
-      color: transparent;
-      caret-color: black;
-      resize: vertical;
-      z-index: 2;
-    }
-
-    .editor-wrapper pre {
-      pointer-events: none;
-      z-index: 1;
-      overflow: auto;
-    }
-  </style>
+<style>
+  /* Editor container */
+  .cm-editor {
+    height: 400px;
+    border: 1px solid #ced4da;
+    border-radius: 0.375rem;
+  }
+</style>
 {% endblock %}
 
 {% block content %}
-
 <div id="app" class="container">
 
   <h4 class="mb-3">Edit XML</h4>
@@ -55,33 +22,114 @@
     [[ xmlError ]]
   </div>
 
-  <form method="POST">
+  <form method="POST" ref="form" @submit="submitForm">
+  <!-- Hidden inputs for submission -->
+  <input type="hidden" name="xml" ref="xmlInput">
+  <input type="hidden" name="status" :value="normalization.status" ref="statusInput">
 
-    <input type="hidden" name="xml" :value="cleanXml">
+  <!-- Editor container -->
+  <div ref="editor"></div>
 
-    <div class="editor-wrapper mb-3">
-      <textarea
-        v-model="displayXml"
-        @input="onInput"
-        spellcheck="false"
-      ></textarea>
+  <!-- Status buttons -->
+  <div class="row mt-2">
+    <div class="col-md-4">
+      <div class="btn-group btn-group-sm" role="group" aria-label="Status selector">
+        <!-- Prefix -->
+        <button class="btn btn-secondary disabled" disabled>
+          Status:
+        </button>
 
-      <pre class="language-markup">
-<code v-html="highlightedXml"></code>
-      </pre>
+        <!-- Pending -->
+        <button
+          type="button"
+          class="btn"
+          :class="normalization.status === 'pending' ? 'btn-danger' : 'btn-outline-primary'"
+          @click="normalization.status = 'pending'"
+        >
+          Pending
+        </button>
+
+        <!-- In review -->
+        <button
+          type="button"
+          class="btn"
+          :class="normalization.status === 'active' ? 'btn-warning' : 'btn-outline-primary'"
+          @click="normalization.status = 'active'"
+        >
+          In the work
+        </button>
+
+        <!-- Done -->
+        <button
+          type="button"
+          class="btn"
+          :class="normalization.status === 'done' ? 'btn-success' : 'btn-outline-primary'"
+          @click="normalization.status = 'done'"
+        >
+          Done
+        </button>
+      </div>
     </div>
+  </div>
 
-    <button
-      class="btn btn-primary"
-      :disabled="!!xmlError"
-    >
-      Save
-    </button>
+  <!-- Save button -->
+  <button
+    class="btn btn-primary mt-3"
+    type="submit"
+    :disabled="!!xmlError"
+  >
+    Save
+  </button>
+</form>
+  <hr />
+<div class="btn-group" role="group">
+    {% if normalization.prev %}
+        <a id="prev_normalization" href="{{ url_for('.normalization_xml_edit', normalization_id=normalization.prev.id) }}" class="btn btn-primary">
+            &laquo; Previous
+        </a>
+    {% else %}
+        <button class="btn btn-secondary" disabled>&laquo; Previous</button>
+    {% endif %}
 
-  </form>
+    {% if normalization.next %}
+        <a id="next_normalization" href="{{ url_for('.normalization_xml_edit', normalization_id=normalization.next.id) }}" class="btn btn-primary">
+            Next &raquo;
+        </a>
+    {% else %}
+        <button class="btn btn-secondary" disabled>Next &raquo;</button>
+    {% endif %}
 </div>
 
-<script>
+</div>
+<script type="text/javascript">
+
+document.addEventListener('keydown', function(e) {
+    // PageUp
+    if (e.key === 'PageUp') {
+        const prevLink = document.getElementById('prev_normalization');
+        if (prevLink && prevLink.href) {
+            window.location.href = prevLink.href;
+        }
+    }
+    // PageDown
+    if (e.key === 'PageDown') {
+        const nextLink = document.getElementById('next_normalization');
+        if (nextLink && nextLink.href) {
+            window.location.href = nextLink.href;
+        }
+    }
+});
+</script>
+<script type="module">
+import { EditorState } from "https://esm.sh/@codemirror/state@6";
+import { EditorView, keymap, lineNumbers } from "https://esm.sh/@codemirror/view@6";
+import { defaultKeymap } from "https://esm.sh/@codemirror/commands@6";
+import { xml } from "https://esm.sh/@codemirror/lang-xml@6";
+import { syntaxHighlighting, defaultHighlightStyle } from "https://esm.sh/@codemirror/language@6";
+import { oneDark } from "https://esm.sh/@codemirror/theme-one-dark@6";
+import { searchKeymap, highlightSelectionMatches } from "https://esm.sh/@codemirror/search@6";
+
+
 const { createApp } = Vue;
 
 createApp({
@@ -89,49 +137,97 @@ createApp({
 
   data() {
     return {
-      rawXml: `{{ normalization.xml | safe }}`,
-      displayXml: '',
-      xmlError: null
+      view: null,
+      xmlError: null,
+      initialXml: `{{ normalization.xml | safe }}`,
+      normalization: {
+        status: `{{ normalization.status | default('pending') }}` // initialize from server
+      }
     };
   },
 
-  computed: {
-    cleanXml() {
-      return this.displayXml.replaceAll('</seg>\n', '</seg>');
-    },
-
-    highlightedXml() {
-      return Prism.highlight(
-        this.displayXml,
-        Prism.languages.markup,
-        'markup'
-      );
-    }
-  },
-
   methods: {
-    prettify(xml) {
+    // Simple pretty printer for display
+    prettifyXml(xml) {
       return xml.replaceAll('</seg>', '</seg>\n');
     },
 
-    validateXml(xml) {
+    // Validate XML live
+    validateXml(xmlText) {
       const parser = new DOMParser();
-      const doc = parser.parseFromString(xml, "application/xml");
-      const errorNode = doc.querySelector("parsererror");
+      const doc = parser.parseFromString(xmlText, 'application/xml');
+      const errorNode = doc.querySelector('parsererror');
 
       this.xmlError = errorNode
-        ? errorNode.textContent
+        ? errorNode.textContent.replace(/\s+/g, ' ').trim()
         : null;
     },
 
-    onInput() {
-      this.validateXml(this.cleanXml);
+    // Normalize before submit
+    normalizeForSubmit(xmlText) {
+      return xmlText
+        .replaceAll('</seg>\n', '</seg>') // undo pretty-print
+        .replaceAll('\r\n', '\n')
+        .trim();
+    },
+
+    submitForm() {
+      event.preventDefault();
+
+      // 1. Get editor content
+      let xml = this.view.state.doc.toString();
+
+      // 2. Normalize newlines / canonical format
+      xml = this.normalizeForSubmit(xml);
+
+      // 3. Validate XML
+      this.validateXml(xml);
+      if (this.xmlError) return;
+
+      // 4. Sync hidden inputs
+      this.$refs.xmlInput.value = xml;
+      this.$refs.statusInput.value = this.normalization.status;
+
+      // 5. Submit form
+      this.$refs.form.submit();
     }
   },
 
   mounted() {
-    this.displayXml = this.prettify(this.rawXml);
-    this.validateXml(this.rawXml);
+    // Initialize CodeMirror with pretty-printed content
+    const prettyXml = this.prettifyXml(this.initialXml);
+
+    const state = EditorState.create({
+      doc: prettyXml,
+      extensions: [
+        lineNumbers(),
+        keymap.of([...defaultKeymap, ...searchKeymap]), // add searchKeymap
+        xml(),
+        syntaxHighlighting(defaultHighlightStyle),
+        oneDark,
+        EditorView.lineWrapping,
+        highlightSelectionMatches(),
+        EditorView.updateListener.of(update => {
+          if (update.docChanged) this.validateXml(update.state.doc.toString());
+        })
+      ]
+
+    });
+
+    this.view = new EditorView({
+      state,
+      parent: this.$refs.editor
+    });
+
+    // Initial validation
+    this.validateXml(prettyXml);
+  },
+
+  beforeUnmount() {
+    if (this.view) {
+      this.view.destroy();
+      this.view = null;
+    }
   }
 }).mount('#app');
 </script>

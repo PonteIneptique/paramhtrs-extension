@@ -174,7 +174,7 @@ def normalization_edit_route(normalization: Normalization):
 
 @bp_norm.route("/normalizations/<int:normalization_id>/edit-xml", methods=["GET", "POST"])
 @requires_access(Normalization, 'normalization_id')
-def edit_normalization(normalization):
+def normalization_xml_edit(normalization):
     error = None
 
     if request.method == "POST":
@@ -187,8 +187,9 @@ def edit_normalization(normalization):
 
         if is_valid:
             normalization.xml = cleaned_xml
+            normalization.status = request.form.get("status", normalization.status)
             db.session.commit()
-            return redirect(url_for(".edit_normalization", norm_id=norm.id))
+            return redirect(url_for(".normalization_xml_edit", normalization_id=normalization.id))
 
     return render_template(
         "normalization/xml.html",
