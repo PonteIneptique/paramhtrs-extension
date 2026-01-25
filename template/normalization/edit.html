@@ -138,24 +138,45 @@ createApp({
             this.selectedSeg = seg;
         },
         handleKeydown(e) {
-            if (document.activeElement?.tagName === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+            // Don't trigger if already editing or typing elsewhere
+            if (this.editingId || e.target.isContentEditable || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-            // Trigger XML Editor on "X"
+            // Trigger XML Editor on "X" (Standard)
             if ((e.key === "x" || e.key === "X") && this.selectedSeg) {
                 this.enterXmlMode(this.selectedSeg);
                 e.preventDefault();
             }
+
+            // Trigger Wrap Mode on "S"
+            if ((e.key === "s" || e.key === "S") && this.selectedSeg) {
+                this.wrapInSeg(this.selectedSeg);
+                e.preventDefault();
+            }
         },
+        wrapInSeg(seg) {
+            this.editingId = seg.id;
+            // Wraps current orig and leaves reg empty
+            this.xmlBuffer = `<seg><orig>${seg.orig}</orig><reg></reg></seg>`;
+
+            this.$nextTick(() => {
+                const el = this.$refs.xmlInput;
+                if (el && el[0]) {
+                    el[0].focus();
+                    // Optional: Set cursor position inside the <reg> tags
+                    const pos = this.xmlBuffer.indexOf('</reg>');
+                    el[0].setSelectionRange(pos, pos);
+                }
+            });
+        },
+
         enterXmlMode(seg) {
             this.editingId = seg.id;
-            // Format the XML snippet
+            // Pre-fill with existing data
             this.xmlBuffer = `<seg><orig>${seg.orig}</orig><reg>${seg.reg || ''}</reg></seg>`;
 
-            // Focus the textarea on next tick
             this.$nextTick(() => {
-                if (this.$refs.xmlInput && this.$refs.xmlInput[0]) {
-                    this.$refs.xmlInput[0].focus();
-                }
+                const el = this.$refs.xmlInput;
+                if (el && el[0]) el[0].focus();
             });
         },
         commitXML(seg) {
