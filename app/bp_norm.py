@@ -15,7 +15,7 @@ def validate_xml(xml: str) -> tuple[bool, str | None]:
 
 from .models import db, Normalization, Project
 from .bp_auth import requires_access
-from .aligner import align_and_markup
+from .alignment import align_and_markup, Alignment, xml_serialize
 
 bp_norm = Blueprint("bp_norm", __name__,
                     template_folder=os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "template"),
@@ -133,25 +133,13 @@ def normalization_edit_route(normalization: Normalization):
         return Response(str(from_xml_to_tei(normalization.xml)), mimetype="text/xml")
     if request.method == "POST":
         data = request.json
-        # Recompute alignment
-        source = ""
-        normz = ""
+        # Transform alignment to XML
+        norms = []
         for seg in data["json"]:
-            origElem = seg.get("orig")
-            regElem = seg.get("reg")
-            if origElem is not None:
-                source += origElem
-
-            # If reg is not present, we keep orig
-            # However, if reg is empty, we map to an empty string
-            if regElem is not None:
-                normz += regElem or ''
-            elif origElem is not None:
-                normz += origElem
-        print(source)
-        print(normz)
-        normalization.xml = align_and_markup(source, normz)
+            norms.append(Alignment(seg.get("orig"), seg.get("reg"), "s"))
+        normalization.xml = xml_serialize(norms)
         normalization.status = data.get("status", normalization.status)
+
         db.session.add(normalization)
         db.session.commit()
         return jsonify({"status": "ok", "content": {
@@ -170,7 +158,8 @@ def normalization_edit_route(normalization: Normalization):
                 "metadata_json": json.loads(normalization.metadata_json),
                 "id": normalization.id,
                 "status": normalization.status
-            }
+            },
+            norm_object=normalization
         )
 
 @bp_norm.route("/normalizations/<int:normalization_id>/edit-xml", methods=["GET", "POST"])

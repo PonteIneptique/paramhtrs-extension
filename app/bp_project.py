@@ -15,8 +15,7 @@ from flask_login import login_required, current_user
 import os
 from .models import Project, db, Normalization, User, ProjectUser
 from .bp_auth import requires_access
-from .aligner import align_and_markup
-
+from .alignment import align_and_markup
 
 bp_project = Blueprint(
     "bp_project",

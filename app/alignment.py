@@ -21,12 +21,12 @@
 # SOFTWARE.
 
 import string
-from typing import Optional, List, Tuple, Literal, Dict, Callable, Union
-from collections import deque, namedtuple
+from typing import Optional, List, Tuple, Literal, Dict, NamedTuple, Union, Callable
+from collections import deque, Counter
+from xml.sax.saxutils import escape
 
 import rapidfuzz.distance.Levenshtein as editdistance
 import regex as re
-from app.aligner import common_hapaxes_normalized
 
 
 MAP_RE_ABBR_SIMPLIFICATION = {
@@ -57,10 +57,45 @@ RE_ABBR_SIMPLIFICATION = re.compile("|".join(re.escape(k) for k in MAP_RE_ABBR_S
 RE_REG_SIMPLIFICATION = re.compile("|".join(re.escape(k) for k in MAP_RE_REG_SIMPLIFICATION.keys()))
 
 OperationCode = Literal["s", "d", "i", "n"]
-Alignment: Tuple[str, str, OperationCode] = namedtuple(
-    "Alignment",
-    field_names=["source", "target", "code"]
-)
+class Alignment(NamedTuple):
+    source: str
+    target: str
+    code: OperationCode
+
+
+def normalize(token: str) -> str:
+    return token.lower().replace("v", "u").replace("j", "i")
+
+
+def common_hapaxes_normalized(raw: list[str], reg: list[str], max_distance: int) -> list[tuple[str, int, int]]:
+    raw_norm = [normalize(t) for t in raw]
+    reg_norm = [normalize(t) for t in reg]
+
+    results: list[tuple[str, int, int]] = []
+    j = 0
+    last_i, last_j =0, 0
+    dist = 0
+    for i, tok in enumerate(raw_norm):
+        # suffix-aware counts
+        raw_suffix = raw_norm[i:]
+        reg_suffix = reg_norm[j:]
+
+        raw_counts = Counter(raw_suffix)
+        reg_counts = Counter(reg_suffix)
+
+        if raw_counts[tok] != 1 or reg_counts.get(tok) != 1:
+            continue
+
+        j = reg_norm[last_j:].index(tok) + last_j
+
+        if abs(i - j) <= (max_distance+dist):
+            results.append((tok, i, j))
+            last_j = j
+
+        j += 1
+        dist = abs(j-i)
+
+    return results
 
 
 def token_splitter(data: str) -> list[str]:
@@ -97,7 +132,7 @@ def _compute_operation(
         abbreviated_tokens: List[str],
         normalized_tokens: List[str],
         weight_fns: Dict[str, Union[Callable[[str, str], int], Callable[[str], int]]]
-):
+) -> Dict[Tuple[int, int], Tuple[int, OperationCode]]:
     """ Compute operations for both token lists
 
     :param abbreviated_tokens: Tokens that are abbreviated
@@ -112,7 +147,7 @@ def _compute_operation(
     # Cost for each pair of token in the input
     tbl: Dict[Tuple[int, int], Tuple[int, OperationCode]] = {(0, 0): (0, 'n')}
 
-    m = len(abbreviated_tokens), str
+    m = len(abbreviated_tokens)
     n = len(normalized_tokens)
 
     for i in range(0, m):
@@ -159,7 +194,7 @@ def weighted_edit_distance(abbr, reg):
     return editdistance.distance(abbr, reg) * 2 / max(len(abbr), len(reg), 1)
 
 
-def _gen_alignments(tokens1, tokens2):
+def _gen_alignments(tokens1, tokens2, reading_order: Literal["rtl", "ltr"] = "rtl"):
     weight_fns = {
         's': weighted_edit_distance,
         'd': lambda x: 1,
@@ -171,37 +206,64 @@ def _gen_alignments(tokens1, tokens2):
     m = len(tokens1)
     n = len(tokens2)
 
-    alignments = deque()
+    if reading_order == "rtl":
+        # Start from the end
+        alignments = deque()
+        i = m
+        j = n
 
-    i = m
-    j = n
+        while i != 0 or j != 0:
+            op = dist_table[(i, j)][1]
+            cost = dist_table[(i, j)][0]
 
-    while i != 0 or j != 0:
-        op = dist_table[(i, j)][1]
-        cost = dist_table[(i, j)][0]
+            if op == 'n' or op == 's':
+                alignments.appendleft((i, j, op, cost))
+                i -= 1
+                j -= 1
 
-        if op == 'n' or op == 's':
-            alignments.appendleft((i, j, op, cost))
-            i -= 1
-            j -= 1
+            elif op == 'i':
+                alignments.appendleft((None, j, 'i', cost))
+                j -= 1
 
-        elif op == 'i':
-            alignments.appendleft((None, j, 'i', cost))
-            j -= 1
+            elif op == 'd':
+                alignments.appendleft((i, None, 'd', cost))
+                i -= 1
+    else:  # ToDo: Fix something here
+        # Start from the end
+        alignments = list()
+        i = 0
+        j = 0
 
-        elif op == 'd':
-            alignments.appendleft((i, None, 'd', cost))
-            i -= 1
+        while i < m or j < n:
+            op = dist_table[(i, j)][1]
+            cost = dist_table[(i, j)][0]
+
+            if op == 'n' or op == 's':
+                alignments.append((i, j, op, cost))
+                i += 1
+                j += 1
+
+            elif op == 'i':
+                alignments.append((None, j, 'i', cost))
+                j += 1
+
+            elif op == 'd':
+                alignments.append((i, None, 'd', cost))
+                i += 1
+
 
     return alignments
 
 
 def sub_alignments(orig_toks: List[str], norm_toks: List[str], max_distance=20) -> List:
-    """
+    """ Using local unique tokens, subsplit two sequences.
 
-    :param orig_toks:
-    :param norm_toks:
+    :param orig_toks: Tokens in the original string
+    :param norm_toks: Tokens in the normalized string
     :param max_distance:
+
+    >>> sub_alignments(list("1222234456561222"), list("222222234456561222"))
+    [(['1', '2', '2', '2', '2', '3'], ['2', '2', '2', '2', '2', '2', '2', '3']), (['4', '4', '5', '6', '5', '6', '1'], ['4', '4', '5', '6', '5', '6', '1']), (['2', '2', '2'], ['2', '2', '2'])]
 
     """
     orig_toks_simple: list[str] = [el.lower() for el in orig_toks]
@@ -213,15 +275,11 @@ def sub_alignments(orig_toks: List[str], norm_toks: List[str], max_distance=20) 
     out = []
 
     raw_cursor, reg_cursor = 0, 0
-
-    def get_len(subset: list[str]) -> int:
-        return len("".join(subset))
-
     for tok, raw_id, reg_id in common_hapaxes_normalized(
             orig_toks_simple, norm_toks_simple, max_distance=max_distance
     ):
-        raw_subset = orig_toks[raw_cursor:raw_id]
-        reg_subset = norm_toks[reg_cursor:reg_id]
+        raw_subset = orig_toks[raw_cursor:raw_id+1]
+        reg_subset = norm_toks[reg_cursor:reg_id+1]
 
         out.append((raw_subset, reg_subset))
 
@@ -229,28 +287,38 @@ def sub_alignments(orig_toks: List[str], norm_toks: List[str], max_distance=20) 
         raw_cursor = raw_id + 1
         reg_cursor = reg_id + 1
 
+    if raw_cursor < len(orig_toks) and reg_cursor < len(norm_toks):
+        out.append((orig_toks[raw_cursor:], norm_toks[reg_cursor:]))
+
     return out
 
 
-def align_words(abbreviated, regularized):
+def align_words(abbreviated: str, regularized: str) -> List[Alignment]:
+    """ Align two sequences word to words
+    :param abbreviated: Abbreviated content
+    :param regularized: Regularized content
+
+    >>> align_words("Au. chou rave de folie", "Av chovrave de folie")
+    [Alignment(source='Au.', target='Av', code='s'), Alignment(source=' ', target=' ', code='n'), Alignment(source='chou rave', target='chovrave', code='s'), Alignment(source=' ', target=' ', code='n'), Alignment(source='de', target='de', code='n'), Alignment(source=' ', target=' ', code='n'), Alignment(source='folie', target='folie', code='n')]
+    """
     abbreviated_tokens = token_splitter(abbreviated)
     regularized_tokens = token_splitter(regularized)
 
-    output: Tuple[Optional[str], Optional[str], Literal['i', 's', 'n', 'd']] = []
+    output: List[Tuple[Optional[str], Optional[str], Literal['i', 's', 'n', 'd']]] = []
     for (abbr, reg) in sub_alignments(abbreviated_tokens, regularized_tokens):
         alignments = _gen_alignments(abbr, reg)
 
-        output.extend([
+        output.extend(reprocess_space([
             Alignment(abbr[i - 1] if i else "", reg[j - 1] if j else "", op)
             for i, j, op, _ in alignments
-        ])
-    return list(alignments), abbreviated_tokens, regularized_tokens
+        ]))
+    return list(output)
 
 
 def reprocess_space(
-    alignments: List[Tuple[Optional[str], Optional[str], Literal["s", "d", "i", "n"]]]
+    alignments: List[Alignment]
 ):
-    """
+    """ Reprocess a "Jaccard" alignment to deal with space insertion and merge them.
     """
     ops = []
     i = 0
@@ -318,3 +386,23 @@ def reprocess_space(
             ops.append(alignments[i])
             i += 1
     return ops
+
+def xml_serialize(operations: List[Alignment]):
+    """ Serialized stuff into XML
+    """
+    # serialize
+    out = []
+    for op in operations:
+        if op.source == op.target:
+            out.append(f"<seg>{escape(op.source)}</seg>")
+        elif not op.source:
+            out.append(f"<seg><reg>{escape(op.target)}</reg></seg>")
+        elif op.target is None:
+            out.append(f"<seg><orig>{escape(op.source)}</orig></seg>")
+        else:
+            out.append(f"<seg><orig>{escape(op.source)}</orig><reg>{escape(op.target)}</reg></seg>")
+    return "<text>"+"".join(out)+"</text>"
+
+def align_and_markup(raw: str, reg:str) -> str:
+    operations = align_words(raw, reg)
+    return xml_serialize(operations)

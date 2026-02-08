@@ -25,7 +25,7 @@ app.cli.add_command(db_cli)
 def import_text(file_path):
     """Import a plain text file into the DB."""
     from .process import get_model_and_tokenizer, normalize_line
-    from .aligner import align_and_markup
+    from .alignment import align_words
     model, tokenizer = get_model_and_tokenizer()
 
     with current_app.app_context():
