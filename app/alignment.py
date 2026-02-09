@@ -55,6 +55,11 @@ MAP_RE_REG_SIMPLIFICATION = {
 # create a single regex matching any key in mapping
 RE_ABBR_SIMPLIFICATION = re.compile("|".join(re.escape(k) for k in MAP_RE_ABBR_SIMPLIFICATION.keys()))
 RE_REG_SIMPLIFICATION = re.compile("|".join(re.escape(k) for k in MAP_RE_REG_SIMPLIFICATION.keys()))
+RE_SPACE = re.compile(r"\s+")
+
+def space_norm(inp: Optional[str]) -> Optional[str]:
+    if inp:
+        return RE_SPACE.sub(" ", inp)
 
 OperationCode = Literal["s", "d", "i", "n"]
 class Alignment(NamedTuple):
@@ -110,7 +115,7 @@ def token_splitter(data: str) -> list[str]:
     pattern = re.compile(
         r"""(
         \.\w+\.        # abbreviations like .xxv. or .s.
-        |[⁊\w+'\uf1ac]+(?:\s[\uf1ac\u0363-\u036F\u1DDA\u1DDC-\u1DDD\u1DE0\u1DE4\u1DE6\u1DE8\u1DEB\u1DEE\u1DF1\uF02B\uF030\uF033])?  # words with apostrophes/hyphens or space + combining
+        |[⁊\w+'\uf1ac¬]+(?:\s[\uf1ac\u0363-\u036F\u1DDA\u1DDC-\u1DDD\u1DE0\u1DE4\u1DE6\u1DE8\u1DEB\u1DEE\u1DF1\uF02B\uF030\uF033])?  # words with apostrophes/hyphens or space + combining
         |[\.,:;?!-]+           # punctuation
         )""",
         re.VERBOSE
@@ -328,7 +333,7 @@ def reprocess_space(
         if src and op == "d": # word is deleted, this is weird
             if src.strip():
                 if j-2 > 0 and (
-                    ops[j-1].source == " " or ops[j-1].target == " "
+                    space_norm(ops[j-1].source) == " " or space_norm(ops[j-1].target) == " "
                 ) and ops[j-2].code == "s": # Look backwards in ops
                     # There needs to be a space before
                     # And a substitution
@@ -352,13 +357,13 @@ def reprocess_space(
                         # IF prefix[-1] is space on both ends,
                         # AND it means the space after the word was misaligned.
                         if prefix[-1].source == prefix[-1].target:
-                            if alignments[i+1].source == " " and not alignments[i+1].target:
+                            if i+1 < len(alignments) and alignments[i+1].source == " " and not alignments[i+1].target:
                                 ops.append(Alignment(" ", " ", "n"))
                                 i += 1
                         i += 1
                         continue
                 if i+2 < len(alignments) and (
-                    alignments[i+1].source == " " or alignments[i+1].target == " "
+                    space_norm(alignments[i+1].source) == " " or space_norm(alignments[i+1].target) == " "
                 ) and alignments[j+2].code == "s":
                     orig_dist = weighted_edit_distance(
                         alignments[i+2].source, alignments[i+2].target

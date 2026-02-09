@@ -8,3 +8,4 @@ torch==2.9.1
 transformers==4.57.3
 saxonche==12.9.0
 flask-login==0.6.3
+rapidfuzz
