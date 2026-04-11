@@ -6,10 +6,10 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 import click
 import json
-from .process import from_xml_to_tei
 
 
 db = SQLAlchemy()
+
 
 class User(db.Model, UserMixin):
     __tablename__ = "users"
@@ -39,8 +39,8 @@ class Project(db.Model):
     description = db.Column(db.Text, nullable=False)
     creator_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
 
-    normalizations = db.relationship(
-        "Normalization",
+    documents = db.relationship(
+        "Document",
         backref="project",
         cascade="all, delete-orphan",
         lazy=True,
@@ -56,66 +56,125 @@ class Project(db.Model):
     def user_has_access(self, user: User) -> bool:
         if self.creator_id == user.id:
             return True
-        return ProjectUser.query.filter(ProjectUser.project_id == self.id, ProjectUser.user_id==user.id).count() > 0
+        return ProjectUser.query.filter(
+            ProjectUser.project_id == self.id,
+            ProjectUser.user_id == user.id
+        ).count() > 0
 
 
-# -------------------------
-# Database model
-# -------------------------
-class Normalization(db.Model):
+class DocumentUser(db.Model):
+    __tablename__ = "document_user"
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
+    document_id = db.Column(db.Integer, db.ForeignKey("documents.id"), primary_key=True)
+
+
+class Document(db.Model):
+    __tablename__ = "documents"
     id = db.Column(db.Integer, primary_key=True)
-    original_text = db.Column(db.Text, nullable=False, unique=True)
-    xml = db.Column(db.Text, nullable=False)
-    status = db.Column(db.String, nullable=False)
-    metadata_json = db.Column(db.JSON, nullable=False)
-    project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
+    name = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text, nullable=False, default="")
+    project_id = db.Column(db.Integer, db.ForeignKey("projects.id"), nullable=False)
+    creator_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    language = db.Column(db.String(10), nullable=False, default="fre")
+    qid = db.Column(db.String(100), nullable=True)
+
+    pages = db.relationship(
+        "Page",
+        backref="document",
+        cascade="all, delete-orphan",
+        lazy=True,
+        order_by="Page.order"
+    )
+    users = db.relationship(
+        "User",
+        secondary="document_user",
+        lazy="dynamic"
+    )
+
+    def user_has_access(self, user: User) -> bool:
+        project = Project.query.get(self.project_id)
+        if project.user_has_access(user):
+            return True
+        return DocumentUser.query.filter(
+            DocumentUser.document_id == self.id,
+            DocumentUser.user_id == user.id
+        ).count() > 0
+
+
+class Page(db.Model):
+    __tablename__ = "pages"
+    id = db.Column(db.Integer, primary_key=True)
+    document_id = db.Column(db.Integer, db.ForeignKey("documents.id"), nullable=False)
+    label = db.Column(db.String(200), nullable=False)
+    order = db.Column(db.Integer, nullable=False, default=0)
+    status = db.Column(db.String(20), nullable=False, default="pending")
 
     __table_args__ = (
         CheckConstraint(
             "status IN ('pending', 'active', 'done')",
-            name="check_status_valid"
+            name="check_page_status_valid"
         ),
     )
+
+    annotations = db.Column(db.JSON, nullable=False, default=list)
+
+    lines = db.relationship(
+        "Line",
+        backref="page",
+        cascade="all, delete-orphan",
+        lazy=True,
+        order_by="Line.order"
+    )
+
+    @property
+    def full_text(self) -> str:
+        """Original text of all lines joined by newline."""
+        return "\n".join(line.original_text for line in self.lines)
+
+    @property
+    def normalized_text(self) -> str:
+        from .annot_utils import apply_annotations_to_text
+        return apply_annotations_to_text(self.full_text, self.annotations or [])
+
+    def user_has_access(self, user: User) -> bool:
+        document = Document.query.get(self.document_id)
+        return document.user_has_access(user)
 
     @property
     def prev(self):
         return (
-            Normalization.query
-            .filter(Normalization.project_id == self.project_id, Normalization.id < self.id)
-            .order_by(Normalization.id.desc())
+            Page.query
+            .filter(Page.document_id == self.document_id, Page.order < self.order)
+            .order_by(Page.order.desc())
             .first()
         )
 
     @property
     def next(self):
         return (
-            Normalization.query
-            .filter(Normalization.project_id == self.project_id, Normalization.id > self.id)
-            .order_by(Normalization.id.asc())
+            Page.query
+            .filter(Page.document_id == self.document_id, Page.order > self.order)
+            .order_by(Page.order.asc())
             .first()
         )
 
     @property
-    def name(self):
-        return self.original_text[:80]
+    def line_count(self):
+        return Line.query.filter_by(page_id=self.id).count()
 
-    @property
-    def json_compatible(self):
-        return {
-            'metadata': json.loads(self.metadata_json),
-            'id': self.id,
-            'orig': self.original_text,
-            'norm': self.normalized_text,
-            'status': self.status
-        }
 
-    @property
-    def normalized_text(self):
-        return from_xml_to_tei(self.xml, plaintext=True)
+class Line(db.Model):
+    __tablename__ = "lines"
+    id = db.Column(db.Integer, primary_key=True)
+    page_id = db.Column(db.Integer, db.ForeignKey("pages.id"), nullable=False)
+    order = db.Column(db.Integer, nullable=False, default=0)
+    original_text = db.Column(db.Text, nullable=False)
+    alto_id = db.Column(db.String(200), nullable=True)
 
-    def user_has_access(self, user: User):
-        project = Project.query.filter_by(id=self.project_id).first()
-        return project.user_has_access(user)
+    def user_has_access(self, user: User) -> bool:
+        page = Page.query.get(self.page_id)
+        return page.user_has_access(user)
+
 
 # -------------------------
 # Flask CLI command to init DB
@@ -135,22 +194,22 @@ def db_create(admin, admin_name, admin_password):
         db.create_all()
         click.echo("DB Created")
         if admin:
-            admin = User(username=admin_name, is_admin=True, is_approved=True)
-            admin.set_password(admin_password)
-            db.session.add(admin)
+            admin_user = User(username=admin_name, is_admin=True, is_approved=True)
+            admin_user.set_password(admin_password)
+            db.session.add(admin_user)
             db.session.commit()
             click.echo("Admin created")
 
 
 @db_cli.command("reset")
-def db_create():
+def db_reset():
     with current_app.app_context():
         db.drop_all()
         db.create_all()
     click.echo("DB Recreated")
 
 @db_cli.command("drop")
-def db_create():
+def db_drop():
     with current_app.app_context():
         db.drop_all()
     click.echo("DB Dropped")

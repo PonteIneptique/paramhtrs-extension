@@ -1,0 +1,691 @@
+{% extends "base.html" %}
+{% block morestyle %}
+<link rel="stylesheet" href="https://esm.sh/@recogito/text-annotator/dist/text-annotator.css">
+<style>
+/* ── Layout ── */
+#editor-root {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 56px);
+}
+#editor-toolbar {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #dee2e6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+#editor-panels {
+  flex: 1 1 0;
+  display: flex;
+  overflow: hidden;
+}
+.panel {
+  overflow-y: auto;
+  padding: 12px;
+}
+.panel-source    { flex: 0 0 33%; border-right: 1px solid #dee2e6; }
+.panel-annots    { flex: 0 0 28%; border-right: 1px solid #dee2e6; }
+.panel-normalized{ flex: 1 1 0; }
+.panel-header {
+  font-size: .75rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .05em; color: #6c757d;
+  padding-bottom: 6px; margin-bottom: 8px;
+  border-bottom: 1px solid #dee2e6;
+}
+
+/* ── Source panel ── */
+#page-source {
+  font-family: 'JunicodeVF', serif;
+  font-size: 1rem;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
+  min-height: 60px;
+}
+#page-source .r6o-annotation {
+  background: rgba(255, 220, 0, 0.35);
+  border-bottom: 2px solid #f0a500;
+  cursor: pointer;
+}
+#page-source .r6o-annotation.selected {
+  background: rgba(255, 150, 0, 0.55);
+  border-bottom-color: #d97706;
+}
+.line-mgmt-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: .8rem;
+}
+.line-mgmt-num { color: #adb5bd; min-width: 20px; }
+.line-mgmt-text {
+  font-family: 'JunicodeVF', serif;
+  flex: 1 1 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #495057;
+}
+.line-mgmt-del { color: #adb5bd; cursor: pointer; background: none; border: none; padding: 0; }
+.line-mgmt-del:hover { color: #dc3545; }
+
+/* ── Annotation panel ── */
+.annot-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: background .15s;
+}
+.annot-row:hover, .annot-row.hovered { background: #fff3cd; }
+.annot-orig {
+  font-family: 'JunicodeVF', serif;
+  font-weight: 600;
+  font-size: .9rem;
+  white-space: nowrap;
+  color: #495057;
+  min-width: 40px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+/* Whitespace / space-removal display */
+.annot-orig-sp {
+  font-family: monospace;
+  font-size: .75rem;
+  font-weight: normal;
+  background: #e9ecef;
+  border-radius: 3px;
+  padding: 1px 5px;
+  color: #6c757d;
+  flex-shrink: 0;
+}
+.annot-del-chip {
+  font-size: .75rem;
+  background: #fde8e8;
+  color: #dc3545;
+  border-radius: 3px;
+  padding: 1px 6px;
+  flex: 1 1 0;
+  font-style: italic;
+}
+.annot-arrow { color: #adb5bd; flex-shrink: 0; padding: 0 2px; }
+.annot-target {
+  font-family: 'JunicodeVF', serif;
+  font-size: .9rem;
+  flex: 1 1 0;
+  min-width: 0;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+.annot-target:focus { border-color: #86b7fe; outline: none; box-shadow: 0 0 0 2px rgba(13,110,253,.15); }
+.annot-del { color: #adb5bd; cursor: pointer; flex-shrink: 0; background: none; border: none; padding: 0 2px; }
+.annot-del:hover { color: #dc3545; }
+.annot-pending .annot-target { border-color: #86b7fe; }
+
+/* ── Normalized panel ── */
+.normalized-text {
+  font-family: 'JunicodeVF', serif;
+  font-size: 1rem;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #212529;
+}
+.normalized-text mark.norm-highlight {
+  background: rgba(255, 150, 0, 0.45);
+  border-bottom: 2px solid #d97706;
+  border-radius: 2px;
+  padding: 0;
+  color: inherit;
+}
+
+/* ── Status badge ── */
+.status-pending { background: #dc3545; }
+.status-active  { background: #ffc107; color: #000; }
+.status-done    { background: #198754; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="editor-root">
+
+  <!-- Toolbar -->
+  <div id="editor-toolbar">
+    <nav aria-label="breadcrumb" class="me-2">
+      <ol class="breadcrumb mb-0 small">
+        <li class="breadcrumb-item">
+          <a href="{{ url_for('bp_project.project_browse', project_id=document.project_id) }}">{{ document.project.name }}</a>
+        </li>
+        <li class="breadcrumb-item">
+          <a href="{{ url_for('bp_document.document_browse', document_id=document.id) }}">{{ document.name }}</a>
+        </li>
+        <li class="breadcrumb-item active">{{ page.label }}</li>
+      </ol>
+    </nav>
+
+    <div class="btn-group btn-group-sm ms-auto">
+      {% if prev_page %}
+      <a href="{{ url_for('bp_page.page_editor', page_id=prev_page.id) }}" class="btn btn-outline-secondary">
+        &laquo; {{ prev_page.label }}
+      </a>
+      {% else %}
+      <button class="btn btn-outline-secondary" disabled>&laquo;</button>
+      {% endif %}
+      {% if next_page %}
+      <a href="{{ url_for('bp_page.page_editor', page_id=next_page.id) }}" class="btn btn-outline-secondary">
+        {{ next_page.label }} &raquo;
+      </a>
+      {% else %}
+      <button class="btn btn-outline-secondary" disabled>&raquo;</button>
+      {% endif %}
+    </div>
+
+    <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#editPageForm">
+      <i class="fa-solid fa-pen"></i>
+    </button>
+
+    <a href="{{ url_for('bp_page.page_export_tei', page_id=page.id) }}" class="btn btn-sm btn-info">
+      <i class="fa-solid fa-download"></i> TEI
+    </a>
+
+    <a href="{{ url_for('bp_page.page_delete', page_id=page.id) }}" class="btn btn-sm btn-outline-danger">
+      <i class="fa-solid fa-trash"></i>
+    </a>
+
+    <!-- Page status -->
+    <div class="btn-group btn-group-sm">
+      <button class="btn btn-sm btn-secondary disabled" disabled>Status:</button>
+      <button type="button" class="btn btn-sm"
+        :class="pageStatus === 'pending' ? 'btn-danger' : 'btn-outline-secondary'"
+        @click="setPageStatus('pending')">Pending</button>
+      <button type="button" class="btn btn-sm"
+        :class="pageStatus === 'active' ? 'btn-warning' : 'btn-outline-secondary'"
+        @click="setPageStatus('active')">In progress</button>
+      <button type="button" class="btn btn-sm"
+        :class="pageStatus === 'done' ? 'btn-success' : 'btn-outline-secondary'"
+        @click="setPageStatus('done')">Done</button>
+    </div>
+  </div>
+
+  <!-- Rename form (collapsed) -->
+  <div class="collapse" id="editPageForm">
+    <form method="post" action="{{ url_for('bp_page.page_update', page_id=page.id) }}"
+          class="d-flex gap-2 p-2 bg-light border-bottom">
+      <input type="text" class="form-control form-control-sm" name="label" value="{{ page.label }}" required>
+      <button type="submit" class="btn btn-sm btn-primary">Save</button>
+    </form>
+  </div>
+
+  <!-- 3-panel editor -->
+  <div id="editor-panels">
+
+    <!-- Col 1: Source -->
+    <div class="panel panel-source">
+      <div class="panel-header">Source</div>
+      <div id="page-source" ref="pageSource"></div>
+
+      <template v-if="lines.length">
+        <hr class="my-3">
+        <div class="panel-header">Lines</div>
+        <div v-for="(line, idx) in lines" :key="line.id" class="line-mgmt-row">
+          <span class="line-mgmt-num">#[[ idx + 1 ]]</span>
+          <span class="line-mgmt-text" :title="line.original_text">[[ line.original_text ]]</span>
+          <button class="line-mgmt-del" @click="deleteLine(line, idx)" title="Delete line">
+            <i class="fa-solid fa-trash-can"></i>
+          </button>
+        </div>
+      </template>
+    </div>
+
+    <!-- Col 2: Annotations -->
+    <div class="panel panel-annots">
+      <div class="panel-header">Annotations</div>
+
+      <template v-for="annot in allAnnotationsSorted" :key="annot.id">
+        <div class="annot-row" :class="{ hovered: hoveredAnnotationId === annot.id }">
+          <!--
+            Wrap everything except the delete button in a <label>.
+            Because the label contains the <input>, clicking anywhere inside it
+            (the orig span, the arrow, empty space) natively focuses the input —
+            no JavaScript needed.
+          -->
+          <label class="annot-row-label">
+            <span v-if="isSpaceExact(annot)" class="annot-orig-sp" title="space">[SPACE]</span>
+            <span v-else class="annot-orig" :title="getExact(annot)">[[ getExact(annot) ]]</span>
+
+            <span class="annot-arrow">→</span>
+
+            <span v-if="!getBodyValue(annot)" class="annot-del-chip">deleted</span>
+            <input v-else type="text" class="annot-target"
+              :value="getBodyValue(annot)"
+              @blur="onAnnotBlur(annot, $event)"
+              @keydown.enter.prevent="$event.target.blur()"
+              @keydown.tab.prevent="tabToNext(annot)">
+          </label>
+
+          <button class="annot-del" @click.stop="removeAnnotation(annot)" title="Remove">✕</button>
+        </div>
+      </template>
+
+      <!-- Pending new annotation (pendingAnnot is a plain {id, exact} stub) -->
+      <div v-if="pendingAnnot" class="annot-row annot-pending">
+        <span v-if="!pendingAnnot.exact.trim()" class="annot-orig-sp" title="space">[SPACE]</span>
+        <span v-else class="annot-orig" :title="pendingAnnot.exact">[[ pendingAnnot.exact ]]</span>
+        <span class="annot-arrow">→</span>
+        <input type="text" class="annot-target" ref="pendingInput"
+          @keydown.enter.prevent="commitPending($event.target.value)"
+          @keydown.esc="cancelPending"
+          @blur="commitPending($event.target.value)">
+        <button class="annot-del" @click="cancelPending" title="Cancel">✕</button>
+      </div>
+
+      <div v-if="!allAnnotationsSorted.length && !pendingAnnot" class="text-muted small">
+        Select text in the source panel to create an annotation.
+      </div>
+    </div>
+
+    <!-- Col 3: Normalized -->
+    <div class="panel panel-normalized">
+      <div class="panel-header">Normalized</div>
+      <pre class="normalized-text" v-html="normalizedPageHtml"></pre>
+    </div>
+
+  </div><!-- /#editor-panels -->
+</div><!-- /#editor-root -->
+
+<script type="importmap">
+{
+  "imports": {
+    "vue": "https://unpkg.com/vue@3/dist/vue.esm-browser.js",
+    "@recogito/text-annotator": "https://esm.sh/@recogito/text-annotator"
+  }
+}
+</script>
+
+<script type="module">
+import { createApp } from 'vue';
+import { createTextAnnotator } from '@recogito/text-annotator';
+
+// ── Helper functions ──────────────────────────────────────────────────────────
+
+function getSelector(annot, type) {
+  return (annot?.target?.selector || []).find(s => s.type === type) || {};
+}
+function getStart(annot) { return getSelector(annot, 'TextPositionSelector').start ?? 0; }
+function getEnd(annot)   { return getSelector(annot, 'TextPositionSelector').end   ?? 0; }
+function getExact(annot) {
+  return getSelector(annot, 'TextQuoteSelector').exact ?? '';
+}
+function getBodyValue(annot) { return annot?.body?.[0]?.value ?? ''; }
+function isSpaceExact(annot) { return getExact(annot).trim() === ''; }
+
+function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function applyAnnotations(text, annotations) {
+  if (!annotations || !annotations.length) return text;
+  const sorted = [...annotations].sort((a, b) => getStart(b) - getStart(a));
+  let result = text;
+  for (const a of sorted) {
+    const start = getStart(a), end = getEnd(a);
+    result = result.slice(0, start) + getBodyValue(a) + result.slice(end);
+  }
+  return result;
+}
+
+// Both live outside Vue's reactive system to avoid Proxy wrapping issues.
+// Recogito's internals do instance/property checks that break on Vue Proxies.
+let annotator = null;
+let pendingAnnotRaw = null;   // raw Recogito selection object — never touched by Vue
+
+// ── Vue app ───────────────────────────────────────────────────────────────────
+
+createApp({
+  delimiters: ['[[', ']]'],
+
+  data() {
+    return {
+      lines: {{ lines|tojson }},
+      fullText: {{ full_text|tojson }},
+      annotations: {{ annotations|tojson }},
+      pageId: {{ page.id }},
+      pageStatus: '{{ page.status }}',
+      hoveredAnnotationId: null,
+      // Display-only stub { id, exact } for the pending row in the template.
+      // The actual Recogito selection lives in pendingAnnotRaw (not reactive).
+      pendingAnnot: null,
+    };
+  },
+
+  computed: {
+    allAnnotationsSorted() {
+      return [...this.annotations].sort((a, b) => getStart(a) - getStart(b));
+    },
+
+    normalizedPageText() {
+      return applyAnnotations(this.fullText, this.annotations);
+    },
+
+    // For each annotation, compute where its output value sits in normalizedPageText.
+    // Walk left-to-right accumulating the offset delta (value.length - origSpan.length).
+    normalizedPositions() {
+      const sorted = [...this.annotations].sort((a, b) => getStart(a) - getStart(b));
+      const map = {};
+      let delta = 0;
+      for (const a of sorted) {
+        const origStart = getStart(a);
+        const origEnd   = getEnd(a);
+        const value     = getBodyValue(a);
+        const normStart = origStart + delta;
+        const normEnd   = normStart + value.length;
+        map[a.id] = { start: normStart, end: normEnd };
+        delta += value.length - (origEnd - origStart);
+      }
+      return map;
+    },
+
+    normalizedPageHtml() {
+      const text = this.normalizedPageText;
+      const id   = this.hoveredAnnotationId;
+      if (!id) return escapeHtml(text);
+      const pos = this.normalizedPositions[id];
+      if (!pos || pos.start === pos.end) return escapeHtml(text);  // insertion / deletion has no output span
+      const { start, end } = pos;
+      return escapeHtml(text.slice(0, start))
+        + '<mark class="norm-highlight">' + escapeHtml(text.slice(start, end)) + '</mark>'
+        + escapeHtml(text.slice(end));
+    },
+  },
+
+  mounted() {
+    this._initAnnotator();
+    document.addEventListener('keydown', this._handleKeydown);
+  },
+
+  beforeUnmount() {
+    document.removeEventListener('keydown', this._handleKeydown);
+    annotator?.destroy?.();
+  },
+
+  methods: {
+    // ── Helpers exposed to template ──────────────────────────────────────────
+    getExact,
+    getBodyValue,
+    isSpaceExact,
+
+    // ── Recogito init / reinit ───────────────────────────────────────────────
+    _initAnnotator() {
+      const el = this.$refs.pageSource;
+      if (!el) return;
+      if (annotator) { annotator.destroy?.(); annotator = null; }
+      pendingAnnotRaw = null;
+      this.pendingAnnot = null;
+
+      el.textContent = this.fullText;
+      annotator = createTextAnnotator(el);
+
+      if (this.annotations.length) {
+        // JSON-clone to give Recogito plain objects — Vue Proxies break its internal checks
+        annotator.setAnnotations(JSON.parse(JSON.stringify(this.annotations)));
+      }
+
+      // ── New text selection: use native mouseup to compute char offsets ────────
+      // This is more reliable than selectionChanged (which can miss events).
+      el.addEventListener('mouseup', () => {
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+
+        const range = sel.getRangeAt(0);
+        // Bail if selection is entirely outside our source element
+        if (!el.contains(range.commonAncestorContainer)) return;
+
+        // Compute start char offset relative to el.textContent
+        const preRange = document.createRange();
+        preRange.setStart(el, 0);
+        preRange.setEnd(range.startContainer, range.startOffset);
+        const start = preRange.toString().length;
+        const end   = start + range.toString().length;
+        if (start === end) return;
+
+        const text   = el.textContent;
+        const exact  = text.slice(start, end);
+        const prefix = text.slice(Math.max(0, start - 10), start);
+        const suffix = text.slice(end, end + 10);
+        const id     = crypto.randomUUID();
+
+        pendingAnnotRaw = {
+          id,
+          type: 'Annotation',
+          body: [],
+          target: {
+            annotation: id,
+            selector: [
+              { type: 'TextPositionSelector', start, end },
+              { type: 'TextQuoteSelector', exact, prefix, suffix },
+            ],
+          },
+        };
+        this.pendingAnnot = { id, exact };
+        // Clear Recogito's internal selection so it doesn't show its own UI
+        annotator?.setSelected?.([]);
+        this.$nextTick(() => {
+          const inp = this.$refs.pendingInput;
+          if (inp) (Array.isArray(inp) ? inp[0] : inp).focus();
+        });
+      });
+
+      // ── Click / hover on existing annotation spans → highlight middle panel ──
+      // setAnnotations defers lifecycle callbacks via setTimeout(0); register
+      // hover events after that tick so they don't fire during init.
+      setTimeout(() => {
+        if (!annotator) return;
+
+        const onAnnotationEnter = (annot) => {
+          const id = annot?.id ?? annot;
+          if (!id) return;
+          this.hoveredAnnotationId = id;
+          this._scrollAnnotRowIntoView(id);
+        };
+        const onAnnotationLeave = () => {
+          this.hoveredAnnotationId = null;
+        };
+
+        // Recogito core fires these events on its highlight spans
+        annotator.on('mouseEnterAnnotation', onAnnotationEnter);
+        annotator.on('mouseLeaveAnnotation', onAnnotationLeave);
+        annotator.on('clickAnnotation',      onAnnotationEnter);
+
+        // Fallback: native event delegation on data-annotation spans
+        el.addEventListener('mouseover', (evt) => {
+          const span = evt.target.closest('[data-annotation]');
+          if (span) onAnnotationEnter({ id: span.dataset.annotation });
+        });
+        el.addEventListener('mouseout', (evt) => {
+          const from = evt.target.closest('[data-annotation]');
+          const to   = evt.relatedTarget?.closest?.('[data-annotation]');
+          if (from && from !== to) onAnnotationLeave();
+        });
+        el.addEventListener('click', (evt) => {
+          const span = evt.target.closest('[data-annotation]');
+          if (span) {
+            const id = span.dataset.annotation;
+            onAnnotationEnter({ id });
+            annotator?.setSelected?.([id]);
+            const annot = this.allAnnotationsSorted.find(a => a.id === id);
+            if (annot) this._focusAnnotInput(annot);
+          }
+        });
+      }, 0);
+    },
+
+    // ── Scroll annotation row to top of middle panel and focus its input ────────
+    _scrollAnnotRowIntoView(id, focus = false) {
+      // Use setTimeout instead of $nextTick: we need to wait for both Vue's
+      // re-render AND any Recogito DOM work to settle before querying rows.
+      setTimeout(() => {
+        const idx = this.allAnnotationsSorted.findIndex(a => a.id === id);
+        if (idx === -1) return;
+        const panel = document.querySelector('.panel-annots');
+        if (!panel) return;
+        const rows = panel.querySelectorAll('.annot-row:not(.annot-pending)');
+        const row = rows[idx];
+        if (!row) return;
+        panel.scrollTop = row.offsetTop - panel.offsetTop;
+        if (focus) {
+          const input = row.querySelector('.annot-target');
+          if (input) input.focus();
+        }
+      }, 0);
+    },
+
+    // ── Shared: scroll annotation row to top of panel and focus its input ───────
+    _focusAnnotInput(annot) {
+      const panel = document.querySelector('.panel-annots');
+      if (!panel) return;
+      const idx = this.allAnnotationsSorted.findIndex(a => a.id === annot.id);
+      if (idx === -1) return;
+      const rows = panel.querySelectorAll('.annot-row:not(.annot-pending)');
+      const row = rows[idx];
+      if (!row) return;
+      panel.scrollTop = row.offsetTop - panel.offsetTop;
+      const input = row.querySelector('.annot-target');
+      if (input) input.focus();
+    },
+
+    // ── Mousedown on annotation row → scroll to top + focus input ───────────────
+    // Intercept mousedown (not click) so we can call preventDefault() before the
+    // browser resets focus to body. The ✕ button stops mousedown propagation so
+    // it can fire its own click independently.
+    onRowMousedown(annot, event) {
+      if (event.target.closest('.annot-target')) return; // let input handle itself
+      event.preventDefault(); // stop browser from blurring focus to body
+      this._focusAnnotInput(annot);
+    },
+
+    // ── Annotation edit ──────────────────────────────────────────────────────
+    onAnnotBlur(annot, evt) {
+      const newValue = evt.target.value;
+      const found = this.annotations.find(a => a.id === annot.id);
+      if (found && found.body?.[0]) {
+        found.body[0].value = newValue;
+        // JSON-clone to give Recogito a plain object — Vue Proxies break its internal checks
+        annotator?.updateAnnotation?.(JSON.parse(JSON.stringify(found)));
+      }
+      this.saveAnnotations();
+    },
+
+    // ── Commit pending annotation ────────────────────────────────────────────
+    commitPending(value) {
+      if (!pendingAnnotRaw) return;
+      const annot = pendingAnnotRaw;   // raw Recogito object — no Vue Proxy
+      pendingAnnotRaw = null;
+      this.pendingAnnot = null;
+
+      const trimmed = (value || '').trim();
+      // Mutate the raw Recogito object's body directly
+      annot.body = [{ type: 'TextualBody', value: trimmed, purpose: 'normalizing' }];
+      this.annotations = [...this.annotations, annot];
+      // JSON-clone so Recogito gets a plain object, not whatever Vue does to annot
+      // after it enters the reactive array above
+      annotator?.addAnnotation?.(JSON.parse(JSON.stringify(annot)));
+      this.saveAnnotations();
+    },
+
+    cancelPending() {
+      pendingAnnotRaw = null;
+      this.pendingAnnot = null;
+      annotator?.setSelected?.([]);
+    },
+
+    // ── Remove annotation ────────────────────────────────────────────────────
+    removeAnnotation(annot) {
+      this.annotations = this.annotations.filter(a => a.id !== annot.id);
+      annotator?.removeAnnotation?.(annot.id);
+      this.saveAnnotations();
+    },
+
+    // ── Tab cycling ──────────────────────────────────────────────────────────
+    tabToNext(currentAnnot) {
+      const all = this.allAnnotationsSorted;
+      const idx = all.findIndex(a => a.id === currentAnnot.id);
+      const nextIdx = (idx + 1) % all.length;
+      const next = all[nextIdx];
+      if (next) {
+        this._focusAnnotInput(next);
+      }
+    },
+
+    _handleKeydown(e) {
+      if (e.key === 'Escape' && this.pendingAnnot) {
+        this.cancelPending();
+        e.preventDefault();
+      }
+    },
+
+    // ── Delete line ──────────────────────────────────────────────────────────
+    async deleteLine(line, idx) {
+      if (!confirm(`Delete line #${idx + 1}? Annotations on this line will also be removed.`)) return;
+      const r = await fetch(`/api/lines/${line.id}/delete`, { method: 'POST' });
+      if (!r.ok) return;
+
+      let charStart = 0;
+      for (let i = 0; i < idx; i++) {
+        charStart += this.lines[i].original_text.length + 1;
+      }
+      const lineLen     = line.original_text.length;
+      const charEnd     = charStart + lineLen;
+      const removedChars = lineLen + (idx < this.lines.length - 1 ? 1 : 0);
+
+      this.annotations = this.annotations
+        .filter(a => !(getStart(a) >= charStart && getStart(a) <= charEnd))
+        .map(a => {
+          const pos = getSelector(a, 'TextPositionSelector');
+          if (pos && pos.start > charEnd) {
+            pos.start -= removedChars;
+            pos.end   -= removedChars;
+          }
+          return a;
+        });
+
+      this.lines.splice(idx, 1);
+      this.fullText = this.lines.map(l => l.original_text).join('\n');
+
+      await this.$nextTick();
+      this._initAnnotator();
+      await this.saveAnnotations();
+    },
+
+    // ── Persist page annotations ─────────────────────────────────────────────
+    async saveAnnotations() {
+      await fetch(`/api/pages/${this.pageId}/annotations`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ annotations: this.annotations }),
+      });
+    },
+
+    // ── Page status ──────────────────────────────────────────────────────────
+    async setPageStatus(status) {
+      this.pageStatus = status;
+      await fetch(`/api/pages/${this.pageId}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+    },
+  },
+}).mount('#editor-root');
+</script>
+{% endblock %}

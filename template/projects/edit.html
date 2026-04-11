@@ -2,39 +2,71 @@
 
 {% block content %}
 <div class="container mt-5">
-  <h1 class="mb-4">Project {{project.name}}</h1>
+  <h1 class="mb-4">Project: {{ project.name }}</h1>
 
-  <!-- Toggle button for collapsed edit form -->
-  <button class="btn btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#editProjectForm" aria-expanded="false" aria-controls="editProjectForm">
+  <!-- Edit form (collapsed) -->
+  <button class="btn btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#editProjectForm" aria-expanded="false">
     Edit Project
   </button>
-  {% if can_edit %}<a class="btn btn-outline-warning mb-3">Manage access</a>{% endif %}
+  {% if can_edit %}
+  <a href="{{ url_for('bp_project.project_users', project_id=project.id) }}" class="btn btn-outline-warning mb-3">
+    <i class="fa-solid fa-users"></i> Manage Access
+  </a>
+  {% endif %}
 
-  <!-- Edit Project Form (collapsed by default) -->
   <div class="collapse" id="editProjectForm">
     <form method="post" action="{{ url_for('bp_project.project_update', project_id=project.id) }}">
       <div class="mb-3">
         <label for="name" class="form-label">Name</label>
         <input type="text" class="form-control" id="name" name="name" value="{{ project.name }}" required>
       </div>
-
       <div class="mb-3">
         <label for="description" class="form-label">Description</label>
-        <textarea class="form-control" id="description" name="description" rows="4">{{ project.description }}</textarea>
+        <textarea class="form-control" id="description" name="description" rows="3">{{ project.description }}</textarea>
       </div>
-
       <button type="submit" class="btn btn-primary">Save</button>
-      <a href="{{ url_for('bp_project.project_delete', project_id=project.id) }}" class="btn btn-danger ms-2">
-        Delete Project
-      </a>
+      <a href="{{ url_for('bp_project.project_delete', project_id=project.id) }}" class="btn btn-danger ms-2">Delete Project</a>
     </form>
   </div>
 
-  <hr class="my-5">
+  <hr class="my-4">
 
-  <!-- Normalizations Search -->
-  <h2 class="mb-3">Normalizations</h2>
-  <a href="{{url_for('bp_norm.normalization_list_route', project_id=project.id)}}" class="btn btn-primary">See normalizations</a>
-  <a href="{{url_for('bp_norm.normalization_new_route', project_id=project.id)}}" class="btn btn-secondary">Create</a>
+  <!-- Documents list -->
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="mb-0">Documents</h2>
+    <a href="{{ url_for('bp_document.document_create', project_id=project.id) }}" class="btn btn-primary btn-sm">
+      <i class="fa-solid fa-book-medical"></i> New Document
+    </a>
+  </div>
+
+  <!-- Search -->
+  <form method="get" class="mb-3 d-flex gap-2">
+    <input type="text" name="search" class="form-control form-control-sm w-auto" placeholder="Search documents…" value="{{ search }}">
+    <button type="submit" class="btn btn-sm btn-outline-secondary">Search</button>
+  </form>
+
+  {% if documents %}
+  <div class="list-group">
+    {% for doc in documents %}
+    <a href="{{ url_for('bp_document.document_browse', document_id=doc.id) }}"
+       class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+      <div>
+        <strong>{{ doc.name }}</strong>
+        {% if doc.description %}
+        <small class="text-muted ms-2">{{ doc.description[:80] }}</small>
+        {% endif %}
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        <span class="badge bg-secondary">{{ doc.language }}</span>
+        <span class="badge bg-light text-dark">{{ doc.pages | length }} page(s)</span>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-muted">No documents yet.
+    <a href="{{ url_for('bp_document.document_create', project_id=project.id) }}">Create the first one.</a>
+  </p>
+  {% endif %}
 </div>
 {% endblock %}

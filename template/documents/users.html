@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4" style="max-width: 700px;">
+  <nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="{{ url_for('bp_project.project_browse', project_id=document.project_id) }}">{{ document.project.name }}</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('bp_document.document_browse', document_id=document.id) }}">{{ document.name }}</a></li>
+      <li class="breadcrumb-item active">Manage Access</li>
+    </ol>
+  </nav>
+
+  <h2>Document Access — {{ document.name }}</h2>
+  <p class="text-muted">Users with project-level access already have access to this document.
+     Add users here to grant access to this document only.</p>
+
+  <div id="users-app">
+    <table class="table table-bordered align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>User</th>
+          <th>Project access</th>
+          <th>Document access</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in users %}
+        {% set has_doc = user.id in document_user_ids %}
+        <tr>
+          <td>{{ user.username }}</td>
+          <td>
+            {% if user.id == document.creator_id %}
+            <span class="badge bg-primary">Creator</span>
+            {% elif user.id in document_user_ids %}
+            <span class="text-muted">—</span>
+            {% else %}
+            <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            <span id="status-{{ user.id }}">
+              {% if has_doc %}<span class="badge bg-success">Granted</span>{% else %}<span class="badge bg-light text-dark">None</span>{% endif %}
+            </span>
+          </td>
+          <td>
+            {% if user.id != document.creator_id %}
+            {% if has_doc %}
+            <button class="btn btn-sm btn-outline-danger"
+                onclick="removeUser({{ user.id }}, this)">Remove</button>
+            {% else %}
+            <button class="btn btn-sm btn-outline-success"
+                onclick="addUser({{ user.id }}, this)">Add</button>
+            {% endif %}
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<script>
+const documentId = {{ document.id }};
+
+async function addUser(userId, btn) {
+  btn.disabled = true;
+  const resp = await fetch(`/api/documents/${documentId}/users/${userId}`, {method: 'POST'});
+  if (resp.ok) { location.reload(); }
+  else { btn.disabled = false; alert('Error adding user'); }
+}
+
+async function removeUser(userId, btn) {
+  btn.disabled = true;
+  const resp = await fetch(`/api/documents/${documentId}/users/${userId}`, {method: 'DELETE'});
+  if (resp.ok) { location.reload(); }
+  else { btn.disabled = false; alert('Error removing user'); }
+}
+</script>
+{% endblock %}

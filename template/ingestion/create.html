@@ -1,0 +1,513 @@
+{% extends "base.html" %}
+{% block morestyle %}
+<style>
+.step { display: none; }
+.step.active { display: block; }
+.drop-zone {
+  border: 2px dashed #adb5bd; border-radius: 8px; padding: 24px;
+  text-align: center; cursor: pointer; color: #6c757d; transition: border-color .2s;
+}
+.drop-zone.drag-over { border-color: #0d6efd; background: #f0f5ff; }
+.drop-zone.has-file { border-color: #198754; background: #f0fff4; color: #198754; }
+.iiif-canvas-list { max-height: 280px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 6px; }
+.iiif-canvas-item { padding: 6px 10px; cursor: pointer; border-bottom: 1px solid #f0f0f0; font-size: .9rem; }
+.iiif-canvas-item:last-child { border-bottom: none; }
+.iiif-canvas-item:hover, .iiif-canvas-item.selected { background: #e9f5ff; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="ingestion-app" class="container mt-4" style="max-width: 760px;">
+  <h2>Add Lines{% if document %} — <span class="text-muted fw-normal fs-5">{{ document.name }}</span>{% endif %}</h2>
+
+  <!-- Step indicator -->
+  <div class="d-flex gap-2 mb-4">
+    <span :class="['badge', step >= 1 ? 'bg-primary' : 'bg-secondary']">1 Input</span>
+    <span class="text-muted">›</span>
+    <span :class="['badge', step >= 2 ? 'bg-primary' : 'bg-secondary']">2 Normalizing</span>
+  </div>
+
+  <!-- ── STEP 1: input ──────────────────────────────────────────────── -->
+  <div class="step" :class="{active: step === 1}">
+
+    {% if not document %}
+    <!-- Project + Document selection (only when no document_id in URL) -->
+    <div class="mb-3">
+      <label class="form-label fw-semibold">Project <span class="text-danger">*</span></label>
+      <input type="text" class="form-control mb-1" v-model="projectSearch" placeholder="Search projects…" @input="searchProjects">
+      <select class="form-select" v-model="selectedProjectId" @change="onProjectChange" size="4">
+        <option v-for="p in projectOptions" :key="p.id" :value="p.id">[[ p.name ]]</option>
+      </select>
+    </div>
+
+    <div class="mb-3" v-if="selectedProjectId">
+      <label class="form-label fw-semibold">Document <span class="text-danger">*</span></label>
+      <select class="form-select mb-1" v-model="selectedDocumentId">
+        <option value="">— select or create below —</option>
+        <option v-for="d in documentOptions" :key="d.id" :value="d.id">[[ d.name ]]</option>
+      </select>
+      <div v-if="selectedDocumentId === ''" class="border rounded p-3 bg-light">
+        <p class="mb-2 small text-muted">Create a new document:</p>
+        <input type="text" class="form-control form-control-sm mb-2" v-model="newDoc.name" placeholder="Name *">
+        <select class="form-select form-select-sm mb-2" v-model="newDoc.language">
+          <option value="fre">French</option>
+          <option value="lat">Latin</option>
+          <option value="spa">Spanish</option>
+          <option value="ita">Italian</option>
+          <option value="eng">English</option>
+          <option value="ger">German</option>
+        </select>
+        <input type="text" class="form-control form-control-sm" v-model="newDoc.qid" placeholder="Biblissima QID (optional)">
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Page label -->
+    <div class="mb-3">
+      <label class="form-label fw-semibold">Page label <span class="text-danger">*</span></label>
+      <input type="text" class="form-control" v-model="pageLabel" placeholder="e.g. fol. 12r, p. 5, col. A">
+    </div>
+
+    <!-- Input mode tabs -->
+    <div class="mb-3">
+      <ul class="nav nav-tabs mb-2">
+        <li class="nav-item">
+          <button class="nav-link" :class="{active: inputMode==='text'}" @click="inputMode='text'">
+            <i class="fa-solid fa-keyboard"></i> Paste text
+          </button>
+        </li>
+        <li class="nav-item">
+          <button class="nav-link" :class="{active: inputMode==='alto'}" @click="inputMode='alto'">
+            <i class="fa-solid fa-file-code"></i> Upload ALTO
+          </button>
+        </li>
+        <li class="nav-item">
+          <button class="nav-link" :class="{active: inputMode==='iiif'}" @click="inputMode='iiif'">
+            <i class="fa-solid fa-image"></i> IIIF Manifest
+          </button>
+        </li>
+      </ul>
+
+      <!-- Text paste mode -->
+      <div v-if="inputMode === 'text'">
+        <textarea class="form-control" v-model="rawText" rows="10"
+          placeholder="One line per row. Use ¶ to split on a pilcrow."></textarea>
+        <button class="btn btn-sm btn-outline-secondary mt-1" @click="cleanLines">
+          Split on ¶ / clean lines
+        </button>
+      </div>
+
+      <!-- ALTO upload mode -->
+      <div v-if="inputMode === 'alto'">
+        <div class="drop-zone"
+             :class="{'drag-over': dragging, 'has-file': altoFileName}"
+             @dragover.prevent="dragging=true"
+             @dragleave="dragging=false"
+             @drop.prevent="onAltoDrop"
+             @click="$refs.altoInput.click()">
+          <i class="fa-solid fa-file-xml fa-2x mb-2 d-block"></i>
+          <span v-if="altoFileName"><strong>[[ altoFileName ]]</strong><br><small>[[ altoLines.length ]] line(s) extracted</small></span>
+          <span v-else>Click or drag &amp; drop an ALTO XML file here</span>
+        </div>
+        <input type="file" ref="altoInput" accept=".xml,.alto" style="display:none" @change="onAltoFileSelect">
+
+        <div v-if="altoLines.length" class="mt-3">
+          <p class="small text-muted mb-1">Extracted lines (edit if needed):</p>
+          <div v-for="(line, i) in altoLines" :key="i" class="d-flex gap-2 mb-1 align-items-center">
+            <span class="text-muted small" style="min-width:2em;">[[ i+1 ]].</span>
+            <span class="text-muted small font-monospace" style="min-width:6em; font-size:.7rem;" :title="line.alto_id">[[ line.alto_id || '' ]]</span>
+            <input type="text" class="form-control form-control-sm" v-model="altoLines[i].text">
+            <button class="btn btn-sm btn-outline-danger" @click="altoLines.splice(i,1)">✕</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- IIIF Manifest mode -->
+      <div v-if="inputMode === 'iiif'">
+        <div class="input-group mb-2">
+          <input type="url" class="form-control" v-model="iiifUrl"
+            placeholder="https://…/manifest.json" @keydown.enter.prevent="fetchIiif">
+          <button class="btn btn-outline-primary" @click="fetchIiif" :disabled="iiifLoading || !iiifUrl.trim()">
+            <span v-if="iiifLoading"><span class="spinner-border spinner-border-sm"></span></span>
+            <span v-else>Load</span>
+          </button>
+        </div>
+        <div v-if="iiifError" class="alert alert-danger py-1 small">[[ iiifError ]]</div>
+
+        <!-- Canvas list -->
+        <div v-if="iiifCanvases.length" class="mb-2">
+          <p class="small text-muted mb-1">Select a canvas:</p>
+          <div class="iiif-canvas-list">
+            <div v-for="(c, i) in iiifCanvases" :key="i"
+                 class="iiif-canvas-item"
+                 :class="{selected: iiifSelectedCanvas === i}"
+                 @click="selectIiifCanvas(i)">
+              [[ c.label || ('Canvas ' + (i+1)) ]]
+            </div>
+          </div>
+        </div>
+
+        <!-- Extracted IIIF lines -->
+        <div v-if="iiifLines.length" class="mt-2">
+          <p class="small text-muted mb-1">[[ iiifLines.length ]] line(s) extracted (edit if needed):</p>
+          <div v-for="(line, i) in iiifLines" :key="i" class="d-flex gap-2 mb-1 align-items-center">
+            <span class="text-muted small" style="min-width:2em;">[[ i+1 ]].</span>
+            <input type="text" class="form-control form-control-sm" v-model="iiifLines[i].text">
+            <button class="btn btn-sm btn-outline-danger" @click="iiifLines.splice(i,1)">✕</button>
+          </div>
+        </div>
+        <div v-else-if="iiifCanvases.length && iiifSelectedCanvas !== null" class="text-muted small mt-2">
+          No supplementing annotations with text found on this canvas.
+        </div>
+      </div>
+    </div>
+
+    <!-- Normalization batching options -->
+    <div class="mb-3 mt-3">
+      <label class="form-label fw-semibold small">Normalization batching</label>
+      <div class="d-flex flex-wrap gap-3">
+        <div class="form-check">
+          <input class="form-check-input" type="radio" v-model="splitMode" value="lines" id="sm-lines">
+          <label class="form-check-label" for="sm-lines">Per line</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="radio" v-model="splitMode" value="pilcrow" id="sm-pilcrow">
+          <label class="form-check-label" for="sm-pilcrow">Split on ¶</label>
+        </div>
+        <div class="form-check d-flex align-items-center gap-2">
+          <input class="form-check-input" type="radio" v-model="splitMode" value="dots" id="sm-dots">
+          <label class="form-check-label" for="sm-dots">Split on . &nbsp;(min words:</label>
+          <input type="number" class="form-control form-control-sm" style="width:64px"
+                 v-model.number="minWords" :disabled="splitMode !== 'dots'" min="10" max="500">
+          <span>)</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 mt-3">
+      <button class="btn btn-primary" @click="goNormalize" :disabled="!canProceed || normalizing">
+        <span v-if="normalizing"><span class="spinner-border spinner-border-sm"></span> Normalizing…</span>
+        <span v-else>Normalize →</span>
+      </button>
+    </div>
+    <div v-if="error" class="alert alert-danger mt-2">[[ error ]]</div>
+  </div>
+
+  <!-- ── STEP 2: normalizing progress ──────────────────────────────── -->
+  <div class="step" :class="{active: step === 2}">
+    <h4 class="mb-3">Normalizing…</h4>
+    <div class="mb-2 small text-muted">
+      [[ normalizeProgress.current ]] / [[ normalizeProgress.total ]] processed
+    </div>
+    <div class="progress mb-3" style="height:12px;">
+      <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
+           :style="{width: normalizeProgress.total ? (normalizeProgress.current / normalizeProgress.total * 100) + '%' : '0%'}">
+      </div>
+    </div>
+    <div v-if="normalizeProgress.total > 0" class="small text-muted">
+      Last: <span class="font-monospace">[[ normalizeProgress.lastOrig ]]</span>
+    </div>
+    <button class="btn btn-sm btn-outline-secondary mt-3" @click="step=1">← Back</button>
+    <div v-if="error" class="alert alert-danger mt-2">[[ error ]]</div>
+  </div>
+</div>
+
+<script>
+const { createApp } = Vue;
+
+createApp({
+  delimiters: ['[[', ']]'],
+  data() {
+    return {
+      step: 1,
+      // project/doc selection (only used when no document_id provided)
+      projectSearch: '',
+      projectOptions: [],
+      selectedProjectId: {{ project_id or 'null' }},
+      documentOptions: [],
+      selectedDocumentId: {{ document_id or "''" }},
+      newDoc: { name: '', language: 'fre', qid: '' },
+      pageLabel: '',
+      // input mode
+      inputMode: 'text',
+      rawText: '',
+      // ALTO
+      altoFileName: '',
+      altoLines: [],
+      dragging: false,
+      // IIIF
+      iiifUrl: '',
+      iiifLoading: false,
+      iiifError: null,
+      iiifCanvases: [],
+      iiifSelectedCanvas: null,
+      iiifLines: [],
+      // normalization batching
+      splitMode: 'lines',
+      minWords: 100,
+      // state
+      normalizing: false,
+      normalizeProgress: { current: 0, total: 0, lastOrig: '' },
+      saving: false,
+      error: null,
+    };
+  },
+  computed: {
+    effectiveLines() {
+      if (this.inputMode === 'alto') {
+        return this.altoLines.filter(l => l.text && l.text.trim()).map(l => ({ text: l.text.trim(), alto_id: l.alto_id || null }));
+      }
+      if (this.inputMode === 'iiif') {
+        return this.iiifLines.filter(l => l.text && l.text.trim()).map(l => ({ text: l.text.trim(), alto_id: null }));
+      }
+      return this.rawText.split('\n')
+        .map(l => l.trim()).filter(Boolean)
+        .map(text => ({ text, alto_id: null }));
+    },
+    canProceed() {
+      const hasDoc = {{ 'true' if document else 'false' }}
+        || this.selectedDocumentId
+        || this.newDoc.name.trim();
+      {% if not document %}
+      if (!this.selectedProjectId) return false;
+      {% endif %}
+      return hasDoc && this.pageLabel.trim() && this.effectiveLines.length > 0;
+    },
+  },
+  async created() {
+    {% if not document %}
+    await this.searchProjects();
+    if (this.selectedProjectId) await this.loadDocuments();
+    {% endif %}
+  },
+  methods: {
+    {% if not document %}
+    async searchProjects() {
+      const q = this.projectSearch ? `&search=${encodeURIComponent(this.projectSearch)}` : '';
+      const r = await fetch(`/projects?format=json${q}`);
+      this.projectOptions = await r.json();
+    },
+    async onProjectChange() {
+      this.selectedDocumentId = '';
+      this.documentOptions = [];
+      if (this.selectedProjectId) await this.loadDocuments();
+    },
+    async loadDocuments() {
+      const r = await fetch(`/api/projects/${this.selectedProjectId}/documents`);
+      this.documentOptions = await r.json();
+    },
+    {% endif %}
+
+    cleanLines() {
+      this.rawText = this.rawText
+        .replace(/¶/g, '\n')
+        .split('\n').map(l => l.trim()).filter(Boolean).join('\n');
+    },
+
+    // ── ALTO parsing ──────────────────────────────────────────────────
+    onAltoFileSelect(e) {
+      const file = e.target.files[0];
+      if (file) this.readAltoFile(file);
+    },
+    onAltoDrop(e) {
+      this.dragging = false;
+      const file = e.dataTransfer.files[0];
+      if (file) this.readAltoFile(file);
+    },
+    readAltoFile(file) {
+      this.altoFileName = file.name;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const { lines, label } = this.parseAlto(e.target.result);
+        this.altoLines = lines;
+        if (label && !this.pageLabel) this.pageLabel = label;
+      };
+      reader.readAsText(file);
+    },
+    parseAlto(xmlString) {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(xmlString, 'text/xml');
+      const ALTO_NS = 'http://www.loc.gov/standards/alto/ns-v4#';
+      function getEls(tagName) {
+        let els = Array.from(doc.getElementsByTagNameNS(ALTO_NS, tagName));
+        if (els.length === 0) els = Array.from(doc.getElementsByTagName(tagName));
+        return els;
+      }
+      const fileNameEl = getEls('fileName')[0];
+      const label = fileNameEl ? fileNameEl.textContent.trim().replace(/\.[^.]+$/, '') : '';
+      const textLines = getEls('TextLine');
+      const lines = [];
+      for (const tl of textLines) {
+        const alto_id = tl.getAttribute('ID') || tl.getAttribute('id') || null;
+        const strings = Array.from(tl.getElementsByTagNameNS(ALTO_NS, 'String'));
+        const fallback = strings.length ? strings : Array.from(tl.getElementsByTagName('String'));
+        const content = fallback.map(s => s.getAttribute('CONTENT') || '').join(' ').trim();
+        if (content) lines.push({ text: content, alto_id });
+      }
+      return { lines, label };
+    },
+
+    // ── IIIF manifest ─────────────────────────────────────────────────
+    async fetchIiif() {
+      this.iiifError = null;
+      this.iiifLoading = true;
+      this.iiifCanvases = [];
+      this.iiifSelectedCanvas = null;
+      this.iiifLines = [];
+      try {
+        const r = await fetch(this.iiifUrl.trim());
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const manifest = await r.json();
+        // Support IIIF Presentation API 2 and 3
+        const canvases = manifest.sequences?.[0]?.canvases   // v2
+                      || manifest.items                       // v3
+                      || [];
+        this.iiifCanvases = canvases.map((c, i) => {
+          const rawLabel = c.label;
+          let label = '';
+          if (typeof rawLabel === 'string') label = rawLabel;
+          else if (rawLabel?.en?.[0]) label = rawLabel.en[0];
+          else if (rawLabel && typeof rawLabel === 'object') {
+            const first = Object.values(rawLabel)[0];
+            label = Array.isArray(first) ? first[0] : first;
+          }
+          return { label: label || `Canvas ${i + 1}`, raw: c };
+        });
+        if (this.iiifCanvases.length === 1) this.selectIiifCanvas(0);
+      } catch(e) {
+        this.iiifError = `Could not load manifest: ${e.message}`;
+      } finally {
+        this.iiifLoading = false;
+      }
+    },
+    selectIiifCanvas(idx) {
+      this.iiifSelectedCanvas = idx;
+      const canvas = this.iiifCanvases[idx]?.raw;
+      if (!canvas) return;
+      const lines = [];
+      // Try supplementing annotations (v3: canvas.annotations; v2: canvas.otherContent)
+      const annotPages = canvas.annotations || canvas.otherContent || [];
+      for (const ap of annotPages) {
+        const items = ap.items || ap.resources || [];
+        for (const item of items) {
+          const motivation = item.motivation || item['@type'];
+          if (motivation && !['supplementing', 'oa:commenting', 'transcribing'].some(m => motivation.includes(m))) continue;
+          // Extract text body
+          const body = item.body || item.resource;
+          let text = '';
+          if (typeof body === 'string') text = body;
+          else if (body?.value) text = body.value;
+          else if (body?.['@value']) text = body['@value'];
+          if (text.trim()) lines.push({ text: text.trim() });
+        }
+      }
+      this.iiifLines = lines;
+      // Auto-fill page label from canvas label if empty
+      if (!this.pageLabel && this.iiifCanvases[idx]?.label) {
+        this.pageLabel = this.iiifCanvases[idx].label;
+      }
+    },
+
+    // ── Normalize + auto-save ─────────────────────────────────────────
+    async goNormalize() {
+      this.error = null;
+      this.normalizing = true;
+      this.normalizeProgress = { current: 0, total: this.effectiveLines.length, lastOrig: '' };
+      this.step = 2;
+
+      try {
+        {% if not document %}
+        // Create document if needed (only in project/doc selection mode)
+        if (!this.selectedDocumentId) {
+          const r = await fetch('/documents/new', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              project_id: this.selectedProjectId,
+              name: this.newDoc.name,
+              language: this.newDoc.language,
+              qid: this.newDoc.qid || null,
+            })
+          });
+          const data = await r.json();
+          if (!r.ok || data.status !== 'ok') throw new Error(data.error || 'Could not create document');
+          this.selectedDocumentId = data.id;
+        }
+        {% endif %}
+
+        // Stream normalize results
+        const effLines = this.effectiveLines;
+        const response = await fetch('/api/normalize', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            inputtext: effLines.map(l => l.text).join('\n'),
+            split_mode: this.splitMode,
+            min_words: this.minWords,
+          })
+        });
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let finalFullReg = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const chunks = buffer.split('\n\n');
+          buffer = chunks.pop();
+          for (const chunk of chunks) {
+            if (!chunk.startsWith('data: ')) continue;
+            const evt = JSON.parse(chunk.slice(6));
+            if (evt.type === 'progress') {
+              this.normalizeProgress = {
+                current: evt.current,
+                total: evt.total,
+                lastOrig: evt.result?.orig || '',
+              };
+            } else if (evt.type === 'done') {
+              finalFullReg = evt.full_reg || '';
+            }
+          }
+        }
+
+        const linesToSave = effLines.map(l => ({ orig: l.text, alto_id: l.alto_id || null }));
+        await this._savePage(linesToSave, finalFullReg);
+
+      } catch(e) {
+        this.error = e.message || 'An error occurred';
+        this.step = 1;
+      } finally {
+        this.normalizing = false;
+      }
+    },
+
+    async _savePage(lines, full_reg) {
+      this.saving = true;
+      try {
+        const r = await fetch('/pages/new', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            document_id: this.selectedDocumentId,
+            label: this.pageLabel,
+            lines,
+            full_reg,
+          })
+        });
+        const data = await r.json();
+        if (data.status === 'ok') {
+          window.location.href = data.redirect;
+        } else {
+          throw new Error('Save failed');
+        }
+      } finally {
+        this.saving = false;
+      }
+    }
+  }
+}).mount('#ingestion-app');
+</script>
+{% endblock %}

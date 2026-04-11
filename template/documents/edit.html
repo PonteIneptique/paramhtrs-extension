@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4">
+  <nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="{{ url_for('bp_project.project_lists') }}">Projects</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('bp_project.project_browse', project_id=document.project_id) }}">{{ document.project.name }}</a></li>
+      <li class="breadcrumb-item active">{{ document.name }}</li>
+    </ol>
+  </nav>
+
+  <div class="d-flex justify-content-between align-items-start mb-2">
+    <h1 class="mb-0">{{ document.name }}</h1>
+    <div class="d-flex gap-2">
+      <a href="{{ url_for('bp_document.document_export_tei', document_id=document.id) }}" class="btn btn-sm btn-info">
+        <i class="fa-solid fa-download"></i> Export TEI
+      </a>
+      {% if can_edit %}
+      <a href="{{ url_for('bp_document.document_users', document_id=document.id) }}" class="btn btn-sm btn-outline-warning">
+        <i class="fa-solid fa-users"></i> Access
+      </a>
+      {% endif %}
+    </div>
+  </div>
+  <p class="text-muted">{{ document.description }}</p>
+  <div class="mb-1">
+    <span class="badge bg-secondary">{{ document.language }}</span>
+    {% if document.qid %}<span class="badge bg-light text-dark ms-1">{{ document.qid }}</span>{% endif %}
+  </div>
+
+  {% if can_edit %}
+  <!-- Edit form (collapsed) -->
+  <button class="btn btn-outline-secondary btn-sm mt-2 mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#editDocForm">
+    Edit Metadata
+  </button>
+  <div class="collapse" id="editDocForm">
+    <form method="post" action="{{ url_for('bp_document.document_update', document_id=document.id) }}" class="mt-2 mb-3 p-3 border rounded bg-white">
+      <div class="mb-2">
+        <label class="form-label">Name</label>
+        <input type="text" class="form-control form-control-sm" name="name" value="{{ document.name }}" required>
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Description</label>
+        <textarea class="form-control form-control-sm" name="description" rows="2">{{ document.description }}</textarea>
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Language</label>
+        <select class="form-select form-select-sm" name="language">
+          {% for code, label in languages %}
+          <option value="{{ code }}" {% if code == document.language %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="mb-2">
+        <label class="form-label">QID</label>
+        <input type="text" class="form-control form-control-sm" name="qid" value="{{ document.qid or '' }}">
+      </div>
+      <button type="submit" class="btn btn-sm btn-primary">Save</button>
+      <a href="{{ url_for('bp_document.document_delete', document_id=document.id) }}" class="btn btn-sm btn-danger ms-2">Delete Document</a>
+    </form>
+  </div>
+  {% endif %}
+
+  <hr>
+
+  <!-- Pages list -->
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="mb-0">Pages</h2>
+    <a href="{{ url_for('bp_norm.ingestion_new', document_id=document.id) }}" class="btn btn-sm btn-primary">
+      <i class="fa-solid fa-plus"></i> Add Page
+    </a>
+  </div>
+
+  {% if pages %}
+  <div class="list-group">
+    {% for page in pages %}
+    {% set total = page.line_count %}
+    <a href="{{ url_for('bp_page.page_editor', page_id=page.id) }}"
+       class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+      <div>
+        <strong>{{ page.label }}</strong>
+        <small class="text-muted ms-2">{{ total }} line(s)</small>
+      </div>
+      <div class="d-flex align-items-center gap-3">
+        <span class="badge
+          {% if page.status == 'done' %}bg-success
+          {% elif page.status == 'active' %}bg-warning text-dark
+          {% else %}bg-secondary{% endif %}">{{ page.status }}</span>
+        <span class="text-muted"><i class="fa-solid fa-chevron-right"></i></span>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-muted">No pages yet.
+    <a href="{{ url_for('bp_norm.ingestion_new', document_id=document.id) }}">Add the first page.</a>
+  </p>
+  {% endif %}
+</div>
+{% endblock %}

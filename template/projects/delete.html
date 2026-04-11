@@ -1,42 +1,17 @@
+{% extends "base.html" %}
 {% block content %}
-<div class="alert alert-danger">
-    <h2>Confirmation</h2>
-
-    <p>
-        Are you sure you want to delete this project?
-    </p>
-
-    <p>
-        <strong>{{ project.name }}</strong>
-    </p>
-
+<div class="container mt-5" style="max-width: 500px;">
+  <div class="alert alert-danger">
+    <h2>Delete Project</h2>
+    <p>Are you sure you want to delete <strong>{{ project.name }}</strong>?</p>
     {% if project.description %}
-        <p class="text-muted">
-            {{ project.description }}
-        </p>
+    <p class="text-muted">{{ project.description }}</p>
     {% endif %}
-
-    <p class="text-small">
-        <small>
-            This will also delete
-            {{ project.normalizations.count() }}
-            normalization(s).
-        </small>
-    </p>
-
-    <p>
-        <a href="{{ url_for('bp_project.project_delete',
-                            project_id=project.id,
-                            confirm=True) }}"
-           class="btn btn-danger">
-            Delete
-        </a>
-
-        <a href="{{ url_for('bp_project.project_browse',
-                            project_id=project.id) }}"
-           class="btn btn-secondary">
-            Back to project
-        </a>
-    </p>
+    <p><small>This will permanently delete all documents, pages, and lines inside this project.</small></p>
+    <a href="{{ url_for('bp_project.project_delete', project_id=project.id, confirm=True) }}"
+       class="btn btn-danger">Delete</a>
+    <a href="{{ url_for('bp_project.project_browse', project_id=project.id) }}"
+       class="btn btn-secondary ms-2">Cancel</a>
+  </div>
 </div>
 {% endblock %}
