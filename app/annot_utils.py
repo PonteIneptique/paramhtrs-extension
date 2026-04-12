@@ -1,4 +1,5 @@
 from uuid import uuid4
+import re
 from xml.sax.saxutils import escape
 
 
@@ -96,42 +97,115 @@ def _escape_segment(text: str) -> str:
 
 
 def build_tei_from_annotations(original_text: str, annotations: list) -> str:
-    """Build TEI markup from page full_text + W3C annotations.
-
-    Newlines in original_text become <lb/>. Each logical line is wrapped
-    in <l>...</l> only when building per-page output; callers that want
-    per-line <l> elements should split on '\\n' themselves.
     """
+    Builds TEI with regularized text in <body> and original source text inside
+    the <span> tags in <standOff>.
+    """
+    # 1. Sort annotations by start position
     sorted_annots = sorted(
         annotations,
-        key=lambda a: _get_selector(a, "TextPositionSelector").get("start", 0),
+        key=lambda a: _get_selector(a, "TextPositionSelector").get("start", 0)
     )
-    parts = []
+
+    body_parts = []
+    span_entries = []
+
+    word_count = 0
     cursor = 0
+    tokens_on_line = 0
+
+    def process_segment(text, orig_label=None, force_lb_at_end=False):
+        """
+        Tokenizes 'text' (regularized) and links tokens to 'orig_label'
+        (the messy source) in the standoff.
+        """
+        nonlocal word_count, tokens_on_line
+        local_ids = []
+
+        # Split text into lines
+        lines = text.split('\n')
+        for i, line in enumerate(lines):
+            # Tokenize words/punctuation
+            line_tokens = list(re.finditer(r"(\w+)|([^\w\s]+)", line))
+
+            for j, match in enumerate(line_tokens):
+                word_count += 1
+                tokens_on_line += 1
+                w_id = f"w{word_count}"
+                tag = "pc" if match.group(2) else "w"
+                token_xml = f'<{tag} xml:id="{w_id}">{escape(match.group(0))}</{tag}>'
+
+                body_parts.append(token_xml)
+                local_ids.append(f"#{w_id}")
+
+                # Logic for <lb/> based on line breaks or forced end-of-annot breaks
+                is_last_of_line = (j == len(line_tokens) - 1)
+                is_last_of_annot = (i == len(lines) - 1 and is_last_of_line)
+
+                if (i < len(lines) - 1 and is_last_of_line) or (is_last_of_annot and force_lb_at_end):
+                    body_parts.append('<lb break="no" precision="low"/>\n        ')
+                    tokens_on_line = 0
+                elif tokens_on_line >= 10:
+                    body_parts.append("\n        ")
+                    tokens_on_line = 0
+
+            # Handle static text line breaks (empty lines)
+            if not line.strip() and len(lines) > 1 and i < len(lines) - 1:
+                body_parts.append('<lb/>\n        ')
+                tokens_on_line = 0
+
+        # Link IDs to the original source text directly in the span
+        if orig_label is not None and local_ids:
+            span_entries.append(
+                f'      <span target="{" ".join(local_ids)}">{escape(orig_label)}</span>'
+            )
+
+    # 2. Linear processing of segments
     for annot in sorted_annots:
         pos = _get_selector(annot, "TextPositionSelector")
-        start = pos.get("start", 0)
-        end = pos.get("end", 0)
-        body = annot.get("body", [{}])[0] if annot.get("body") else {}
-        purpose = body.get("purpose", "normalizing")
-        value = body.get("value", "")
-        if cursor < start:
-            parts.append(_escape_segment(original_text[cursor:start]))
-        orig_span = escape(original_text[start:end])
-        if purpose == "normalizing":
-            parts.append(
-                f'<choice><orig>{orig_span}</orig><reg>{escape(value)}</reg></choice>'
-            )
-        elif purpose == "deletion":
-            parts.append(f'<surplus>{orig_span}</surplus>')
-        elif purpose == "insertion":
-            parts.append(f'<supplied>{escape(value)}</supplied>')
+        start, end = pos.get("start", 0), pos.get("end", 0)
+
+        # Static text
+        if start > cursor:
+            process_segment(original_text[cursor:start])
+
+        # Annotation
+        body = annot.get("body", [{}])[0]
+        reg_value = body.get("value", "")
+        orig_value = original_text[start:end]
+
+        # Detect if we need the custom non-breaking LB
+        has_lb_in_orig = '\n' in orig_value
+
+        # Map regularized tokens to original string content
+        process_segment(reg_value, orig_label=orig_value, force_lb_at_end=has_lb_in_orig)
         cursor = end
+
+    # Trailing text
     if cursor < len(original_text):
-        parts.append(_escape_segment(original_text[cursor:]))
-    inner = "".join(parts)
-    # Wrap each line segment in <l>...</l>
-    lines_tei = []
-    for line_part in inner.split("<lb/>"):
-        lines_tei.append(f"<l>{line_part}</l>")
-    return "\n<lb/>\n".join(lines_tei)
+        process_segment(original_text[cursor:])
+
+    # 3. Final Assembly
+    full_body = " ".join(body_parts).replace(" \n", "\n").replace("\n ", "\n")
+
+    return f'''<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader>
+    <fileDesc>
+      <titleStmt><title>Standoff TEI Export</title></titleStmt>
+      <publicationStmt><p>Cleaned Standoff Mapping</p></publicationStmt>
+      <sourceDesc><p>Linear processing with direct span content</p></sourceDesc>
+    </fileDesc>
+  </teiHeader>
+  <text>
+    <body>
+      <p>
+        {full_body.strip()}
+      </p>
+    </body>
+  </text>
+  <standOff>
+    <spanGrp type="wordForm">
+{chr(10).join(span_entries)}
+    </spanGrp>
+  </standOff>
+</TEI>'''
