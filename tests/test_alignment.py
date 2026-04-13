@@ -2,23 +2,28 @@ from app.alignment import Alignment
 from app.alignment import align_words
 
 
-# Rules for alignment
-# 1. code[n] should not follow each other: if multiple things (punctuation, tokens, spaces, etc.) are null operations
-#       then they form a single Alignment: `a b c` -> `a b c`: Alignment(source='a b c', target='a b c', code='n')
-# 2. Changes in tokens are moved into a code[s]: Alignment(source='REATOR', target='reator', code='s')
-# 3. Changes in punctuation are moved into a code[s]: Alignment(source='.', target=',', code='s')
-# 4. Two edge cases exist for 2+3:
-#    4.1. `casa.`->`casa,` is a null operation on casa Alignment(source='casa', target='casa', code='n')
-#       and a substitution on ,/.
-#    4.2  `.n.` -> `enim` is a full code[n] in a single step because dots here are
-#       deleted: Alignment(source='.n.', target='enim', code='s'). Same goes for `G.` -> `Galienus`
-#       Alignment(source='G.', target='Galienus', code='s')
-# 5. If a token deletion is followed by a token insertion, it's most likely a substitution.
-# 6. Space insertion is a specific kind of phenomenon that needs to be captured `ab`-> `a b`: a[code = n]
-#       Alignment(source='', target=' ', code='i') b[code = n]
-# 7. Space deletion leads to a single token most of the time, except before punctuation
-#       7.1 `a b` -> `ab`: Alignment(source="a b", target="ab", code="s")
-#       7.2 `a .` -> `a.`: [Alignment(source="a", target="a", code="n"),
+# There are four kind of alignment: null / match, substitution, insertion, deletion.
+# Here are the rules:
+# 1. While not necessarily based on a word model alignment, space and punctuation are an activator of string splitting, 
+#     such as `a d` -> `a b`: Alignment(source='a ', target='a ', code='n'), Alignment(source='d', target='b', code='s')
+#     and not Alignment(source='a d', target='a b', code='s')
+# 2. Alignment(..., code="n") should not follow each other: if multiple things (punctuation, tokens, spaces, etc.) are null operations
+#     then they form a single Alignment: `a b c` -> `a b c`: Alignment(source='a b c', target='a b c', code='n')
+# 3. Changes in a token form the basis of substitution, even if it's only lower case
+#     Alignment(..., code="s"): Alignment(source='REATOR', target='reator', code='s')
+# 4. Changes in punctuation are also Alignment(..., code="s"): Alignment(source='.', target=',', code='s')
+# 5. Two edge cases exist for 2+3:
+#    5.1. `casa.`->`casa,` is a null operation on `casa` = Alignment(source='casa', target='casa', code='n')
+#       and a substitution on Alignment(source='.', target=',', code='s').
+#    5.2  `.n.` -> `enim` is a single Alignment(..., code="s") because dots here are
+#       deleted and part of the main token: Alignment(source='.n.', target='enim', code='s'). 
+#       Same goes for `G.` -> `Galienus`: Alignment(source='G.', target='Galienus', code='s')
+# 6. If a token deletion is followed by a token insertion, it should be a substitution.
+# 7. Space insertion is a specific kind of phenomenon that needs to be captured `ab`-> `a b`: Alignment(source='a', target='a', code='n')
+#       Alignment(source='', target=' ', code='i') Alignment(source='b', target='b', code='n')
+# 8. Space deletion leads to a single token most of the time, except before punctuation
+#       8.1 `a b` -> `ab`: Alignment(source="a b", target="ab", code="s")
+#       8.2 `a .` -> `a.`: [Alignment(source="a", target="a", code="n"),
 #                           Alignment(source=" ", target="", code="d")
 #                           Alignment(source=".", target=".", code="n")]
 
