@@ -19,8 +19,9 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-
+import dataclasses
 import string
+from string import punctuation
 from typing import Optional, List, Tuple, Literal, Dict, NamedTuple, Union, Callable
 from collections import deque, Counter
 from xml.sax.saxutils import escape
@@ -62,11 +63,27 @@ def space_norm(inp: Optional[str]) -> Optional[str]:
         return RE_SPACE.sub(" ", inp)
 
 OperationCode = Literal["s", "d", "i", "n"]
-class Alignment(NamedTuple):
+@dataclasses.dataclass
+class Alignment:
     source: str
     target: str
     code: OperationCode
 
+    def split(self, at: int) -> List["Alignment"]:
+        data = [
+            Alignment(source=self.source[:at], target=self.target[:at], code="n"),
+            Alignment(source=self.source[at:], target=self.target[at:], code="n")
+        ]
+        for al in data:
+            if al.source != al.target:
+                al.code = "s"
+        return data
+
+    def __eq__(self, other):
+        return self.source == other.source and self.target == other.target and self.code == other.code
+
+    def __iter__(self):
+        return iter((self.source, self.target, self.code))
 
 def normalize(token: str) -> str:
     return token.lower().replace("v", "u").replace("j", "i")
@@ -309,7 +326,7 @@ def align_words(abbreviated: str, regularized: str) -> List[Alignment]:
     abbreviated_tokens = token_splitter(abbreviated)
     regularized_tokens = token_splitter(regularized)
 
-    output: List[Tuple[Optional[str], Optional[str], Literal['i', 's', 'n', 'd']]] = []
+    output: List[Alignment] = []
     for (abbr, reg) in sub_alignments(abbreviated_tokens, regularized_tokens):
         alignments = _gen_alignments(abbr, reg)
 
@@ -317,7 +334,30 @@ def align_words(abbreviated: str, regularized: str) -> List[Alignment]:
             Alignment(abbr[i - 1] if i else "", reg[j - 1] if j else "", op)
             for i, j, op, _ in alignments
         ]))
-    return list(output)
+
+    idx = 0
+    while idx < len(output):
+        alignment: Alignment = output[idx]
+        if alignment.code == "s" and len(alignment.source) > 1:
+            # Deal with dangling char in source/target
+            if alignment.source[-1] in string.punctuation and alignment.target[-1] in string.punctuation:
+                if alignment.source[-1] != alignment.target[-1] and alignment.source[:-1] == alignment.target[:-1]:
+                    output = output[:idx] + alignment.split(-1) + output[idx+1:]
+        idx += 1
+
+
+    for alignment in output:
+        if alignment.code == "n" and alignment.source != alignment.target:
+            alignment.code = "s"
+
+    new_output = []
+    for alignment in output:
+        if alignment.code == "n" and new_output and new_output[-1].code == "n":
+            new_output[-1].source += alignment.source
+            new_output[-1].target += alignment.target
+        else:
+            new_output.append(alignment)
+    return new_output
 
 
 def reprocess_space(

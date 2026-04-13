@@ -1,7 +1,35 @@
 from uuid import uuid4
 import re
 from xml.sax.saxutils import escape
+import re
+from xml.sax.saxutils import escape
 
+# Use cdifflib for speed if available, fallback to standard difflib
+try:
+    from cdifflib import CSequenceMatcher as SequenceMatcher
+except ImportError:
+    from difflib import SequenceMatcher
+
+
+def find_split_point(orig: str, reg: str) -> int:
+    """
+    Finds the index in the regularized word that logically
+    corresponds to the '\n' in the original word.
+    """
+    # 1. Clean the original for a fair comparison
+    orig_clean = orig.replace('\n', '')
+
+    # 2. Align characters
+    s = SequenceMatcher(None, orig_clean, reg)
+    nl_pos = orig.find('\n')
+
+    # 3. Find the best matching block for the character before the newline
+    for block in s.get_matching_blocks():
+        if block.a <= nl_pos <= block.a + block.size:
+            # Calculate the relative offset in the regularized string
+            return block.b + (nl_pos - block.a)
+
+    return len(reg)
 
 def _get_selector(annot: dict, selector_type: str) -> dict:
     for sel in annot.get("target", {}).get("selector", []):
@@ -35,6 +63,7 @@ def align_to_annotations(original_text: str, regularized_text: str) -> list:
     """Convert align_words() output to W3C Web Annotation JSON."""
     from .alignment import align_words
     alignments = align_words(original_text, regularized_text)
+
     annotations = []
     char_pos = 0
     for almt in alignments:
@@ -96,12 +125,9 @@ def _escape_segment(text: str) -> str:
     return "".join(result)
 
 
+
+
 def build_tei_from_annotations(original_text: str, annotations: list) -> str:
-    """
-    Builds TEI with regularized text in <body> and original source text inside
-    the <span> tags in <standOff>.
-    """
-    # 1. Sort annotations by start position
     sorted_annots = sorted(
         annotations,
         key=lambda a: _get_selector(a, "TextPositionSelector").get("start", 0)
@@ -109,91 +135,72 @@ def build_tei_from_annotations(original_text: str, annotations: list) -> str:
 
     body_parts = []
     span_entries = []
+    word_count, cursor, tokens_on_line = 0, 0, 0
 
-    word_count = 0
-    cursor = 0
-    tokens_on_line = 0
-
-    def process_segment(text, orig_label=None, force_lb_at_end=False):
-        """
-        Tokenizes 'text' (regularized) and links tokens to 'orig_label'
-        (the messy source) in the standoff.
-        """
+    def process_segment(text, orig_label=None):
         nonlocal word_count, tokens_on_line
         local_ids = []
+        has_internal_lb = orig_label and '\n' in orig_label
 
-        # Split text into lines
-        lines = text.split('\n')
-        for i, line in enumerate(lines):
-            # Tokenize words/punctuation
-            line_tokens = list(re.finditer(r"(\w+)|([^\w\s]+)", line))
+        # Tokenize reg value (words, punctuation, or manual newlines)
+        tokens = list(re.finditer(r"(\w+)|([^\w\s]+)|(\n)", text))
 
-            for j, match in enumerate(line_tokens):
-                word_count += 1
-                tokens_on_line += 1
-                w_id = f"w{word_count}"
-                tag = "pc" if match.group(2) else "w"
-                token_xml = f'<{tag} xml:id="{w_id}">{escape(match.group(0))}</{tag}>'
-
-                body_parts.append(token_xml)
-                local_ids.append(f"#{w_id}")
-
-                # Logic for <lb/> based on line breaks or forced end-of-annot breaks
-                is_last_of_line = (j == len(line_tokens) - 1)
-                is_last_of_annot = (i == len(lines) - 1 and is_last_of_line)
-
-                if (i < len(lines) - 1 and is_last_of_line) or (is_last_of_annot and force_lb_at_end):
-                    body_parts.append('<lb break="no" precision="low"/>\n        ')
-                    tokens_on_line = 0
-                elif tokens_on_line >= 10:
-                    body_parts.append("\n        ")
-                    tokens_on_line = 0
-
-            # Handle static text line breaks (empty lines)
-            if not line.strip() and len(lines) > 1 and i < len(lines) - 1:
+        for match in tokens:
+            val = match.group(0)
+            if match.group(3):  # \n in regularization
                 body_parts.append('<lb/>\n        ')
                 tokens_on_line = 0
+                continue
 
-        # Link IDs to the original source text directly in the span
-        if orig_label is not None and local_ids:
-            span_entries.append(
-                f'      <span target="{" ".join(local_ids)}">{escape(orig_label)}</span>'
-            )
+            word_count += 1
+            tokens_on_line += 1
+            w_id = f"w{word_count}"
+            tag = "pc" if match.group(2) else "w"
+            local_ids.append(f"#{w_id}")
 
-    # 2. Linear processing of segments
+            if has_internal_lb:
+                # Surgical split
+                split_idx = find_split_point(orig_label, val)
+                part1, part2 = val[:split_idx], val[split_idx:]
+                lb_tag = '<lb break="no" precision="low"/>'
+                token_xml = f'<{tag} xml:id="{w_id}">{escape(part1)}{lb_tag}{escape(part2)}</{tag}>'
+                tokens_on_line = 0  # Force wrap after an internal lb
+            else:
+                token_xml = f'<{tag} xml:id="{w_id}">{escape(val)}</{tag}>'
+
+            body_parts.append(token_xml)
+
+            # Beautification wrapping
+            if tokens_on_line >= 10:
+                body_parts.append("\n        ")
+                tokens_on_line = 0
+
+        if orig_label and local_ids:
+            span_entries.append(f'      <span target="{" ".join(local_ids)}">{escape(orig_label)}</span>')
+
+    # Main Loop
     for annot in sorted_annots:
         pos = _get_selector(annot, "TextPositionSelector")
         start, end = pos.get("start", 0), pos.get("end", 0)
 
-        # Static text
         if start > cursor:
             process_segment(original_text[cursor:start])
 
-        # Annotation
         body = annot.get("body", [{}])[0]
-        reg_value = body.get("value", "")
-        orig_value = original_text[start:end]
-
-        # Detect if we need the custom non-breaking LB
-        has_lb_in_orig = '\n' in orig_value
-
-        # Map regularized tokens to original string content
-        process_segment(reg_value, orig_label=orig_value, force_lb_at_end=has_lb_in_orig)
+        process_segment(body.get("value", ""), orig_label=original_text[start:end])
         cursor = end
 
-    # Trailing text
     if cursor < len(original_text):
         process_segment(original_text[cursor:])
 
-    # 3. Final Assembly
+    # Cleanup formatting
     full_body = " ".join(body_parts).replace(" \n", "\n").replace("\n ", "\n")
 
     return f'''<TEI xmlns="http://www.tei-c.org/ns/1.0">
   <teiHeader>
     <fileDesc>
-      <titleStmt><title>Standoff TEI Export</title></titleStmt>
-      <publicationStmt><p>Cleaned Standoff Mapping</p></publicationStmt>
-      <sourceDesc><p>Linear processing with direct span content</p></sourceDesc>
+      <titleStmt><title>Standoff Export</title></titleStmt>
+      <publicationStmt><p>Fast Standoff via cdifflib</p></publicationStmt>
     </fileDesc>
   </teiHeader>
   <text>
