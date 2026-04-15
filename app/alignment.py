@@ -339,10 +339,19 @@ def align_words(abbreviated: str, regularized: str) -> List[Alignment]:
     while idx < len(output):
         alignment: Alignment = output[idx]
         if alignment.code == "s" and len(alignment.source) > 1:
-            # Deal with dangling char in source/target
-            if alignment.source[-1] in string.punctuation and alignment.target[-1] in string.punctuation:
-                if alignment.source[-1] != alignment.target[-1] and alignment.source[:-1] == alignment.target[:-1]:
+            # Deal with trailing punckt in source/target
+            if alignment.target[-1] in string.punctuation:
+                if alignment.source[-1] in string.punctuation:
                     output = output[:idx] + alignment.split(-1) + output[idx+1:]
+                else:
+                    code = "s"
+                    if alignment.source == alignment.target[:-1]:
+                        code = "n"
+                    als = [
+                        Alignment(source=alignment.source, target=alignment.target[:-1], code=code),
+                        Alignment(source="", target=alignment.target[-1], code="i")
+                    ]
+                    output = output[:idx] + als + output[idx + 1:]
         idx += 1
 
 
@@ -352,11 +361,16 @@ def align_words(abbreviated: str, regularized: str) -> List[Alignment]:
 
     new_output = []
     for alignment in output:
-        if alignment.code == "n" and new_output and new_output[-1].code == "n":
-            new_output[-1].source += alignment.source
-            new_output[-1].target += alignment.target
-        else:
-            new_output.append(alignment)
+        if new_output:
+            if alignment.code == "n" and new_output[-1].code == "n":
+                new_output[-1].source += alignment.source
+                new_output[-1].target += alignment.target
+                continue
+            elif alignment.code == "d" and new_output[-1].code == "d":
+                new_output[-1].source += alignment.source
+                new_output[-1].target += alignment.target
+                continue
+        new_output.append(alignment)
     return new_output
 
 
