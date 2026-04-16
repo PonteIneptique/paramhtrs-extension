@@ -64,35 +64,46 @@ def api_normalize():
         # One model call per line; full_reg is newline-joined normalized lines.
         def generate():
             total = len(orig_lines)
-            normalized = []
+            pairs = []
             for i, line in enumerate(orig_lines):
                 reg = normalize_line(line, model, tokenizer)
-                normalized.append(reg)
+                pairs.append({"orig": line, "reg": reg})
                 yield _sse_event("progress", {"current": i + 1, "total": total,
                                               "result": {"orig": line, "reg": reg}})
-            yield _sse_event("done", {"full_reg": "\n".join(normalized)})
+            yield _sse_event("done", {
+                "full_reg": "\n".join(p["reg"] for p in pairs),
+                "chunks": pairs,
+                "separator": "\n",
+            })
 
     else:
         if split_mode == "pilcrow":
             # Split after each ¶ (lookbehind keeps the ¶ in its chunk)
             full_text = "\n".join(orig_lines)
-            chunks = [c for c in re.split(r"(?<=¶)", full_text) if c.strip()]
+            batch_chunks = [c for c in re.split(r"(?<=¶)", full_text) if c.strip()]
+            separator = ""
         elif split_mode == "dots":
             full_text = " ".join(orig_lines)
-            chunks = _split_on_dots(full_text, min_words)
+            batch_chunks = _split_on_dots(full_text, min_words)
+            separator = " "
         else:
-            chunks = orig_lines
+            batch_chunks = orig_lines
+            separator = "\n"
 
-        # One model call per batch; full_reg is space-joined normalized chunks.
+        # One model call per batch; full_reg is joined normalized chunks.
         def generate():
-            total = len(chunks)
-            normalized = []
-            for i, chunk in enumerate(chunks):
+            total = len(batch_chunks)
+            pairs = []
+            for i, chunk in enumerate(batch_chunks):
                 reg = normalize_line(chunk, model, tokenizer)
-                normalized.append(reg)
+                pairs.append({"orig": chunk, "reg": reg})
                 yield _sse_event("progress", {"current": i + 1, "total": total,
                                               "result": {"orig": chunk, "reg": reg}})
-            yield _sse_event("done", {"full_reg": " ".join(normalized)})
+            yield _sse_event("done", {
+                "full_reg": separator.join(p["reg"] for p in pairs),
+                "chunks": pairs,
+                "separator": separator,
+            })
 
     return Response(
         stream_with_context(generate()),

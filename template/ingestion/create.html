@@ -451,16 +451,18 @@ createApp({
         const decoder = new TextDecoder();
         let buffer = '';
         let finalFullReg = '';
+        let finalChunks = null;
+        let finalSeparator = '\n';
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
-          const chunks = buffer.split('\n\n');
-          buffer = chunks.pop();
-          for (const chunk of chunks) {
-            if (!chunk.startsWith('data: ')) continue;
-            const evt = JSON.parse(chunk.slice(6));
+          const sseChunks = buffer.split('\n\n');
+          buffer = sseChunks.pop();
+          for (const sseChunk of sseChunks) {
+            if (!sseChunk.startsWith('data: ')) continue;
+            const evt = JSON.parse(sseChunk.slice(6));
             if (evt.type === 'progress') {
               this.normalizeProgress = {
                 current: evt.current,
@@ -469,12 +471,14 @@ createApp({
               };
             } else if (evt.type === 'done') {
               finalFullReg = evt.full_reg || '';
+              finalChunks = evt.chunks || null;
+              finalSeparator = evt.separator ?? '\n';
             }
           }
         }
 
         const linesToSave = effLines.map(l => ({ orig: l.text, alto_id: l.alto_id || null }));
-        await this._savePage(linesToSave, finalFullReg);
+        await this._savePage(linesToSave, finalFullReg, finalChunks, finalSeparator);
 
       } catch(e) {
         this.error = e.message || 'An error occurred';
@@ -484,7 +488,7 @@ createApp({
       }
     },
 
-    async _savePage(lines, full_reg) {
+    async _savePage(lines, full_reg, chunks = null, separator = '\n') {
       this.saving = true;
       try {
         const r = await fetch('/pages/new', {
@@ -495,6 +499,8 @@ createApp({
             label: this.pageLabel,
             lines,
             full_reg,
+            chunks,
+            separator,
           })
         });
         const data = await r.json();

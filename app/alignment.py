@@ -533,7 +533,7 @@ def align_words(abbreviated: str, regularized: str) -> List[Alignment]:
     :param regularized: Regularized content
 
     >>> align_words("Au. chou rave de folie", "Av chovrave de folie")
-    [Alignment(source='Au.', target='Av', code='s'), Alignment(source=' ', target=' ', code='n'), Alignment(source='chou rave', target='chovrave', code='s'), Alignment(source=' ', target=' ', code='n'), Alignment(source='de', target='de', code='n'), Alignment(source=' ', target=' ', code='n'), Alignment(source='folie', target='folie', code='n')]
+    [Alignment(source='Au.', target='Av', code='s'), Alignment(source=' ', target=' ', code='n'), Alignment(source='chou rave', target='chovrave', code='s'), Alignment(source=' de folie', target=' de folie', code='n')]
     """
     abbreviated = RE_SPACE.sub(" ", abbreviated)
     regularized = RE_SPACE.sub(" ", regularized)

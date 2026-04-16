@@ -59,40 +59,67 @@ def _make_annot(text: str, start: int, end: int, value: str, purpose: str) -> di
     }
 
 
+def _alignments_to_annotations(alignments: list, reference_text: str, char_offset: int = 0) -> list:
+    """Convert Alignment objects to W3C annotations with positions relative to reference_text."""
+    annotations = []
+    pos = char_offset
+    for almt in alignments:
+        src_len = len(almt.source)
+        if almt.code == 'n' or (almt.code == 's' and almt.source == almt.target):
+            pos += src_len
+        elif almt.code == 's':
+            if not almt.source.strip() and not almt.target.strip():
+                pos += src_len
+                continue
+            annotations.append(_make_annot(reference_text, pos, pos + src_len, almt.target, "normalizing"))
+            pos += src_len
+        elif almt.code == 'd':
+            if not almt.source.strip():
+                pos += src_len
+                continue
+            annotations.append(_make_annot(reference_text, pos, pos + src_len, "", "deletion"))
+            pos += src_len
+        elif almt.code == 'i':
+            if not almt.target.strip():
+                continue
+            annotations.append(_make_annot(reference_text, pos, pos, almt.target, "insertion"))
+    return annotations
+
+
 def align_to_annotations(original_text: str, regularized_text: str) -> list:
     """Convert align_words() output to W3C Web Annotation JSON."""
     from .alignment import align_words
     alignments = align_words(original_text, regularized_text)
+    return _alignments_to_annotations(alignments, original_text)
 
-    annotations = []
-    char_pos = 0
-    for almt in alignments:
-        src_len = len(almt.source)
-        if almt.code == 'n' or (almt.code == 's' and almt.source == almt.target):
-            char_pos += src_len
-        elif almt.code == 's':
-            # Skip substitutions that are whitespace-only on both sides
-            if not almt.source.strip() and not almt.target.strip():
-                char_pos += src_len
-                continue
-            start, end = char_pos, char_pos + src_len
-            annotations.append(_make_annot(original_text, start, end, almt.target, "normalizing"))
-            char_pos += src_len
-        elif almt.code == 'd':
-            # Skip deletion of whitespace-only spans
-            if not almt.source.strip():
-                char_pos += src_len
-                continue
-            start, end = char_pos, char_pos + src_len
-            annotations.append(_make_annot(original_text, start, end, "", "deletion"))
-            char_pos += src_len
-        elif almt.code == 'i':
-            # Skip insertion of whitespace-only content
-            if not almt.target.strip():
-                continue
-            annotations.append(_make_annot(original_text, char_pos, char_pos, almt.target, "insertion"))
-            # insertion does not consume source characters
-    return annotations
+
+def align_to_annotations_from_chunks(chunks: list[dict], separator: str = "\n") -> list:
+    """Align each (orig, reg) chunk pair independently and return consolidated annotations.
+
+    Aligning per-chunk keeps each sub-problem small and scoped to what the
+    normalisation model actually saw, so the edit-distance DP is more accurate
+    than aligning the entire page at once.
+
+    Args:
+        chunks:    list of {"orig": str, "reg": str} dicts (in document order)
+        separator: string that was placed between consecutive orig chunks when
+                   the full page text was assembled.  Typically "\n" (lines
+                   mode) or " " (dots mode).  Pilcrow chunks already carry
+                   their own delimiter so separator="" is correct there.
+    """
+    from .alignment import align_words
+    reference_text = separator.join(c["orig"] for c in chunks)
+    all_annotations = []
+    char_offset = 0
+    for idx, chunk in enumerate(chunks):
+        orig, reg = chunk["orig"], chunk.get("reg", "")
+        if reg:
+            alignments = align_words(orig, reg)
+            all_annotations.extend(_alignments_to_annotations(alignments, reference_text, char_offset))
+        char_offset += len(orig)
+        if idx < len(chunks) - 1:
+            char_offset += len(separator)
+    return all_annotations
 
 
 def apply_annotations_to_text(original_text: str, annotations: list) -> str:

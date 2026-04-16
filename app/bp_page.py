@@ -6,7 +6,7 @@ from sqlalchemy import func
 
 from .models import db, Page, Line, Document, Project
 from .bp_auth import requires_access
-from .annot_utils import align_to_annotations, build_tei_from_annotations
+from .annot_utils import align_to_annotations, align_to_annotations_from_chunks, build_tei_from_annotations
 
 bp_page = Blueprint(
     "bp_page", __name__,
@@ -56,10 +56,19 @@ def page_create():
 
         db.session.flush()
 
-        # Align full page text against the full normalized text in one pass
-        full_text = "\n".join(orig_lines)
+        chunks = data.get("chunks")
+        separator = data.get("separator", "\n")
         full_reg = (data.get("full_reg") or "").strip()
-        page.annotations = align_to_annotations(full_text, full_reg) if full_reg else []
+        if chunks:
+            # Prefer per-chunk alignment: each chunk was produced by the model
+            # from its own excerpt, so the DP sub-problems are smaller and
+            # better scoped.
+            page.annotations = align_to_annotations_from_chunks(chunks, separator=separator)
+        elif full_reg:
+            full_text = "\n".join(orig_lines)
+            page.annotations = align_to_annotations(full_text, full_reg)
+        else:
+            page.annotations = []
         db.session.commit()
         return jsonify({
             "status": "ok",
