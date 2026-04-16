@@ -28,6 +28,70 @@ from app.alignment import align_words
 #                           Alignment(source=".", target=".", code="n")]
 
 
+def test_trailing_punctuation():
+    """
+    Tests the trailing-punctuation splitting rules:
+
+    - Both tokens end with different punctuation → split: s(word,word) + s(p1,p2)
+    - Only target has trailing punctuation   → split: s/n(word,word) + i('',p)
+    - Only source has trailing punctuation   → keep as one substitution (can't
+      distinguish abbreviation dots from sentence dots, e.g. `motũ.` vs `G.`)
+    - Both tokens end with the same punctuation → split: s/n(word,word) + n(p,p)
+    """
+    test_cases = [
+        # Both end with different punct → split both
+        ("renouari.", "renovari,", [
+            Alignment("renouari", "renovari", "s"),
+            Alignment(".", ",", "s"),
+        ]),
+        # Only target ends with comma → split off as insertion
+        ("qs", "quaesumus,", [
+            Alignment("qs", "quaesumus", "s"),
+            Alignment("", ",", "i"),
+        ]),
+        # Only target ends with period → split off as insertion
+        ("subiecti", "subjecti.", [
+            Alignment("subiecti", "subjecti", "s"),
+            Alignment("", ".", "i"),
+        ]),
+        # Both end with same period → split: substitution + null
+        ("iustitia.", "justitiam.", [
+            Alignment("iustitia", "justitiam", "s"),
+            Alignment(".", ".", "n"),
+        ]),
+        # Both end with different punct, word part identical → null + substitution
+        ("casa.", "casa,", [
+            Alignment("casa", "casa", "n"),
+            Alignment(".", ",", "s"),
+        ]),
+        # Source == target[:-1], target has trailing period → null + insertion
+        ("a", "a.", [
+            Alignment("a", "a", "n"),
+            Alignment("", ".", "i"),
+        ]),
+        # Source has trailing punct with close match → keep as single substitution
+        # (cannot reliably distinguish abbreviation dot from sentence dot)
+        ("fiance.", "fiances", [
+            Alignment("fiance.", "fiances", "s"),
+        ]),
+        # Source abbreviation dot → keep as single substitution (rule 5.2)
+        ("motũ.", "motum", [
+            Alignment("motũ.", "motum", "s"),
+        ]),
+        ("G.", "Galienus", [
+            Alignment("G.", "Galienus", "s"),
+        ]),
+    ]
+
+    for source, target, expected in test_cases:
+        result = align_words(source, target)
+        assert result == expected, (
+            f"Failed trailing-punct alignment for: {source!r} -> {target!r}\n"
+            f"  expected: {expected}\n"
+            f"  got:      {result}"
+        )
+
+
 def test_alignment_rules():
     """
     Tests the alignment logic against the 7 core business rules provided.
@@ -234,7 +298,8 @@ def test_long_latin():
         Alignment(source=' ', target=' ', code='n'),
         Alignment(source='sem̃', target='semen', code='s'),
         Alignment(source=' ', target=' ', code='n'),
-        Alignment(source='emitit᷑.', target='emittitur,', code='s'),
+        Alignment(source='emitit᷑', target='emittitur', code='s'),
+        Alignment(source='.', target=',', code='s'),
         Alignment(source=' cui aliud ', target=' cui aliud ', code='n'),
         Alignment(source='obuiando', target='obviando', code='s'),
         Alignment(source=' ', target=' ', code='n'),
@@ -307,8 +372,8 @@ def test_long_latin():
         Alignment(source=' ', target=' ', code='n'),
         Alignment(source='ꝑ', target='per', code='s'),
         Alignment(source=' ', target=' ', code='n'),
-        Alignment(source='motũ', target='motum', code='s'), # Is there really a way to differentiate motũ. -> motum[. deleted] from G. -> Galienus [. part of abbrev] ?
-        Alignment(source='.', target='', code='d'),
+        # There is no way to differentiate motũ. -> motum[. deleted] from G. -> Galienus [. part of abbrev] ?
+        Alignment(source='motũ.', target='motum', code='s'),
         Alignment(source=' ', target=' ', code='n'),
         Alignment(source='oĩa', target='omnia', code='s'),
         Alignment(source=' ', target=' ', code='n'),
@@ -330,8 +395,7 @@ def test_long_latin():
         Alignment(source=' ', target=' ', code='n'),
         Alignment(source='qͥ', target='qui', code='s'),
         Alignment(source=' ', target=' ', code='n'),
-        Alignment(source='ẽ', target='est', code='s'),
-        Alignment(source='.', target='', code='d'),
+        Alignment(source='ẽ.', target='est', code='s'),
         Alignment(source='', target=' ', code='i'),
         Alignment(source='ĩ', target='in', code='s'),
         Alignment(source=' ', target=' ', code='n'),
@@ -379,7 +443,8 @@ def test_long_latin():
         Alignment(source=' ', target=' ', code='n'),
         Alignment(source='ypoc̾s', target='Ypocras', code='s'),
         Alignment(source=' ', target=' ', code='n'),
-        Alignment(source='dic̃', target='dicit:', code='s'),
+        Alignment(source='dic̃', target='dicit', code='s'),
+        Alignment(source='', target=':', code='i'),
         Alignment(source=' ', target=' ', code='n'),
         Alignment(source='qͥbꝰc̾q\uf1ac', target='quibuscumque', code='s'),
         Alignment(source=' ', target=' ', code='n'),
@@ -451,8 +516,7 @@ def test_shorter_latin():
     expected = [
         Alignment(source='libus', target='libus', code='n'),
         Alignment(source=':', target=',', code='s'),
-        Alignment(source=' ', target=' ', code='n'),
-        Alignment(source='tribue', target='tribue', code='n'),
+        Alignment(source=' tribue', target=' tribue', code='n'),
         Alignment(source='', target=',', code='i'),
         Alignment(source=' ', target=' ', code='n'),
         Alignment(source='qs', target='quaesumus', code='s'),
@@ -470,7 +534,8 @@ def test_shorter_latin():
         Alignment(source=' ', target=' ', code='n'),
         Alignment(source='capia¬ mus', target='capiamus', code='s'),
         Alignment(source=' dona ', target=' dona ', code='n'),
-        Alignment(source='subiecti', target='subjecti.', code='s'),
+        Alignment(source='subiecti', target='subjecti', code='s'),
+        Alignment(source='', target='.', code='i'),
         Alignment(source=' ', target=' ', code='n'),
         Alignment(source='ꝑ .d. ', target='', code='d'),
         Alignment(source='Concede nobis', target='Concede nobis', code='n'),
@@ -493,8 +558,8 @@ def test_shorter_latin():
         Alignment(source=' ', target=' ', code='n'),
         Alignment(source='semꝑ', target='semper', code='s'),
         Alignment(source=' amare ', target=' amare ', code='n'),
-        Alignment(source='iustitiã.', target='justitiam.', code='s'),
-        Alignment(source=' ', target=' ', code='n'),
+        Alignment(source='iustitiã', target='justitiam', code='s'),
+        Alignment(source='. ', target='. ', code='n'),
         Alignment(source='ꝑ¬', target='', code='d')
     ]
     assert abbr.replace("\n", " ") == "".join([alignment.source for alignment in expected])
@@ -543,8 +608,8 @@ camblances ou il auoient lor fiance. """
         Alignment(source=' des', target=' des', code='n'),
         Alignment(source='', target=' ', code='i'),
         Alignment(source='iuis', target='iuis', code='n'),
-        Alignment(source='.:', target='', code='d'),
         Alignment(source='', target=' ', code='i'),
+        Alignment(source='.:', target='', code='d'),
         Alignment(source='Qins', target='ains', code='s'),
         Alignment(source=' aoroient ', target=' aoroient ', code='n'),
         Alignment(source='⁊', target='et', code='s'),
@@ -565,8 +630,7 @@ camblances ou il auoient lor fiance. """
         Alignment(source=' ', target=' ', code='n'),
         Alignment(source='ou', target='o', code='s'),
         Alignment(source=' il auoient lor ', target=' il auoient lor ', code='n'),
-        Alignment(source='fiance', target='fiances', code='s'),
-        Alignment(source='.', target='', code='d'),
+        Alignment(source='fiance.', target='fiances', code='s'),
         Alignment(source=' ', target=' ', code='n')
     ]
     assert abbr.replace("\n", " ") == "".join([alignment.source for alignment in expected])

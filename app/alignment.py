@@ -34,6 +34,7 @@ MAP_RE_ABBR_SIMPLIFICATION = {
     "ꝓ": "pr",
     "\u1dd1": "ur",
     "⁊": "et",
+    "&": "et",
     "ꝑ": "per",
     "ħ": "h",  # For some characters, we need to ensure that a "normal" form is proposed, to reduce distance.
     "ꝙ": "qu",
@@ -132,7 +133,7 @@ def token_splitter(data: str) -> list[str]:
     pattern = re.compile(
         r"""(
         \.\w+\.        # abbreviations like .xxv. or .s.
-        |[⁊\w+'\uf1ac¬]+(?:\s[\uf1ac\u0363-\u036F\u1DDA\u1DDC-\u1DDD\u1DE0\u1DE4\u1DE6\u1DE8\u1DEB\u1DEE\u1DF1\uF02B\uF030\uF033])?  # words with apostrophes/hyphens or space + combining
+        |[⁊&\w+'\uf1ac¬]+(?:\s[\uf1ac\u0363-\u036F\u1DDA\u1DDC-\u1DDD\u1DE0\u1DE4\u1DE6\u1DE8\u1DEB\u1DEE\u1DF1\uF02B\uF030\uF033])?  # words with apostrophes/hyphens or space + combining
         |[\.,:;?!-]+           # punctuation
         )""",
         re.VERBOSE
@@ -194,6 +195,35 @@ def _compute_operation(
             tbl[(i + 1, j + 1)] = min([insert_cost, delete_cost, edit_cost], key=lambda t: t[0])
 
     return tbl
+
+
+def _simplify_abbr(s: str) -> str:
+    s = RE_ABBR_SIMPLIFICATION.sub(lambda m: MAP_RE_ABBR_SIMPLIFICATION[m.group()], s.lower())
+    return s.translate(str.maketrans('', '', string.punctuation))
+
+
+def _simplify_reg(s: str) -> str:
+    s = RE_REG_SIMPLIFICATION.sub(lambda m: MAP_RE_REG_SIMPLIFICATION[m.group()], s.lower())
+    return s.translate(str.maketrans('', '', string.punctuation))
+
+
+def find_prefix_split(src: str, tgt: str) -> int:
+    """Return split index k so that src[:k] simplifies to tgt, or -1 if not found.
+
+    >>> find_prefix_split('⁊si', 'et')
+    1
+    >>> find_prefix_split('laloy', 'la')
+    2
+    >>> find_prefix_split('abc', 'xyz')
+    -1
+    """
+    tgt_simp = _simplify_reg(tgt)
+    if not tgt_simp:
+        return -1
+    for k in range(1, len(src)):
+        if _simplify_abbr(src[:k]) == tgt_simp:
+            return k
+    return -1
 
 
 def weighted_edit_distance(abbr, reg):
@@ -315,6 +345,188 @@ def sub_alignments(orig_toks: List[str], norm_toks: List[str], max_distance=20) 
     return out
 
 
+def reprocess_space_insertion(alignments: List[Alignment]) -> List[Alignment]:
+    """Handle space insertions/deletions that require splitting source or target tokens.
+
+    Handles three patterns (applied repeatedly until stable):
+
+    Pattern A — source token starts with target token, insertions follow:
+      s(src, tgt_prefix) + i('',' ') + i('', word) + ...
+        where src.startswith(tgt_prefix)
+      → n(tgt_prefix,tgt_prefix) + i('',' ') + s/n(src_suffix, word) + ...
+
+    Pattern B — same but with an intervening null space in source:
+      s(src, tgt_prefix) + n(' ',' ') + i('', word) + i('',' ') + ...
+        where src.startswith(tgt_prefix)
+      → n(tgt_prefix,tgt_prefix) + i('',' ') + s/n(src_suffix, word) + n(' ',' ') + ...
+      (source space re-paired with the i('',' ') that followed word)
+
+    Pattern C — insertion word matches prefix of next substitution's source:
+      i('', word) + i('',' ') + s(src, tgt)
+        where src.startswith(word)
+      → n(word, word) + i('',' ') + s/n(src_suffix, tgt)
+
+    Pattern D — source has trailing punct not in target:
+      s(src_punct, tgt)  where src_punct[-1] in punctuation and src_punct[:-1] == tgt
+      → n(tgt, tgt) + d(punct, '')
+    """
+    ops = list(alignments)
+    changed = True
+    while changed:
+        changed = False
+        new_ops = []
+        i = 0
+        while i < len(ops):
+            al = ops[i]
+
+            # Pattern D: trailing source punctuation not in target
+            if (al.code == "s" and al.source and al.target
+                    and len(al.source) > 1 and al.source[-1] in string.punctuation
+                    and not al.target[-1] in string.punctuation
+                    and al.source[:-1] == al.target):
+                new_ops.append(Alignment(al.target, al.target, "n"))
+                new_ops.append(Alignment(al.source[-1], "", "d"))
+                i += 1
+                changed = True
+                continue
+
+            # Patterns A & B: s(src, tgt_prefix) where src[:k] simplifies to tgt_prefix
+            if (al.code == "s" and al.source and al.target
+                    and al.source.strip() and al.target.strip()):
+                split_k = find_prefix_split(al.source, al.target)
+            else:
+                split_k = -1
+            if split_k != -1:
+                src, tgt_prefix = al.source, al.target
+                suffix = src[split_k:]
+
+                prefix_src = src[:split_k]
+                prefix_code = "n" if prefix_src == tgt_prefix else "s"
+
+                # Pattern A: immediately followed by i('',' ') then i('', word)
+                if (i + 2 < len(ops)
+                        and ops[i+1].code == "i" and ops[i+1].source == "" and ops[i+1].target == " "
+                        and ops[i+2].code == "i" and ops[i+2].source == ""):
+                    word = ops[i+2].target
+                    code = "n" if suffix == word else "s"
+                    new_ops.append(Alignment(prefix_src, tgt_prefix, prefix_code))
+                    new_ops.append(Alignment("", " ", "i"))
+                    new_ops.append(Alignment(suffix, word, code))
+                    i += 3
+                    changed = True
+                    continue
+
+                # Pattern B: followed by n(' ',' ') then i('', word) then i('',' ')
+                if (i + 3 < len(ops)
+                        and ops[i+1].code == "n" and space_norm(ops[i+1].source) == " "
+                        and ops[i+2].code == "i" and ops[i+2].source == "" and ops[i+2].target.strip()
+                        and ops[i+3].code == "i" and ops[i+3].source == "" and ops[i+3].target == " "):
+                    word = ops[i+2].target
+                    code = "n" if suffix == word else "s"
+                    new_ops.append(Alignment(prefix_src, tgt_prefix, prefix_code))
+                    new_ops.append(Alignment("", " ", "i"))          # target space before suffix
+                    new_ops.append(Alignment(suffix, word, code))
+                    new_ops.append(Alignment(" ", " ", "n"))          # source space re-paired
+                    i += 4
+                    changed = True
+                    continue
+
+            # Pattern C: i('', word) + i('',' ') + s(src, tgt) where src.startswith(word)
+            if (al.code == "i" and not al.source and al.target.strip()
+                    and i + 2 < len(ops)
+                    and ops[i+1].code == "i" and ops[i+1].source == "" and ops[i+1].target == " "
+                    and ops[i+2].code == "s" and ops[i+2].source.startswith(al.target)):
+                word = al.target
+                src2, tgt2 = ops[i+2].source, ops[i+2].target
+                suffix2 = src2[len(word):]
+                code = "n" if suffix2 == tgt2 else "s"
+                new_ops.append(Alignment(word, word, "n"))
+                new_ops.append(Alignment("", " ", "i"))
+                new_ops.append(Alignment(suffix2, tgt2, code))
+                i += 3
+                changed = True
+                continue
+
+            new_ops.append(ops[i])
+            i += 1
+        ops = new_ops
+    return ops
+
+
+def merge_insert_delete(alignments: List[Alignment]) -> List[Alignment]:
+    """Merge adjacent i('',tgt) + d(src,'') or d(src,'') + i('',tgt) into s(src,tgt).
+
+    Only applies when both src and tgt are non-empty, non-space word tokens.
+    i('','cum') + d('ẽ','') -> s('ẽ','cum')
+    """
+    ops = list(alignments)
+    changed = True
+    while changed:
+        changed = False
+        new_ops = []
+        i = 0
+        while i < len(ops):
+            al = ops[i]
+            if i + 1 < len(ops):
+                nx = ops[i + 1]
+                # i + d
+                if (al.code == "i" and not al.source and al.target.strip()
+                        and nx.code == "d" and not nx.target and nx.source.strip()):
+                    new_ops.append(Alignment(nx.source, al.target, "s"))
+                    i += 2
+                    changed = True
+                    continue
+                # d + i
+                if (al.code == "d" and not al.target and al.source.strip()
+                        and nx.code == "i" and not nx.source and nx.target.strip()):
+                    new_ops.append(Alignment(al.source, nx.target, "s"))
+                    i += 2
+                    changed = True
+                    continue
+            new_ops.append(ops[i])
+            i += 1
+        ops = new_ops
+    return ops
+
+
+def cancel_mirrored_punct(alignments: List[Alignment]) -> List[Alignment]:
+    """Cancel i('', X) + [d(' ','')*] + d(X, '') when X is punctuation.
+
+    This fixes the case where trailing punct ends up in target token (e.g. 'a.')
+    but exists separately in source (e.g. 'a' + ' ' + '.'):
+      n(a,a) + i('','.') + d(' ','') + d('.','') -> n(a,a) + d(' ','') + n('.','.')
+    """
+    ops = list(alignments)
+    changed = True
+    while changed:
+        changed = False
+        new_ops = []
+        i = 0
+        while i < len(ops):
+            al = ops[i]
+            # Look for i('', X) where X is a single punct
+            if (al.code == "i" and not al.source
+                    and len(al.target) == 1 and al.target in string.punctuation):
+                punct = al.target
+                # Scan ahead through space deletions to find d(punct, '')
+                j = i + 1
+                space_dels = []
+                while j < len(ops) and ops[j].code == "d" and ops[j].source.strip() == "" and not ops[j].target:
+                    space_dels.append(ops[j])
+                    j += 1
+                if j < len(ops) and ops[j].code == "d" and ops[j].source == punct and not ops[j].target:
+                    # Cancel: emit the space deletions, then n(punct, punct)
+                    new_ops.extend(space_dels)
+                    new_ops.append(Alignment(punct, punct, "n"))
+                    i = j + 1
+                    changed = True
+                    continue
+            new_ops.append(ops[i])
+            i += 1
+        ops = new_ops
+    return ops
+
+
 def align_words(abbreviated: str, regularized: str) -> List[Alignment]:
     """ Align two sequences word to words
     :param abbreviated: Abbreviated content
@@ -323,6 +535,8 @@ def align_words(abbreviated: str, regularized: str) -> List[Alignment]:
     >>> align_words("Au. chou rave de folie", "Av chovrave de folie")
     [Alignment(source='Au.', target='Av', code='s'), Alignment(source=' ', target=' ', code='n'), Alignment(source='chou rave', target='chovrave', code='s'), Alignment(source=' ', target=' ', code='n'), Alignment(source='de', target='de', code='n'), Alignment(source=' ', target=' ', code='n'), Alignment(source='folie', target='folie', code='n')]
     """
+    abbreviated = RE_SPACE.sub(" ", abbreviated)
+    regularized = RE_SPACE.sub(" ", regularized)
     abbreviated_tokens = token_splitter(abbreviated)
     regularized_tokens = token_splitter(regularized)
 
@@ -335,25 +549,32 @@ def align_words(abbreviated: str, regularized: str) -> List[Alignment]:
             for i, j, op, _ in alignments
         ]))
 
+    output = reprocess_space_insertion(output)
+    output = merge_insert_delete(output)
+
     idx = 0
     while idx < len(output):
         alignment: Alignment = output[idx]
-        if alignment.code == "s" and len(alignment.source) > 1:
-            # Deal with trailing punckt in source/target
-            if alignment.target[-1] in string.punctuation:
-                if alignment.source[-1] in string.punctuation:
+        if alignment.code == "s" and alignment.source and alignment.target:
+            src_ends_punct = alignment.source[-1] in string.punctuation
+            tgt_ends_punct = alignment.target[-1] in string.punctuation
+            if tgt_ends_punct and len(alignment.target) > 1:
+                if src_ends_punct:
+                    # Both end with punct: split both at -1
                     output = output[:idx] + alignment.split(-1) + output[idx+1:]
                 else:
-                    code = "s"
-                    if alignment.source == alignment.target[:-1]:
-                        code = "n"
+                    # Target has trailing punct, source doesn't: split it off as insertion
+                    code = "n" if alignment.source == alignment.target[:-1] else "s"
                     als = [
                         Alignment(source=alignment.source, target=alignment.target[:-1], code=code),
                         Alignment(source="", target=alignment.target[-1], code="i")
                     ]
                     output = output[:idx] + als + output[idx + 1:]
+            # Source trailing punct with no target punct: always keep together
         idx += 1
 
+    # Cancel i('',X) / d(X,'') pairs for the same punctuation char (e.g. a . -> a.)
+    output = cancel_mirrored_punct(output)
 
     for alignment in output:
         if alignment.code == "n" and alignment.source != alignment.target:
@@ -386,7 +607,7 @@ def reprocess_space(
         j = len(ops)
         if src and op == "d": # word is deleted, this is weird
             if src.strip():
-                if j-2 > 0 and (
+                if j >= 2 and (
                     space_norm(ops[j-1].source) == " " or space_norm(ops[j-1].target) == " "
                 ) and ops[j-2].code == "s": # Look backwards in ops
                     # There needs to be a space before
@@ -418,7 +639,7 @@ def reprocess_space(
                         continue
                 if i+2 < len(alignments) and (
                     space_norm(alignments[i+1].source) == " " or space_norm(alignments[i+1].target) == " "
-                ) and alignments[j+2].code == "s":
+                ) and alignments[i+2].code == "s":
                     orig_dist = weighted_edit_distance(
                         alignments[i+2].source, alignments[i+2].target
                     )
