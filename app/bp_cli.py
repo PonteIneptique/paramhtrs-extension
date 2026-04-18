@@ -11,7 +11,7 @@ import click
 from flask.cli import AppGroup
 
 from .bp_norm import _split_on_punct, _enforce_max_bytes
-from .alignment import align_words
+from .char_alignment import align_words
 
 cli_group = AppGroup("align", help="Chunk & align original vs regularized text.")
 
@@ -55,14 +55,14 @@ def _print_alignments(alignments: list, show_nulls: bool) -> None:
               help="Delimiter characters for punctuation-mode splitting.")
 @click.option("--min-words", default=100, show_default=True, type=int,
               help="Minimum words per chunk.")
-@click.option("--max-bytes", default=512, show_default=True, type=int,
-              help="Maximum bytes per chunk.")
 @click.option("--hide-nulls", is_flag=True, help="Suppress match (null) alignments.")
 @click.option("--chunks-only", is_flag=True, help="Print chunks only, skip alignment.")
 def align_run(orig, orig_file, reg, reg_file, model, delimiters,
-              min_words, max_bytes, hide_nulls, chunks_only):
+              min_words, hide_nulls, chunks_only):
     """Chunk a text and align it against its normalized form."""
     from flask import current_app
+
+    max_bytes = current_app.config["MAX_CHUNK_BYTES"]
 
     # ── read original ─────────────────────────────────────────────────────────
     if orig:

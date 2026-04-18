@@ -60,7 +60,8 @@ def api_normalize():
         return Response(_sse_done(""), mimetype="text/event-stream",
                         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-    max_chunk_bytes = int(data.get("max_chunk_bytes", 512))
+    from flask import current_app
+    max_chunk_bytes = current_app.config['MAX_CHUNK_BYTES']
     delimiters = list(data.get("delimiters", "¶;."))
 
     if split_mode == "lines":

@@ -89,15 +89,13 @@ def _alignments_to_annotations(alignments: list, reference_text: str, char_offse
             annotations.append(_make_annot(reference_text, pos, pos + src_len, "", "deletion"))
             pos += src_len
         elif almt.code == 'i':
-            if not almt.target.strip():
-                continue
             annotations.append(_make_annot(reference_text, pos, pos, almt.target, "insertion"))
     return annotations
 
 
 def align_to_annotations(original_text: str, regularized_text: str) -> list:
     """Convert align_words() output to W3C Web Annotation JSON."""
-    from .alignment import align_words
+    from .char_alignment import align_words
     alignments = align_words(original_text, regularized_text)
     return _alignments_to_annotations(alignments, original_text)
 
@@ -116,7 +114,7 @@ def align_to_annotations_from_chunks(chunks: list[dict], separator: str = "\n") 
                    mode) or " " (dots mode).  Pilcrow chunks already carry
                    their own delimiter so separator="" is correct there.
     """
-    from .alignment import align_words
+    from .char_alignment import align_words
     reference_text = separator.join(c["orig"] for c in chunks)
     all_annotations = []
     char_offset = 0

@@ -182,11 +182,6 @@
                  v-model.number="minWords" min="10" max="500">
         </div>
       </div>
-      <div class="d-flex align-items-center gap-2">
-        <label class="form-label form-label-sm mb-0 small text-muted">Max chunk size (bytes)</label>
-        <input type="number" class="form-control form-control-sm" style="width:90px"
-               v-model.number="maxChunkBytes" min="64" max="8192">
-      </div>
     </div>
 
     <div class="d-flex gap-2 mt-3">
@@ -252,7 +247,6 @@ createApp({
       splitMode: 'lines',
       minWords: 100,
       delimiters: '¶;.',
-      maxChunkBytes: 512,
       // state
       normalizing: false,
       normalizeProgress: { current: 0, total: 0, lastOrig: '' },
@@ -432,7 +426,6 @@ createApp({
             split_mode: this.splitMode,
             min_words: this.minWords,
             delimiters: this.delimiters,
-            max_chunk_bytes: this.maxChunkBytes,
           })
         });
 
