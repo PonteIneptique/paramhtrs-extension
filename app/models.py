@@ -1,4 +1,4 @@
-from sqlalchemy import CheckConstraint
+from sqlalchemy import CheckConstraint, inspect, text
 from flask import current_app
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin, current_user
@@ -13,17 +13,36 @@ db = SQLAlchemy()
 
 class User(db.Model, UserMixin):
     __tablename__ = "users"
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
+    id            = db.Column(db.Integer, primary_key=True)
+    username      = db.Column(db.String(80),  unique=True, nullable=False)
     password_hash = db.Column(db.String(128), nullable=False)
-    is_admin = db.Column(db.Boolean, default=False)
-    is_approved = db.Column(db.Boolean, default=False)
+    is_admin      = db.Column(db.Boolean, default=False)
+    is_approved   = db.Column(db.Boolean, default=False)
+    # Profile fields (all optional)
+    first_name    = db.Column(db.String(100), nullable=True)
+    last_name     = db.Column(db.String(100), nullable=True)
+    nickname      = db.Column(db.String(80),  nullable=True, unique=True)  # used as TEI @resp key
+    orcid         = db.Column(db.String(30),  nullable=True)
+    institution   = db.Column(db.String(200), nullable=True)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
+
+
+class Work(db.Model):
+    __tablename__ = "works"
+    id    = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(300), nullable=False)
+    genre = db.Column(db.String(100), nullable=True)
+
+
+class DocumentWork(db.Model):
+    __tablename__ = "document_work"
+    document_id = db.Column(db.Integer, db.ForeignKey("documents.id"), primary_key=True)
+    work_id     = db.Column(db.Integer, db.ForeignKey("works.id"),     primary_key=True)
 
 
 class ProjectUser(db.Model):
@@ -77,6 +96,7 @@ class Document(db.Model):
     creator_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     language = db.Column(db.String(10), nullable=False, default="fre")
     qid = db.Column(db.String(100), nullable=True)
+    iiif_manifest_url = db.Column(db.Text, nullable=True)
 
     pages = db.relationship(
         "Page",
@@ -89,6 +109,13 @@ class Document(db.Model):
         "User",
         secondary="document_user",
         lazy="dynamic"
+    )
+
+    works = db.relationship(
+        "Work",
+        secondary="document_work",
+        backref=db.backref("documents", lazy="dynamic"),
+        lazy="dynamic",
     )
 
     def user_has_access(self, user: User) -> bool:
@@ -213,3 +240,34 @@ def db_drop():
     with current_app.app_context():
         db.drop_all()
     click.echo("DB Dropped")
+
+
+@db_cli.command("upgrade")
+def db_upgrade():
+    """Add any missing columns/tables to an existing database."""
+    with current_app.app_context():
+        inspector = inspect(db.engine)
+
+        # New tables (handled by create_all)
+        db.create_all()
+        click.echo("New tables created (if any)")
+
+        # Columns to add: (table_name, column_name, column_def)
+        new_columns = [
+            ("users",     "first_name",        "VARCHAR(100)"),
+            ("users",     "last_name",          "VARCHAR(100)"),
+            ("users",     "nickname",           "VARCHAR(80)"),
+            ("users",     "orcid",              "VARCHAR(30)"),
+            ("users",     "institution",        "VARCHAR(200)"),
+            ("documents", "iiif_manifest_url",  "TEXT"),
+        ]
+        for table, col, col_def in new_columns:
+            existing = [c["name"] for c in inspector.get_columns(table)]
+            if col not in existing:
+                db.session.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_def}"))
+                click.echo(f"  Added {table}.{col}")
+            else:
+                click.echo(f"  {table}.{col} already exists — skipped")
+
+        db.session.commit()
+        click.echo("Upgrade complete")

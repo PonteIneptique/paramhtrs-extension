@@ -71,7 +71,16 @@ def _alignments_to_annotations(alignments: list, reference_text: str, char_offse
             if not almt.source.strip() and not almt.target.strip():
                 pos += src_len
                 continue
-            annotations.append(_make_annot(reference_text, pos, pos + src_len, almt.target, "normalizing"))
+            # Extend the annotation span by one character when the target value
+            # already ends with the character immediately following the source span.
+            # Without this, reconstruction appends that character twice: once from
+            # the annotation value and once from the original text gap.
+            end = pos + src_len
+            if (almt.target
+                    and end < len(reference_text)
+                    and reference_text[end] == almt.target[-1]):
+                end += 1
+            annotations.append(_make_annot(reference_text, pos, end, almt.target, "normalizing"))
             pos += src_len
         elif almt.code == 'd':
             if not almt.source.strip():
@@ -154,7 +163,7 @@ def _escape_segment(text: str) -> str:
 
 
 
-def build_tei_from_annotations(original_text: str, annotations: list) -> str:
+def build_tei_from_annotations(original_text: str, annotations: list, users_by_id: dict = None) -> str:
     sorted_annots = sorted(
         annotations,
         key=lambda a: _get_selector(a, "TextPositionSelector").get("start", 0)
@@ -163,9 +172,10 @@ def build_tei_from_annotations(original_text: str, annotations: list) -> str:
     body_parts = []
     span_entries = []
     word_count, cursor, tokens_on_line = 0, 0, 0
+    annot_resp_id = None  # set per-annotation before calling process_segment
 
     def process_segment(text, orig_label=None):
-        nonlocal word_count, tokens_on_line
+        nonlocal word_count, tokens_on_line, annot_resp_id
         local_ids = []
         has_internal_lb = orig_label and '\n' in orig_label
 
@@ -203,7 +213,10 @@ def build_tei_from_annotations(original_text: str, annotations: list) -> str:
                 tokens_on_line = 0
 
         if orig_label and local_ids:
-            span_entries.append(f'      <span target="{" ".join(local_ids)}">{escape(orig_label)}</span>')
+            resp_attr = ""
+            if users_by_id and annot_resp_id and annot_resp_id in users_by_id:
+                resp_attr = f' resp="#{escape(users_by_id[annot_resp_id])}"'
+            span_entries.append(f'      <span target="{" ".join(local_ids)}"{resp_attr}>{escape(orig_label)}</span>')
 
     # Main Loop
     for annot in sorted_annots:
@@ -211,8 +224,10 @@ def build_tei_from_annotations(original_text: str, annotations: list) -> str:
         start, end = pos.get("start", 0), pos.get("end", 0)
 
         if start > cursor:
+            annot_resp_id = None
             process_segment(original_text[cursor:start])
 
+        annot_resp_id = annot.get("resp_id")
         body = annot.get("body", [{}])[0]
         process_segment(body.get("value", ""), orig_label=original_text[start:end])
         cursor = end

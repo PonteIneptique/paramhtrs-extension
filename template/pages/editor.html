@@ -1,15 +1,32 @@
 {% extends "base.html" %}
 {% block morestyle %}
-<link rel="stylesheet" href="https://esm.sh/@recogito/text-annotator/dist/text-annotator.css">
 <style>
+/* ── Override base container for the editor page ── */
+/* Prevent the page from scrolling (panels scroll internally) */
+body { overflow: hidden; }
+/* Remove the mt-5 / horizontal padding from the base container,
+   but keep the 60 px left gap so the fixed sidebar never overlaps text. */
+.container {
+  margin-left: 60px !important;
+  margin-top: 0 !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  max-width: calc(100vw - 60px) !important;
+  width: calc(100vw - 60px) !important;
+}
+
 /* ── Layout ── */
 #editor-root {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 56px);
+  height: 100vh;   /* full height: no navbar above, no mt-5 */
 }
+/* Main toolbar is the first flex child — it never scrolls */
 #editor-toolbar {
   flex: 0 0 auto;
+  position: sticky;
+  top: 0;
+  z-index: 50;
   padding: 8px 12px;
   background: #f8f9fa;
   border-bottom: 1px solid #dee2e6;
@@ -25,15 +42,24 @@
 }
 .panel {
   overflow-y: auto;
-  padding: 12px;
+  padding: 0;    /* padding moved to inner content so sticky headers reach edges */
 }
+/* All scrollable content inside a panel gets horizontal padding */
+.panel > *:not(.panel-header):not(.panel-toolbar) { padding-left: 12px; padding-right: 12px; }
+#page-source, .normalized-text { padding: 8px 12px 12px; }
 .panel-source    { flex: 0 0 33%; border-right: 1px solid #dee2e6; }
 .panel-annots    { flex: 0 0 28%; border-right: 1px solid #dee2e6; }
 .panel-normalized{ flex: 1 1 0; }
+/* Column header and toolbar stick to the top of each panel as the user scrolls */
 .panel-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #fff;
   font-size: .75rem; font-weight: 700; text-transform: uppercase;
   letter-spacing: .05em; color: #6c757d;
-  padding-bottom: 6px; margin-bottom: 8px;
+  padding: 8px 12px 6px;
+  margin-bottom: 0;
   border-bottom: 1px solid #dee2e6;
 }
 
@@ -47,14 +73,49 @@
   cursor: text;
   min-height: 60px;
 }
-#page-source .r6o-annotation {
+#page-source mark {
+  /* reset browser default <mark> yellow */
   background: rgba(255, 220, 0, 0.35);
   border-bottom: 2px solid #f0a500;
+  border-radius: 0;
+  padding: 0;
   cursor: pointer;
+  color: inherit;
 }
-#page-source .r6o-annotation.selected {
+#page-source mark.selected {
   background: rgba(255, 150, 0, 0.55);
   border-bottom-color: #d97706;
+}
+#page-source mark.hovered {
+  background: rgba(255, 190, 30, 0.50);
+  border-bottom-color: #c97900;
+}
+#page-source mark.r6o-validated {
+  background: rgba(25, 135, 84, 0.20);
+  border-bottom-color: #198754;
+}
+/* Zero-width insertion marker */
+#page-source mark.r6o-insertion {
+  background: transparent;
+  border-bottom: none;
+  display: inline-block;
+  width: 0;
+  overflow: visible;
+}
+#page-source mark.r6o-insertion::before {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: .9em;
+  background: #198754;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  margin-left: -1px;
+}
+#page-source mark.r6o-insertion.selected::before,
+#page-source mark.r6o-insertion.hovered::before {
+  background: #0d6efd;
+  width: 2px;
 }
 .line-mgmt-row {
   display: flex;
@@ -98,7 +159,6 @@
   text-overflow: ellipsis;
   flex-shrink: 0;
 }
-/* Whitespace / space-removal display */
 .annot-orig-sp {
   font-family: monospace;
   font-size: .75rem;
@@ -154,6 +214,47 @@
 .status-pending { background: #dc3545; }
 .status-active  { background: #ffc107; color: #000; }
 .status-done    { background: #198754; }
+
+/* ── Panel toolbar — sticks just below the panel header ── */
+.panel-toolbar {
+  position: sticky;
+  top: 33px;   /* height of .panel-header (approx); keeps toolbar below it */
+  z-index: 9;
+  background: #fff;
+  display: flex;
+  gap: 4px;
+  padding: 4px 12px 6px;
+  border-bottom: 1px solid #f0f0f0;
+  margin-bottom: 0;
+}
+.panel-toolbar .btn { font-size: .75rem; padding: 2px 7px; }
+
+/* ── Insertion annotation chip ── */
+.annot-ins-chip {
+  font-size: .75rem;
+  background: #d1f5d3;
+  color: #157347;
+  border-radius: 3px;
+  padding: 1px 6px;
+  flex-shrink: 0;
+  font-style: italic;
+}
+
+/* ── Selected / validated rows ── */
+.annot-row.selected { background: #cfe2ff !important; }
+.annot-row.validated { opacity: .7; }
+
+/* ── Insert / refine mode cursor hints ── */
+#page-source.insert-cursor { cursor: crosshair; }
+#page-source.refine-cursor { cursor: col-resize; }
+
+/* ── Validated section ── */
+.validated-header {
+  font-size: .8rem; font-weight: 600; color: #6c757d;
+  cursor: pointer; user-select: none;
+  padding: 4px 2px;
+  margin-top: 8px;
+}
 </style>
 {% endblock %}
 
@@ -233,7 +334,23 @@
     <!-- Col 1: Source -->
     <div class="panel panel-source">
       <div class="panel-header">Source</div>
-      <div id="page-source" ref="pageSource"></div>
+      <div class="panel-toolbar">
+        <button class="btn btn-sm btn-outline-secondary"
+                :class="{active: refineMode}"
+                @click="toggleRefineMode"
+                title="Refine span: draw a new selection to update the selected annotation">
+          ✂ Refine span
+        </button>
+        <button class="btn btn-sm btn-outline-secondary"
+                :class="{active: insertMode}"
+                @click="toggleInsertMode"
+                title="Insert: click a position in the source to create a zero-width insertion">
+          + Insert
+        </button>
+      </div>
+      <div id="page-source" ref="pageSource"
+           :class="{'insert-cursor': insertMode, 'refine-cursor': refineMode}"
+           v-html="sourceHtml"></div>
 
       <template v-if="lines.length">
         <hr class="my-3">
@@ -252,16 +369,14 @@
     <div class="panel panel-annots">
       <div class="panel-header">Annotations</div>
 
-      <template v-for="annot in allAnnotationsSorted" :key="annot.id">
-        <div class="annot-row" :class="{ hovered: hoveredAnnotationId === annot.id }">
-          <!--
-            Wrap everything except the delete button in a <label>.
-            Because the label contains the <input>, clicking anywhere inside it
-            (the orig span, the arrow, empty space) natively focuses the input —
-            no JavaScript needed.
-          -->
-          <label class="annot-row-label">
-            <span v-if="isSpaceExact(annot)" class="annot-orig-sp" title="space">[SPACE]</span>
+      <template v-for="annot in pendingAnnotationsSorted" :key="annot.id">
+        <div class="annot-row"
+             :data-annot-id="annot.id"
+             :class="{ hovered: hoveredAnnotationId === annot.id, selected: selectedAnnotationId === annot.id }"
+             @mousedown="onRowMousedown(annot, $event)">
+          <label class="annot-row-label" style="flex:1;display:flex;align-items:center;gap:4px;">
+            <span v-if="isInsertion(annot)" class="annot-ins-chip" title="insertion">[+]</span>
+            <span v-else-if="isSpaceExact(annot)" class="annot-orig-sp" title="space">[SPACE]</span>
             <span v-else class="annot-orig" :title="getExact(annot)">[[ getExact(annot) ]]</span>
 
             <span class="annot-arrow">→</span>
@@ -274,13 +389,16 @@
               @keydown.tab.prevent="tabToNext(annot)">
           </label>
 
+          <button class="btn btn-sm btn-outline-success py-0 px-1" title="Validate"
+                  @click.stop="validateAnnotation(annot)">✓</button>
           <button class="annot-del" @click.stop="removeAnnotation(annot)" title="Remove">✕</button>
         </div>
       </template>
 
-      <!-- Pending new annotation (pendingAnnot is a plain {id, exact} stub) -->
+      <!-- Pending new annotation -->
       <div v-if="pendingAnnot" class="annot-row annot-pending">
-        <span v-if="!pendingAnnot.exact.trim()" class="annot-orig-sp" title="space">[SPACE]</span>
+        <span v-if="isInsertionExact(pendingAnnot)" class="annot-ins-chip" title="insertion">[+]</span>
+        <span v-else-if="!pendingAnnot.exact.trim()" class="annot-orig-sp" title="space">[SPACE]</span>
         <span v-else class="annot-orig" :title="pendingAnnot.exact">[[ pendingAnnot.exact ]]</span>
         <span class="annot-arrow">→</span>
         <input type="text" class="annot-target" ref="pendingInput"
@@ -290,8 +408,39 @@
         <button class="annot-del" @click="cancelPending" title="Cancel">✕</button>
       </div>
 
-      <div v-if="!allAnnotationsSorted.length && !pendingAnnot" class="text-muted small">
+      <div v-if="!pendingAnnotationsSorted.length && !pendingAnnot && !validatedAnnotationsSorted.length"
+           class="text-muted small">
         Select text in the source panel to create an annotation.
+      </div>
+
+      <!-- Validated section (collapsible) -->
+      <div v-if="validatedAnnotationsSorted.length">
+        <div class="validated-header d-flex align-items-center gap-1"
+             @click="showValidated = !showValidated">
+          <i :class="showValidated ? 'fa-solid fa-chevron-down' : 'fa-solid fa-chevron-right'"></i>
+          Validated ([[ validatedAnnotationsSorted.length ]])
+        </div>
+        <template v-if="showValidated" v-for="annot in validatedAnnotationsSorted" :key="annot.id">
+          <div class="annot-row validated"
+               :data-annot-id="annot.id"
+               :class="{ hovered: hoveredAnnotationId === annot.id, selected: selectedAnnotationId === annot.id }"
+               @mousedown="onRowMousedown(annot, $event)">
+            <label class="annot-row-label" style="flex:1;display:flex;align-items:center;gap:4px;">
+              <span v-if="isInsertion(annot)" class="annot-ins-chip" title="insertion">[+]</span>
+              <span v-else-if="isSpaceExact(annot)" class="annot-orig-sp" title="space">[SPACE]</span>
+              <span v-else class="annot-orig" :title="getExact(annot)">[[ getExact(annot) ]]</span>
+              <span class="annot-arrow">→</span>
+              <span v-if="!getBodyValue(annot)" class="annot-del-chip">deleted</span>
+              <input v-else type="text" class="annot-target"
+                :value="getBodyValue(annot)"
+                @blur="onAnnotBlur(annot, $event)"
+                @keydown.enter.prevent="$event.target.blur()">
+            </label>
+            <button class="btn btn-sm btn-outline-secondary py-0 px-1" title="Un-validate"
+                    @click.stop="unvalidateAnnotation(annot)">↩</button>
+            <button class="annot-del" @click.stop="removeAnnotation(annot)" title="Remove">✕</button>
+          </div>
+        </template>
       </div>
     </div>
 
@@ -307,54 +456,53 @@
 <script type="importmap">
 {
   "imports": {
-    "vue": "https://unpkg.com/vue@3/dist/vue.esm-browser.js",
-    "@recogito/text-annotator": "https://esm.sh/@recogito/text-annotator"
+    "vue": "https://unpkg.com/vue@3/dist/vue.esm-browser.js"
   }
 }
 </script>
 
 <script type="module">
 import { createApp } from 'vue';
-import { createTextAnnotator } from '@recogito/text-annotator';
 
-// ── Helper functions ──────────────────────────────────────────────────────────
+const CURRENT_USER_ID = {{ current_user.id }};
 
+// ── Selector helpers ──────────────────────────────────────────────────────────
 function getSelector(annot, type) {
   return (annot?.target?.selector || []).find(s => s.type === type) || {};
 }
 function getStart(annot) { return getSelector(annot, 'TextPositionSelector').start ?? 0; }
 function getEnd(annot)   { return getSelector(annot, 'TextPositionSelector').end   ?? 0; }
-function getExact(annot) {
-  return getSelector(annot, 'TextQuoteSelector').exact ?? '';
-}
+function getExact(annot) { return getSelector(annot, 'TextQuoteSelector').exact ?? ''; }
 function getBodyValue(annot) { return annot?.body?.[0]?.value ?? ''; }
-function isSpaceExact(annot) { return getExact(annot).trim() === ''; }
-
-function escapeHtml(str) {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function isInsertion(annot) {
+  return annot?.body?.[0]?.purpose === 'insertion' || getStart(annot) === getEnd(annot);
+}
+function isSpaceExact(annot) { return !isInsertion(annot) && getExact(annot).trim() === ''; }
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 function applyAnnotations(text, annotations) {
-  if (!annotations || !annotations.length) return text;
-  const sorted = [...annotations].sort((a, b) => getStart(b) - getStart(a));
+  if (!annotations?.length) return text;
+  // Sort right-to-left; for equal start, process larger-end first so that
+  // deletions/substitutions are applied before same-start insertions (end===start).
+  const sorted = [...annotations].sort((a, b) => {
+    const ds = getStart(b) - getStart(a);
+    return ds !== 0 ? ds : getEnd(b) - getEnd(a);
+  });
   let result = text;
   for (const a of sorted) {
-    const start = getStart(a), end = getEnd(a);
-    result = result.slice(0, start) + getBodyValue(a) + result.slice(end);
+    const s = getStart(a), e = getEnd(a);
+    result = result.slice(0, s) + getBodyValue(a) + result.slice(e);
   }
   return result;
 }
 
-// Both live outside Vue's reactive system to avoid Proxy wrapping issues.
-// Recogito's internals do instance/property checks that break on Vue Proxies.
-let annotator = null;
-let pendingAnnotRaw = null;   // raw Recogito selection object — never touched by Vue
-
-// ── Vue app ───────────────────────────────────────────────────────────────────
+// Module-level pending annotation (raw W3C object, not reactive)
+let pendingAnnotRaw = null;
 
 createApp({
   delimiters: ['[[', ']]'],
-
   data() {
     return {
       lines: {{ lines|tojson }},
@@ -363,325 +511,330 @@ createApp({
       pageId: {{ page.id }},
       pageStatus: '{{ page.status }}',
       hoveredAnnotationId: null,
-      // Display-only stub { id, exact } for the pending row in the template.
-      // The actual Recogito selection lives in pendingAnnotRaw (not reactive).
+      selectedAnnotationId: null,
       pendingAnnot: null,
+      insertMode: false,
+      refineMode: false,
+      showValidated: false,
     };
   },
 
   computed: {
-    allAnnotationsSorted() {
-      return [...this.annotations].sort((a, b) => getStart(a) - getStart(b));
+    allAnnotationsSorted()       { return [...this.annotations].sort((a,b) => getStart(a)-getStart(b)); },
+    pendingAnnotationsSorted()   { return this.allAnnotationsSorted.filter(a => !a.validated_by); },
+    validatedAnnotationsSorted() { return this.allAnnotationsSorted.filter(a =>  a.validated_by); },
+
+    // ── Source panel HTML ─────────────────────────────────────────────────────
+    // Rebuilds whenever annotations or selectedAnnotationId changes.
+    // Hover state is applied via direct DOM class-toggling in _registerSourceListeners
+    // to avoid a full re-render on every mousemove.
+    sourceHtml() {
+      const text    = this.fullText;
+      const annots  = this.allAnnotationsSorted;
+      const selId   = this.selectedAnnotationId;
+      let html   = '';
+      let cursor = 0;
+
+      for (const a of annots) {
+        const s = getStart(a), e = getEnd(a);
+        const renderFrom = Math.max(s, cursor);
+
+        // Plain text before this annotation
+        if (s > cursor) html += escapeHtml(text.slice(cursor, s));
+
+        // Build class list
+        const cls = ['r6o-annotation',
+          selId === a.id        ? 'selected'      : '',
+          a.validated_by        ? 'r6o-validated' : '',
+          isInsertion(a)        ? 'r6o-insertion' : '',
+        ].filter(Boolean).join(' ');
+
+        if (s === e) {
+          // Zero-width insertion marker — no text content, rendered via CSS ::before
+          html += `<mark class="${cls}" data-annotation="${escapeHtml(a.id)}"></mark>`;
+        } else if (renderFrom < e) {
+          html += `<mark class="${cls}" data-annotation="${escapeHtml(a.id)}">${escapeHtml(text.slice(renderFrom, e))}</mark>`;
+        }
+        cursor = Math.max(cursor, e);
+      }
+
+      if (cursor < text.length) html += escapeHtml(text.slice(cursor));
+      return html;
     },
 
-    normalizedPageText() {
-      return applyAnnotations(this.fullText, this.annotations);
-    },
+    normalizedPageText() { return applyAnnotations(this.fullText, this.annotations); },
 
-    // For each annotation, compute where its output value sits in normalizedPageText.
-    // Walk left-to-right accumulating the offset delta (value.length - origSpan.length).
     normalizedPositions() {
-      const sorted = [...this.annotations].sort((a, b) => getStart(a) - getStart(b));
-      const map = {};
-      let delta = 0;
-      for (const a of sorted) {
-        const origStart = getStart(a);
-        const origEnd   = getEnd(a);
-        const value     = getBodyValue(a);
-        const normStart = origStart + delta;
-        const normEnd   = normStart + value.length;
-        map[a.id] = { start: normStart, end: normEnd };
-        delta += value.length - (origEnd - origStart);
+      // Must use the same ordering as applyAnnotations: start asc, then end desc for
+      // ties so that the delta accumulates in the same sequence the text was built.
+      const ordered = [...this.annotations].sort((a, b) => {
+        const ds = getStart(a) - getStart(b);
+        return ds !== 0 ? ds : getEnd(b) - getEnd(a);
+      });
+      const map = {}; let delta = 0;
+      for (const a of ordered) {
+        const s = getStart(a), e = getEnd(a), val = getBodyValue(a);
+        const ns = s + delta;
+        map[a.id] = { start: ns, end: ns + val.length };
+        delta += val.length - (e - s);
       }
       return map;
     },
 
     normalizedPageHtml() {
       const text = this.normalizedPageText;
-      const id   = this.hoveredAnnotationId;
+      const id   = this.selectedAnnotationId ?? this.hoveredAnnotationId;
       if (!id) return escapeHtml(text);
       const pos = this.normalizedPositions[id];
-      if (!pos || pos.start === pos.end) return escapeHtml(text);  // insertion / deletion has no output span
-      const { start, end } = pos;
-      return escapeHtml(text.slice(0, start))
-        + '<mark class="norm-highlight">' + escapeHtml(text.slice(start, end)) + '</mark>'
-        + escapeHtml(text.slice(end));
+      if (!pos || pos.start === pos.end) return escapeHtml(text);
+      return escapeHtml(text.slice(0, pos.start))
+        + '<mark class="norm-highlight">' + escapeHtml(text.slice(pos.start, pos.end)) + '</mark>'
+        + escapeHtml(text.slice(pos.end));
     },
   },
 
   mounted() {
-    this._initAnnotator();
+    const el = this.$refs.pageSource;
+    this._registerSourceListeners(el);
     document.addEventListener('keydown', this._handleKeydown);
   },
-
   beforeUnmount() {
     document.removeEventListener('keydown', this._handleKeydown);
-    annotator?.destroy?.();
   },
 
   methods: {
-    // ── Helpers exposed to template ──────────────────────────────────────────
-    getExact,
-    getBodyValue,
-    isSpaceExact,
+    getExact, getBodyValue, isInsertion, isSpaceExact,
+    isInsertionExact(stub) { return stub?.isIns === true; },
 
-    // ── Recogito init / reinit ───────────────────────────────────────────────
-    _initAnnotator() {
-      const el = this.$refs.pageSource;
-      if (!el) return;
-      if (annotator) { annotator.destroy?.(); annotator = null; }
-      pendingAnnotRaw = null;
-      this.pendingAnnot = null;
+    // ── DOM event listeners on #page-source (registered ONCE at mount) ────────
+    _registerSourceListeners(el) {
+      // Click: insert mode OR annotation select
+      el.addEventListener('click', (evt) => {
+        if (this.insertMode) {
+          // Compute caret position → create zero-width pending annotation
+          let pos = 0;
+          const pr = document.createRange();
+          pr.setStart(el, 0);
+          if (document.caretPositionFromPoint) {
+            const cp = document.caretPositionFromPoint(evt.clientX, evt.clientY);
+            if (cp) { pr.setEnd(cp.offsetNode, cp.offset); pos = pr.toString().length; }
+          } else if (document.caretRangeFromPoint) {
+            const cr = document.caretRangeFromPoint(evt.clientX, evt.clientY);
+            if (cr) { pr.setEnd(cr.startContainer, cr.startOffset); pos = pr.toString().length; }
+          }
+          const t  = this.fullText;
+          const id = crypto.randomUUID();
+          pendingAnnotRaw = { id, type:'Annotation', body:[],
+            target:{ annotation:id, selector:[
+              { type:'TextPositionSelector', start:pos, end:pos },
+              { type:'TextQuoteSelector', exact:'',
+                prefix:t.slice(Math.max(0,pos-10),pos), suffix:t.slice(pos,pos+10) },
+            ]}};
+          this.pendingAnnot = { id, exact:'', isIns:true };
+          this.insertMode = false;
+          this.$nextTick(() => {
+            const inp = this.$refs.pendingInput;
+            if (inp) (Array.isArray(inp) ? inp[0] : inp).focus();
+          });
+          return;
+        }
 
-      el.textContent = this.fullText;
-      annotator = createTextAnnotator(el);
+        // Annotation span click → select / deselect
+        const span = evt.target.closest('[data-annotation]');
+        if (span) {
+          const id = span.dataset.annotation;
+          const newSel = this.selectedAnnotationId === id ? null : id;
+          this.selectedAnnotationId = newSel;
+          if (newSel) {
+            const annot = this.allAnnotationsSorted.find(a => a.id === id);
+            if (annot) this._focusAnnotInput(annot);
+          }
+        }
+      });
 
-      if (this.annotations.length) {
-        // JSON-clone to give Recogito plain objects — Vue Proxies break its internal checks
-        annotator.setAnnotations(JSON.parse(JSON.stringify(this.annotations)));
-      }
-
-      // ── New text selection: use native mouseup to compute char offsets ────────
-      // This is more reliable than selectionChanged (which can miss events).
+      // Mouseup → new selection OR refine existing span
       el.addEventListener('mouseup', () => {
         const sel = window.getSelection();
         if (!sel || sel.isCollapsed || !sel.rangeCount) return;
-
         const range = sel.getRangeAt(0);
-        // Bail if selection is entirely outside our source element
         if (!el.contains(range.commonAncestorContainer)) return;
 
-        // Compute start char offset relative to el.textContent
-        const preRange = document.createRange();
-        preRange.setStart(el, 0);
-        preRange.setEnd(range.startContainer, range.startOffset);
-        const start = preRange.toString().length;
+        const pr = document.createRange();
+        pr.setStart(el, 0);
+        pr.setEnd(range.startContainer, range.startOffset);
+        const start = pr.toString().length;
         const end   = start + range.toString().length;
         if (start === end) return;
 
-        const text   = el.textContent;
-        const exact  = text.slice(start, end);
-        const prefix = text.slice(Math.max(0, start - 10), start);
-        const suffix = text.slice(end, end + 10);
-        const id     = crypto.randomUUID();
+        const t      = this.fullText;
+        const exact  = t.slice(start, end);
+        const prefix = t.slice(Math.max(0, start - 10), start);
+        const suffix = t.slice(end, end + 10);
 
-        pendingAnnotRaw = {
-          id,
-          type: 'Annotation',
-          body: [],
-          target: {
-            annotation: id,
-            selector: [
-              { type: 'TextPositionSelector', start, end },
-              { type: 'TextQuoteSelector', exact, prefix, suffix },
-            ],
-          },
-        };
+        if (this.refineMode && this.selectedAnnotationId) {
+          const tid = this.selectedAnnotationId;
+          this.annotations = this.annotations.map(a => a.id !== tid ? a : {
+            ...a, target: { ...a.target, selector: [
+              { type:'TextPositionSelector', start, end },
+              { type:'TextQuoteSelector', exact, prefix, suffix },
+            ]},
+          });
+          this.saveAnnotations();
+          this.refineMode = false;
+          sel.removeAllRanges();
+          return;
+        }
+
+        const id = crypto.randomUUID();
+        pendingAnnotRaw = { id, type:'Annotation', body:[],
+          target:{ annotation:id, selector:[
+            { type:'TextPositionSelector', start, end },
+            { type:'TextQuoteSelector', exact, prefix, suffix },
+          ]}};
         this.pendingAnnot = { id, exact };
-        // Clear Recogito's internal selection so it doesn't show its own UI
-        annotator?.setSelected?.([]);
         this.$nextTick(() => {
           const inp = this.$refs.pendingInput;
           if (inp) (Array.isArray(inp) ? inp[0] : inp).focus();
         });
       });
 
-      // ── Click / hover on existing annotation spans → highlight middle panel ──
-      // setAnnotations defers lifecycle callbacks via setTimeout(0); register
-      // hover events after that tick so they don't fire during init.
-      setTimeout(() => {
-        if (!annotator) return;
-
-        const onAnnotationEnter = (annot) => {
-          const id = annot?.id ?? annot;
-          if (!id) return;
+      // Hover: direct DOM class-toggle (fast — avoids sourceHtml re-render per event)
+      el.addEventListener('mouseover', (evt) => {
+        const span = evt.target.closest('[data-annotation]');
+        if (!span) return;
+        const id = span.dataset.annotation;
+        if (id !== this.hoveredAnnotationId) {
+          // Clear previous hover mark
+          el.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
+          span.classList.add('hovered');
           this.hoveredAnnotationId = id;
           this._scrollAnnotRowIntoView(id);
-        };
-        const onAnnotationLeave = () => {
-          this.hoveredAnnotationId = null;
-        };
-
-        // Recogito core fires these events on its highlight spans
-        annotator.on('mouseEnterAnnotation', onAnnotationEnter);
-        annotator.on('mouseLeaveAnnotation', onAnnotationLeave);
-        annotator.on('clickAnnotation',      onAnnotationEnter);
-
-        // Fallback: native event delegation on data-annotation spans
-        el.addEventListener('mouseover', (evt) => {
-          const span = evt.target.closest('[data-annotation]');
-          if (span) onAnnotationEnter({ id: span.dataset.annotation });
-        });
-        el.addEventListener('mouseout', (evt) => {
-          const from = evt.target.closest('[data-annotation]');
-          const to   = evt.relatedTarget?.closest?.('[data-annotation]');
-          if (from && from !== to) onAnnotationLeave();
-        });
-        el.addEventListener('click', (evt) => {
-          const span = evt.target.closest('[data-annotation]');
-          if (span) {
-            const id = span.dataset.annotation;
-            onAnnotationEnter({ id });
-            annotator?.setSelected?.([id]);
-            const annot = this.allAnnotationsSorted.find(a => a.id === id);
-            if (annot) this._focusAnnotInput(annot);
-          }
-        });
-      }, 0);
-    },
-
-    // ── Scroll annotation row to top of middle panel and focus its input ────────
-    _scrollAnnotRowIntoView(id, focus = false) {
-      // Use setTimeout instead of $nextTick: we need to wait for both Vue's
-      // re-render AND any Recogito DOM work to settle before querying rows.
-      setTimeout(() => {
-        const idx = this.allAnnotationsSorted.findIndex(a => a.id === id);
-        if (idx === -1) return;
-        const panel = document.querySelector('.panel-annots');
-        if (!panel) return;
-        const rows = panel.querySelectorAll('.annot-row:not(.annot-pending)');
-        const row = rows[idx];
-        if (!row) return;
-        panel.scrollTop = row.offsetTop - panel.offsetTop;
-        if (focus) {
-          const input = row.querySelector('.annot-target');
-          if (input) input.focus();
         }
+      });
+      el.addEventListener('mouseout', (evt) => {
+        const from = evt.target.closest('[data-annotation]');
+        const to   = evt.relatedTarget?.closest?.('[data-annotation]');
+        if (from && from !== to) {
+          from.classList.remove('hovered');
+          this.hoveredAnnotationId = null;
+        }
+      });
+    },
+
+    // ── Middle-panel helpers ──────────────────────────────────────────────────
+    _findAnnotRow(id)   { return document.querySelector(`.panel-annots [data-annot-id="${id}"]`); },
+    _scrollAnnotRowIntoView(id) {
+      setTimeout(() => {
+        const row = this._findAnnotRow(id); if (!row) return;
+        const p = document.querySelector('.panel-annots');
+        if (p) p.scrollTop = row.offsetTop - p.offsetTop;
       }, 0);
     },
-
-    // ── Shared: scroll annotation row to top of panel and focus its input ───────
     _focusAnnotInput(annot) {
-      const panel = document.querySelector('.panel-annots');
-      if (!panel) return;
-      const idx = this.allAnnotationsSorted.findIndex(a => a.id === annot.id);
-      if (idx === -1) return;
-      const rows = panel.querySelectorAll('.annot-row:not(.annot-pending)');
-      const row = rows[idx];
-      if (!row) return;
-      panel.scrollTop = row.offsetTop - panel.offsetTop;
-      const input = row.querySelector('.annot-target');
-      if (input) input.focus();
+      setTimeout(() => {
+        const row = this._findAnnotRow(annot.id); if (!row) return;
+        const p = document.querySelector('.panel-annots');
+        if (p) p.scrollTop = row.offsetTop - p.offsetTop;
+        row.querySelector('.annot-target')?.focus();
+      }, 0);
     },
-
-    // ── Mousedown on annotation row → scroll to top + focus input ───────────────
-    // Intercept mousedown (not click) so we can call preventDefault() before the
-    // browser resets focus to body. The ✕ button stops mousedown propagation so
-    // it can fire its own click independently.
     onRowMousedown(annot, event) {
-      if (event.target.closest('.annot-target')) return; // let input handle itself
-      event.preventDefault(); // stop browser from blurring focus to body
-      this._focusAnnotInput(annot);
+      if (event.target.closest('button') || event.target.closest('.annot-target')) return;
+      event.preventDefault();
+      this.selectAnnotation(annot);
     },
 
-    // ── Annotation edit ──────────────────────────────────────────────────────
+    // ── Annotation value edit ─────────────────────────────────────────────────
     onAnnotBlur(annot, evt) {
-      const newValue = evt.target.value;
-      const found = this.annotations.find(a => a.id === annot.id);
-      if (found && found.body?.[0]) {
-        found.body[0].value = newValue;
-        // JSON-clone to give Recogito a plain object — Vue Proxies break its internal checks
-        annotator?.updateAnnotation?.(JSON.parse(JSON.stringify(found)));
-      }
+      this.annotations = this.annotations.map(a =>
+        a.id !== annot.id || !a.body?.[0] ? a : { ...a, body:[{ ...a.body[0], value:evt.target.value }] }
+      );
       this.saveAnnotations();
     },
 
-    // ── Commit pending annotation ────────────────────────────────────────────
+    // ── Commit pending annotation ─────────────────────────────────────────────
     commitPending(value) {
       if (!pendingAnnotRaw) return;
-      const annot = pendingAnnotRaw;   // raw Recogito object — no Vue Proxy
-      pendingAnnotRaw = null;
-      this.pendingAnnot = null;
-
-      const trimmed = (value || '').trim();
-      // Mutate the raw Recogito object's body directly
-      annot.body = [{ type: 'TextualBody', value: trimmed, purpose: 'normalizing' }];
+      const annot = pendingAnnotRaw; pendingAnnotRaw = null; this.pendingAnnot = null;
+      const posSel = getSelector(annot, 'TextPositionSelector');
+      annot.body   = [{ type:'TextualBody', value:(value||'').trim(),
+                        purpose: posSel.start === posSel.end ? 'insertion' : 'normalizing' }];
+      annot.resp_id = CURRENT_USER_ID;
       this.annotations = [...this.annotations, annot];
-      // JSON-clone so Recogito gets a plain object, not whatever Vue does to annot
-      // after it enters the reactive array above
-      annotator?.addAnnotation?.(JSON.parse(JSON.stringify(annot)));
       this.saveAnnotations();
     },
 
-    cancelPending() {
-      pendingAnnotRaw = null;
-      this.pendingAnnot = null;
-      annotator?.setSelected?.([]);
-    },
+    cancelPending() { pendingAnnotRaw = null; this.pendingAnnot = null; },
 
-    // ── Remove annotation ────────────────────────────────────────────────────
+    // ── Remove annotation ─────────────────────────────────────────────────────
     removeAnnotation(annot) {
       this.annotations = this.annotations.filter(a => a.id !== annot.id);
-      annotator?.removeAnnotation?.(annot.id);
+      if (this.selectedAnnotationId === annot.id) this.selectedAnnotationId = null;
       this.saveAnnotations();
     },
 
-    // ── Tab cycling ──────────────────────────────────────────────────────────
-    tabToNext(currentAnnot) {
-      const all = this.allAnnotationsSorted;
-      const idx = all.findIndex(a => a.id === currentAnnot.id);
-      const nextIdx = (idx + 1) % all.length;
-      const next = all[nextIdx];
-      if (next) {
-        this._focusAnnotInput(next);
-      }
+    // ── Persistent cross-column selection ────────────────────────────────────
+    selectAnnotation(annot) {
+      this.selectedAnnotationId = this.selectedAnnotationId === annot.id ? null : annot.id;
+      if (this.selectedAnnotationId) this._focusAnnotInput(annot);
     },
 
-    _handleKeydown(e) {
-      if (e.key === 'Escape' && this.pendingAnnot) {
-        this.cancelPending();
-        e.preventDefault();
-      }
+    // ── Validate / un-validate ────────────────────────────────────────────────
+    validateAnnotation(annot) {
+      this.annotations = this.annotations.map(a => a.id===annot.id ? {...a, validated_by:CURRENT_USER_ID} : a);
+      this.saveAnnotations();
+    },
+    unvalidateAnnotation(annot) {
+      this.annotations = this.annotations.map(a => {
+        if (a.id !== annot.id) return a;
+        const { validated_by, ...rest } = a; return rest;
+      });
+      this.saveAnnotations();
     },
 
-    // ── Delete line ──────────────────────────────────────────────────────────
+    toggleInsertMode() { this.insertMode = !this.insertMode; if (this.insertMode) this.refineMode = false; },
+    toggleRefineMode() { this.refineMode = !this.refineMode; if (this.refineMode) this.insertMode = false; },
+
+    // ── Tab cycling ───────────────────────────────────────────────────────────
+    tabToNext(cur) {
+      const all  = this.allAnnotationsSorted;
+      const next = all[(all.findIndex(a => a.id === cur.id) + 1) % all.length];
+      if (next) { this.selectedAnnotationId = next.id; this._focusAnnotInput(next); }
+    },
+
+    _handleKeydown(e) { if (e.key==='Escape' && this.pendingAnnot) { this.cancelPending(); e.preventDefault(); } },
+
+    // ── Delete line ───────────────────────────────────────────────────────────
     async deleteLine(line, idx) {
-      if (!confirm(`Delete line #${idx + 1}? Annotations on this line will also be removed.`)) return;
-      const r = await fetch(`/api/lines/${line.id}/delete`, { method: 'POST' });
+      if (!confirm(`Delete line #${idx+1}? Annotations on this line will also be removed.`)) return;
+      const r = await fetch(`/api/lines/${line.id}/delete`, { method:'POST' });
       if (!r.ok) return;
-
       let charStart = 0;
-      for (let i = 0; i < idx; i++) {
-        charStart += this.lines[i].original_text.length + 1;
-      }
-      const lineLen     = line.original_text.length;
-      const charEnd     = charStart + lineLen;
+      for (let i = 0; i < idx; i++) charStart += this.lines[i].original_text.length + 1;
+      const lineLen     = line.original_text.length, charEnd = charStart + lineLen;
       const removedChars = lineLen + (idx < this.lines.length - 1 ? 1 : 0);
-
       this.annotations = this.annotations
         .filter(a => !(getStart(a) >= charStart && getStart(a) <= charEnd))
         .map(a => {
           const pos = getSelector(a, 'TextPositionSelector');
-          if (pos && pos.start > charEnd) {
-            pos.start -= removedChars;
-            pos.end   -= removedChars;
-          }
+          if (pos && pos.start > charEnd) { pos.start -= removedChars; pos.end -= removedChars; }
           return a;
         });
-
       this.lines.splice(idx, 1);
       this.fullText = this.lines.map(l => l.original_text).join('\n');
-
-      await this.$nextTick();
-      this._initAnnotator();
       await this.saveAnnotations();
     },
 
-    // ── Persist page annotations ─────────────────────────────────────────────
     async saveAnnotations() {
       await fetch(`/api/pages/${this.pageId}/annotations`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        method:'PUT', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ annotations: this.annotations }),
       });
     },
-
-    // ── Page status ──────────────────────────────────────────────────────────
     async setPageStatus(status) {
       this.pageStatus = status;
       await fetch(`/api/pages/${this.pageId}/status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ status }),
       });
     },

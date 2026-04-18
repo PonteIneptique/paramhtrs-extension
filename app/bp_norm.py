@@ -60,35 +60,38 @@ def api_normalize():
         return Response(_sse_done(""), mimetype="text/event-stream",
                         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
+    max_chunk_bytes = int(data.get("max_chunk_bytes", 512))
+    delimiters = list(data.get("delimiters", "¶;."))
+
     if split_mode == "lines":
         # One model call per line; full_reg is newline-joined normalized lines.
+        raw_chunks = _enforce_max_bytes(orig_lines, max_chunk_bytes)
+        separator = "\n"
+
         def generate():
-            total = len(orig_lines)
+            total = len(raw_chunks)
             pairs = []
-            for i, line in enumerate(orig_lines):
-                reg = normalize_line(line, model, tokenizer)
-                pairs.append({"orig": line, "reg": reg})
+            for i, chunk in enumerate(raw_chunks):
+                reg = normalize_line(chunk, model, tokenizer)
+                pairs.append({"orig": chunk, "reg": reg})
                 yield _sse_event("progress", {"current": i + 1, "total": total,
-                                              "result": {"orig": line, "reg": reg}})
+                                              "result": {"orig": chunk, "reg": reg}})
             yield _sse_event("done", {
-                "full_reg": "\n".join(p["reg"] for p in pairs),
+                "full_reg": separator.join(p["reg"] for p in pairs),
                 "chunks": pairs,
-                "separator": "\n",
+                "separator": separator,
             })
 
     else:
-        if split_mode == "pilcrow":
-            # Split after each ¶ (lookbehind keeps the ¶ in its chunk)
-            full_text = "\n".join(orig_lines)
-            batch_chunks = [c for c in re.split(r"(?<=¶)", full_text) if c.strip()]
-            separator = ""
-        elif split_mode == "dots":
+        if split_mode == "punctuation":
             full_text = " ".join(orig_lines)
-            batch_chunks = _split_on_dots(full_text, min_words)
+            batch_chunks = _split_on_punct(full_text, delimiters, min_words)
             separator = " "
         else:
             batch_chunks = orig_lines
             separator = "\n"
+
+        batch_chunks = _enforce_max_bytes(batch_chunks, max_chunk_bytes)
 
         # One model call per batch; full_reg is joined normalized chunks.
         def generate():
@@ -120,12 +123,13 @@ def _sse_done(full_reg: str) -> str:
     yield _sse_event("done", {"full_reg": full_reg})
 
 
-def _split_on_dots(text: str, min_words: int) -> list[str]:
-    """Split text on sentence-ending dots, ensuring each chunk has at least min_words.
-    The dot is kept at the end of its chunk via lookbehind."""
-    sentences = re.split(r"(?<=\w\.)\s+", text)
+def _split_on_punct(text: str, delimiters: list[str], min_words: int) -> list[str]:
+    """Split text after any delimiter character, accumulating until min_words is reached."""
+    escaped = [re.escape(d) for d in delimiters]
+    pattern = r"(?<=[" + "".join(escaped) + r"])\s+"
+    sentences = [s for s in re.split(pattern, text) if s.strip()]
     chunks = []
-    current = []
+    current: list[str] = []
     word_count = 0
     for sent in sentences:
         current.append(sent)
@@ -137,6 +141,24 @@ def _split_on_dots(text: str, min_words: int) -> list[str]:
     if current:
         chunks.append(" ".join(current))
     return chunks
+
+
+def _enforce_max_bytes(chunks: list[str], max_bytes: int) -> list[str]:
+    """Sub-split any chunk exceeding max_bytes at the nearest preceding space."""
+    result = []
+    for chunk in chunks:
+        while len(chunk.encode()) > max_bytes:
+            # Find split point within max_bytes
+            encoded = chunk.encode()
+            split_pos = encoded[:max_bytes].rfind(b" ")
+            if split_pos <= 0:
+                split_pos = max_bytes
+            head = encoded[:split_pos].decode(errors="ignore")
+            tail = encoded[split_pos:].decode(errors="ignore").lstrip()
+            result.append(head)
+            chunk = tail
+        result.append(chunk)
+    return [c for c in result if c.strip()]
 
 
 # -------------------------

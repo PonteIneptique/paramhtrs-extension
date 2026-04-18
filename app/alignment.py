@@ -58,6 +58,10 @@ MAP_RE_REG_SIMPLIFICATION = {
 RE_ABBR_SIMPLIFICATION = re.compile("|".join(re.escape(k) for k in MAP_RE_ABBR_SIMPLIFICATION.keys()))
 RE_REG_SIMPLIFICATION = re.compile("|".join(re.escape(k) for k in MAP_RE_REG_SIMPLIFICATION.keys()))
 RE_SPACE = re.compile(r"\s+")
+# Collapse elision spaces: model may produce "s' assemblerent" or "n ' estoit"
+# instead of "s'assemblerent" / "n'estoit".  Strip optional spaces on either
+# side of an apostrophe that sits between two word characters.
+RE_ELISION_SPACE = re.compile(r"(\w) ?(['\u2019\u02BC\u02B9]) ?(?=\w)")
 
 def space_norm(inp: Optional[str]) -> Optional[str]:
     if inp:
@@ -133,7 +137,7 @@ def token_splitter(data: str) -> list[str]:
     pattern = re.compile(
         r"""(
         \.\w+\.        # abbreviations like .xxv. or .s.
-        |[⁊&\w+'\uf1ac¬]+(?:\s[\uf1ac\u0363-\u036F\u1DDA\u1DDC-\u1DDD\u1DE0\u1DE4\u1DE6\u1DE8\u1DEB\u1DEE\u1DF1\uF02B\uF030\uF033])?  # words with apostrophes/hyphens or space + combining
+        |[⁊&\w+'\u2019\u2018\uf1ac¬]+(?:\s[\uf1ac\u0363-\u036F\u1DDA\u1DDC-\u1DDD\u1DE0\u1DE4\u1DE6\u1DE8\u1DEB\u1DEE\u1DF1\uF02B\uF030\uF033])?  # words with apostrophes (incl. curly), hyphens or space + combining
         |[\.,:;?!-]+           # punctuation
         )""",
         re.VERBOSE
@@ -197,14 +201,19 @@ def _compute_operation(
     return tbl
 
 
+# Typographic apostrophe variants not covered by string.punctuation
+_EXTRA_PUNCT = '\u2019\u2018\u02BC\u02B9'
+_SIMPLIFY_STRIP = string.punctuation + _EXTRA_PUNCT
+
+
 def _simplify_abbr(s: str) -> str:
     s = RE_ABBR_SIMPLIFICATION.sub(lambda m: MAP_RE_ABBR_SIMPLIFICATION[m.group()], s.lower())
-    return s.translate(str.maketrans('', '', string.punctuation))
+    return s.translate(str.maketrans('', '', _SIMPLIFY_STRIP))
 
 
 def _simplify_reg(s: str) -> str:
     s = RE_REG_SIMPLIFICATION.sub(lambda m: MAP_RE_REG_SIMPLIFICATION[m.group()], s.lower())
-    return s.translate(str.maketrans('', '', string.punctuation))
+    return s.translate(str.maketrans('', '', _SIMPLIFY_STRIP))
 
 
 def find_prefix_split(src: str, tgt: str) -> int:
@@ -536,6 +545,7 @@ def align_words(abbreviated: str, regularized: str) -> List[Alignment]:
     [Alignment(source='Au.', target='Av', code='s'), Alignment(source=' ', target=' ', code='n'), Alignment(source='chou rave', target='chovrave', code='s'), Alignment(source=' de folie', target=' de folie', code='n')]
     """
     abbreviated = RE_SPACE.sub(" ", abbreviated)
+    regularized = RE_ELISION_SPACE.sub(r"\1\2", regularized)
     regularized = RE_SPACE.sub(" ", regularized)
     abbreviated_tokens = token_splitter(abbreviated)
     regularized_tokens = token_splitter(regularized)

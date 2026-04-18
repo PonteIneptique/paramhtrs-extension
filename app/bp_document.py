@@ -2,7 +2,7 @@ import os
 
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, abort, Response
 from flask_login import login_required, current_user
-from .models import db, Document, DocumentUser, Project, Page, Line, User
+from .models import db, Document, DocumentUser, DocumentWork, Work, Project, Page, Line, User
 from .bp_auth import requires_access
 from .annot_utils import build_tei_from_annotations
 
@@ -114,6 +114,7 @@ def document_update(document: Document):
     document.description = request.form.get("description", document.description)
     document.language = request.form.get("language", document.language)
     document.qid = request.form.get("qid") or None
+    document.iiif_manifest_url = request.form.get("iiif_manifest_url") or None
     db.session.commit()
     flash("Document updated", "success")
     return redirect(url_for("bp_document.document_browse", document_id=document.id))
@@ -217,9 +218,10 @@ def api_project_documents(project_id):
 @bp_document.route("/documents/<int:document_id>/export")
 @requires_access(Document, 'document_id')
 def document_export_tei(document: Document):
+    users_by_id = {u.id: u.nickname for u in User.query.filter(User.nickname.isnot(None)).all()}
     parts = [f'<body n="{document.name}">']
     for page in document.pages:
-        page_tei = build_tei_from_annotations(page.full_text, page.annotations or [])
+        page_tei = build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id)
         parts.append(f'<ab n="{page.label}">')
         parts.append(page_tei)
         parts.append('</ab>')
@@ -227,3 +229,36 @@ def document_export_tei(document: Document):
     tei_body = "\n".join(parts)
     return Response(tei_body, mimetype="text/xml",
                     headers={"Content-Disposition": f'attachment; filename="{document.name}.xml"'})
+
+
+# -------------------------
+# Works CRUD
+# -------------------------
+
+@bp_document.route("/api/documents/<int:document_id>/works", methods=["POST"])
+@requires_access(Document, 'document_id')
+def api_doc_add_work(document: Document):
+    require_document_admin(document)
+    data = request.json or {}
+    title = (data.get("title") or "").strip()
+    if not title:
+        abort(400)
+    genre = (data.get("genre") or "").strip() or None
+    work = Work(title=title, genre=genre)
+    db.session.add(work)
+    db.session.flush()
+    db.session.add(DocumentWork(document_id=document.id, work_id=work.id))
+    db.session.commit()
+    return jsonify({"status": "ok", "work": {"id": work.id, "title": work.title, "genre": work.genre}})
+
+
+@bp_document.route("/api/documents/<int:document_id>/works/<int:work_id>", methods=["DELETE"])
+@requires_access(Document, 'document_id')
+def api_doc_remove_work(document: Document, work_id):
+    require_document_admin(document)
+    DocumentWork.query.filter_by(document_id=document.id, work_id=work_id).delete()
+    # Delete orphaned Work
+    if not DocumentWork.query.filter_by(work_id=work_id).count():
+        Work.query.filter_by(id=work_id).delete()
+    db.session.commit()
+    return jsonify({"status": "ok"})

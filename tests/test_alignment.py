@@ -596,6 +596,91 @@ def test_short_sentence_space_insertion():
     als = align_words(abbr, reg)
     assert als == expected
 
+def test_elision_curly_apostrophe():
+    """Elision with U+2019 (curly right single quotation mark) must yield a single
+    substitution, not Insertion(s) + Insertion(') + Sub(stem, expanded)."""
+    test_cases = [
+        # sassemblerẽt → s'assemblerent: treated as one token
+        (
+            "sassemblerẽt",
+            "s\u2019assemblerent",
+            [Alignment("sassemblerẽt", "s\u2019assemblerent", code="s")],
+        ),
+        # nestoit → n'estoit
+        (
+            "nestoit",
+            "n\u2019estoit",
+            [Alignment("nestoit", "n\u2019estoit", code="s")],
+        ),
+        # qil → qu'il: one token on each side
+        (
+            "qil",
+            "qu\u2019il",
+            [Alignment("qil", "qu\u2019il", code="s")],
+        ),
+        # In context: surrounding null ops must not be affected
+        (
+            "il sassemblerẽt la",
+            "il s\u2019assemblerent la",
+            [
+                Alignment("il ", "il ", code="n"),
+                Alignment("sassemblerẽt", "s\u2019assemblerent", code="s"),
+                Alignment(" la", " la", code="n"),
+            ],
+        ),
+    ]
+
+    for source, target, expected in test_cases:
+        result = align_words(source, target)
+        assert result == expected, (
+            f"Failed elision alignment for: {source!r} -> {target!r}\n"
+            f"  expected: {expected}\n"
+            f"  got:      {result}"
+        )
+
+
+def test_elision_space_after_apostrophe():
+    """Model may produce "s' assemblerent" (space after) or "n ' estoit"
+    (spaces both sides).  All variants must collapse to a single substitution."""
+    test_cases = [
+        # Space after apostrophe only
+        (
+            "sassemblerẽt",
+            "s' assemblerent",
+            [Alignment("sassemblerẽt", "s'assemblerent", code="s")],
+        ),
+        # Spaces both sides of apostrophe
+        (
+            "nestoit",
+            "n ' estoit",
+            [Alignment("nestoit", "n'estoit", code="s")],
+        ),
+        # Curly apostrophe with trailing space
+        (
+            "sassemblerẽt",
+            "s\u2019 assemblerent",
+            [Alignment("sassemblerẽt", "s\u2019assemblerent", code="s")],
+        ),
+        # In context: surrounding null ops must be preserved
+        (
+            "il nestoit la",
+            "il n ' estoit la",
+            [
+                Alignment("il ", "il ", code="n"),
+                Alignment("nestoit", "n'estoit", code="s"),
+                Alignment(" la", " la", code="n"),
+            ],
+        ),
+    ]
+    for source, target, expected in test_cases:
+        result = align_words(source, target)
+        assert result == expected, (
+            f"Failed elision-space alignment for: {source!r} -> {target!r}\n"
+            f"  expected: {expected}\n"
+            f"  got:      {result}"
+        )
+
+
 def test_longer_space_insertion_punctuation_deletion():
     abbr = """ione laloy desiuis.:Qins aoroient ⁊ leruoient
 les ydoles ⁊si feisoient faire ymages demeintes

@@ -113,6 +113,27 @@ def change_password():
 
     return render_template("auth/change_password.html")
 
+@bp_auth.route("/profile", methods=["GET", "POST"])
+@login_required
+def profile():
+    if request.method == "POST":
+        current_user.first_name  = request.form.get("first_name",  "").strip() or None
+        current_user.last_name   = request.form.get("last_name",   "").strip() or None
+        current_user.orcid       = request.form.get("orcid",       "").strip() or None
+        current_user.institution = request.form.get("institution", "").strip() or None
+        nickname = request.form.get("nickname", "").strip() or None
+        if nickname and nickname != current_user.nickname:
+            taken = User.query.filter(User.nickname == nickname, User.id != current_user.id).first()
+            if taken:
+                flash("That nickname is already in use.", "danger")
+                return redirect(url_for("bp_auth.profile"))
+        current_user.nickname = nickname
+        db.session.commit()
+        flash("Profile updated.", "success")
+        return redirect(url_for("bp_auth.profile"))
+    return render_template("auth/profile.html")
+
+
 @bp_auth.route("/admin", methods=["GET", "POST"])
 @login_required
 def admin_panel():

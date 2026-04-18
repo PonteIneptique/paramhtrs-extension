@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Profile — Abbreviarium{% endblock %}
+
+{% block content %}
+<h2>Edit Profile</h2>
+
+<form method="POST">
+    <div class="mb-3">
+        <label for="first_name" class="form-label">First Name</label>
+        <input type="text" class="form-control" id="first_name" name="first_name"
+               value="{{ current_user.first_name or '' }}">
+    </div>
+
+    <div class="mb-3">
+        <label for="last_name" class="form-label">Last Name</label>
+        <input type="text" class="form-control" id="last_name" name="last_name"
+               value="{{ current_user.last_name or '' }}">
+    </div>
+
+    <div class="mb-3">
+        <label for="nickname" class="form-label">Nickname
+            <small class="text-muted">(used as TEI <code>@resp</code> key — must be unique)</small>
+        </label>
+        <input type="text" class="form-control" id="nickname" name="nickname"
+               value="{{ current_user.nickname or '' }}">
+    </div>
+
+    <div class="mb-3">
+        <label for="orcid" class="form-label">ORCID</label>
+        <input type="text" class="form-control" id="orcid" name="orcid"
+               value="{{ current_user.orcid or '' }}" placeholder="0000-0000-0000-0000">
+    </div>
+
+    <div class="mb-3">
+        <label for="institution" class="form-label">Institution</label>
+        <input type="text" class="form-control" id="institution" name="institution"
+               value="{{ current_user.institution or '' }}">
+    </div>
+
+    <button type="submit" class="btn btn-primary">Save Profile</button>
+</form>
+{% endblock %}

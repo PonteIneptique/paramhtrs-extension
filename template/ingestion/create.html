@@ -124,6 +124,11 @@
 
       <!-- IIIF Manifest mode -->
       <div v-if="inputMode === 'iiif'">
+        <div class="alert alert-info py-2 small mb-2">
+          <i class="fa-solid fa-circle-info"></i>
+          The IIIF tab sets the <strong>page label</strong> from the selected canvas.
+          Paste or upload the text lines using the <em>Paste text</em> or <em>ALTO</em> tabs.
+        </div>
         <div class="input-group mb-2">
           <input type="url" class="form-control" v-model="iiifUrl"
             placeholder="https://…/manifest.json" @keydown.enter.prevent="fetchIiif">
@@ -136,7 +141,7 @@
 
         <!-- Canvas list -->
         <div v-if="iiifCanvases.length" class="mb-2">
-          <p class="small text-muted mb-1">Select a canvas:</p>
+          <p class="small text-muted mb-1">Select a canvas to populate the page label:</p>
           <div class="iiif-canvas-list">
             <div v-for="(c, i) in iiifCanvases" :key="i"
                  class="iiif-canvas-item"
@@ -146,18 +151,8 @@
             </div>
           </div>
         </div>
-
-        <!-- Extracted IIIF lines -->
-        <div v-if="iiifLines.length" class="mt-2">
-          <p class="small text-muted mb-1">[[ iiifLines.length ]] line(s) extracted (edit if needed):</p>
-          <div v-for="(line, i) in iiifLines" :key="i" class="d-flex gap-2 mb-1 align-items-center">
-            <span class="text-muted small" style="min-width:2em;">[[ i+1 ]].</span>
-            <input type="text" class="form-control form-control-sm" v-model="iiifLines[i].text">
-            <button class="btn btn-sm btn-outline-danger" @click="iiifLines.splice(i,1)">✕</button>
-          </div>
-        </div>
-        <div v-else-if="iiifCanvases.length && iiifSelectedCanvas !== null" class="text-muted small mt-2">
-          No supplementing annotations with text found on this canvas.
+        <div v-if="iiifSelectedCanvas !== null" class="text-success small mt-2">
+          <i class="fa-solid fa-check"></i> Label set to "<strong>[[ pageLabel ]]</strong>"
         </div>
       </div>
     </div>
@@ -165,22 +160,32 @@
     <!-- Normalization batching options -->
     <div class="mb-3 mt-3">
       <label class="form-label fw-semibold small">Normalization batching</label>
-      <div class="d-flex flex-wrap gap-3">
+      <div class="d-flex flex-wrap gap-3 align-items-start mb-2">
         <div class="form-check">
           <input class="form-check-input" type="radio" v-model="splitMode" value="lines" id="sm-lines">
           <label class="form-check-label" for="sm-lines">Per line</label>
         </div>
         <div class="form-check">
-          <input class="form-check-input" type="radio" v-model="splitMode" value="pilcrow" id="sm-pilcrow">
-          <label class="form-check-label" for="sm-pilcrow">Split on ¶</label>
+          <input class="form-check-input" type="radio" v-model="splitMode" value="punctuation" id="sm-punct">
+          <label class="form-check-label" for="sm-punct">Split on punctuation</label>
         </div>
-        <div class="form-check d-flex align-items-center gap-2">
-          <input class="form-check-input" type="radio" v-model="splitMode" value="dots" id="sm-dots">
-          <label class="form-check-label" for="sm-dots">Split on . &nbsp;(min words:</label>
-          <input type="number" class="form-control form-control-sm" style="width:64px"
-                 v-model.number="minWords" :disabled="splitMode !== 'dots'" min="10" max="500">
-          <span>)</span>
+      </div>
+      <div v-if="splitMode === 'punctuation'" class="d-flex flex-wrap gap-3 align-items-end ms-3 mb-2">
+        <div>
+          <label class="form-label form-label-sm mb-0 small">Delimiters</label>
+          <input type="text" class="form-control form-control-sm" style="width:80px"
+                 v-model="delimiters" placeholder="¶;.">
         </div>
+        <div>
+          <label class="form-label form-label-sm mb-0 small">Min words</label>
+          <input type="number" class="form-control form-control-sm" style="width:72px"
+                 v-model.number="minWords" min="10" max="500">
+        </div>
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        <label class="form-label form-label-sm mb-0 small text-muted">Max chunk size (bytes)</label>
+        <input type="number" class="form-control form-control-sm" style="width:90px"
+               v-model.number="maxChunkBytes" min="64" max="8192">
       </div>
     </div>
 
@@ -197,7 +202,8 @@
   <div class="step" :class="{active: step === 2}">
     <h4 class="mb-3">Normalizing…</h4>
     <div class="mb-2 small text-muted">
-      [[ normalizeProgress.current ]] / [[ normalizeProgress.total ]] processed
+      <span v-if="normalizeProgress.total === null">Preparing chunks…</span>
+      <span v-else>[[ normalizeProgress.current ]] / [[ normalizeProgress.total ]] processed</span>
     </div>
     <div class="progress mb-3" style="height:12px;">
       <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
@@ -245,6 +251,8 @@ createApp({
       // normalization batching
       splitMode: 'lines',
       minWords: 100,
+      delimiters: '¶;.',
+      maxChunkBytes: 512,
       // state
       normalizing: false,
       normalizeProgress: { current: 0, total: 0, lastOrig: '' },
@@ -257,9 +265,8 @@ createApp({
       if (this.inputMode === 'alto') {
         return this.altoLines.filter(l => l.text && l.text.trim()).map(l => ({ text: l.text.trim(), alto_id: l.alto_id || null }));
       }
-      if (this.inputMode === 'iiif') {
-        return this.iiifLines.filter(l => l.text && l.text.trim()).map(l => ({ text: l.text.trim(), alto_id: null }));
-      }
+      // IIIF mode is label-only; lines come from paste/ALTO tabs
+      if (this.inputMode === 'iiif') return [];
       return this.rawText.split('\n')
         .map(l => l.trim()).filter(Boolean)
         .map(text => ({ text, alto_id: null }));
@@ -382,28 +389,8 @@ createApp({
     },
     selectIiifCanvas(idx) {
       this.iiifSelectedCanvas = idx;
-      const canvas = this.iiifCanvases[idx]?.raw;
-      if (!canvas) return;
-      const lines = [];
-      // Try supplementing annotations (v3: canvas.annotations; v2: canvas.otherContent)
-      const annotPages = canvas.annotations || canvas.otherContent || [];
-      for (const ap of annotPages) {
-        const items = ap.items || ap.resources || [];
-        for (const item of items) {
-          const motivation = item.motivation || item['@type'];
-          if (motivation && !['supplementing', 'oa:commenting', 'transcribing'].some(m => motivation.includes(m))) continue;
-          // Extract text body
-          const body = item.body || item.resource;
-          let text = '';
-          if (typeof body === 'string') text = body;
-          else if (body?.value) text = body.value;
-          else if (body?.['@value']) text = body['@value'];
-          if (text.trim()) lines.push({ text: text.trim() });
-        }
-      }
-      this.iiifLines = lines;
-      // Auto-fill page label from canvas label if empty
-      if (!this.pageLabel && this.iiifCanvases[idx]?.label) {
+      // Only populate the page label from the canvas label
+      if (this.iiifCanvases[idx]?.label) {
         this.pageLabel = this.iiifCanvases[idx].label;
       }
     },
@@ -412,7 +399,7 @@ createApp({
     async goNormalize() {
       this.error = null;
       this.normalizing = true;
-      this.normalizeProgress = { current: 0, total: this.effectiveLines.length, lastOrig: '' };
+      this.normalizeProgress = { current: 0, total: null, lastOrig: '' };
       this.step = 2;
 
       try {
@@ -444,6 +431,8 @@ createApp({
             inputtext: effLines.map(l => l.text).join('\n'),
             split_mode: this.splitMode,
             min_words: this.minWords,
+            delimiters: this.delimiters,
+            max_chunk_bytes: this.maxChunkBytes,
           })
         });
 

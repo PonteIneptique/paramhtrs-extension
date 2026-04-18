@@ -157,6 +157,9 @@
         <a href="{{ url_for('bp_auth.change_password') }}" aria-label="Change Password">
             <i class="fa-solid fa-key"></i> <span>Change Password</span>
         </a>
+        <a href="{{ url_for('bp_auth.profile') }}" aria-label="Profile">
+            <i class="fa-solid fa-id-card"></i> <span>Profile</span>
+        </a>
         {% if current_user.is_admin %}
         <a href="{{ url_for('bp_auth.admin_panel') }}" aria-label="Admin Panel">
             <i class="fa-solid fa-users"></i> <span>Admin Panel</span>
