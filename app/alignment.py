@@ -137,7 +137,8 @@ def token_splitter(data: str) -> list[str]:
     pattern = re.compile(
         r"""(
         \.\w+\.        # abbreviations like .xxv. or .s.
-        |[⁊&\w+'\u2019\u2018\uf1ac¬]+(?:\s[\uf1ac\u0363-\u036F\u1DDA\u1DDC-\u1DDD\u1DE0\u1DE4\u1DE6\u1DE8\u1DEB\u1DEE\u1DF1\uF02B\uF030\uF033])?  # words with apostrophes (incl. curly), hyphens or space + combining
+        |[⁊&]          # Tironian et / ampersand — always standalone (so ⁊si → ['⁊','si'])
+        |[\w+'\u2019\u2018\uf1ac¬]+(?:\s[\uf1ac\u0363-\u036F\u1DDA\u1DDC-\u1DDD\u1DE0\u1DE4\u1DE6\u1DE8\u1DEB\u1DEE\u1DF1\uF02B\uF030\uF033])?  # words with apostrophes (incl. curly), hyphens or space + combining
         |[\.,:;?!-]+           # punctuation
         )""",
         re.VERBOSE
@@ -656,6 +657,14 @@ def reprocess_space(
                     new_string = src + alignments[i+1].source + alignments[i+2].source
                     new_dist = (weighted_edit_distance(new_string, alignments[i+2].target))
                     if new_dist < orig_dist:
+                        # The n(space,space) being consumed had a target space that
+                        # must be preserved if there is already content before it in
+                        # the output (otherwise the target reconstruction drops a space).
+                        space_tgt = alignments[i+1].target
+                        if (space_tgt and ops
+                                and ops[-1].target
+                                and not ops[-1].target.endswith(space_tgt)):
+                            ops.append(Alignment("", space_tgt, "i"))
                         ops.append(
                             Alignment(
                                 new_string,

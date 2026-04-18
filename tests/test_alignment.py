@@ -681,6 +681,40 @@ def test_elision_space_after_apostrophe():
         )
 
 
+def test_tironian_et_fused_and_linebreak_word():
+    """⁊si must split into ⁊ + si (not fuse into one token).
+    ta\\nnt (word spanning a line break) must merge into one substitution unit."""
+    abbr = "moit nule criature tãt.⁊si lamoit ta\nnt cõme son heritier ⁊qi"
+    reg  = "moit nule creature tant et si l amoit tant comme son heritier et qui"
+    expected = [
+        Alignment(source='moit nule ',  target='moit nule ',  code='n'),
+        Alignment(source='criature',    target='creature',    code='s'),
+        Alignment(source=' ',           target=' ',            code='n'),
+        Alignment(source='tãt.',        target='tant',         code='s'),
+        Alignment(source='',            target=' ',            code='i'),
+        Alignment(source='⁊',           target='et',           code='s'),
+        Alignment(source='',            target=' ',            code='i'),
+        Alignment(source='si l',        target='si l',         code='n'),
+        Alignment(source='',            target=' ',            code='i'),
+        Alignment(source='amoit ',      target='amoit ',       code='n'),
+        Alignment(source='ta nt',       target='tant',         code='s'),
+        Alignment(source=' ',           target=' ',            code='n'),
+        Alignment(source='cõme',        target='comme',        code='s'),
+        Alignment(source=' son heritier ', target=' son heritier ', code='n'),
+        Alignment(source='⁊',           target='et',           code='s'),
+        Alignment(source='',            target=' ',            code='i'),
+        Alignment(source='qi',          target='qui',          code='s'),
+    ]
+    assert abbr.replace('\n', ' ') == ''.join(a.source for a in expected)
+    assert reg == ''.join(a.target for a in expected)
+    result = align_words(abbr, reg)
+    assert result == expected, (
+        f"Failed ⁊si / ta\\nnt alignment\n"
+        f"  expected: {expected}\n"
+        f"  got:      {result}"
+    )
+
+
 def test_longer_space_insertion_punctuation_deletion():
     abbr = """ione laloy desiuis.:Qins aoroient ⁊ leruoient
 les ydoles ⁊si feisoient faire ymages demeintes
