@@ -94,28 +94,22 @@ body { overflow: hidden; }
   background: rgba(25, 135, 84, 0.20);
   border-bottom-color: #198754;
 }
-/* Zero-width insertion marker */
+/* Null insertion marker — ∅ via ::before so it doesn't affect text range positions */
 #page-source mark.r6o-insertion {
   background: transparent;
   border-bottom: none;
-  display: inline-block;
-  width: 0;
-  overflow: visible;
+  display: inline;
+  cursor: pointer;
 }
 #page-source mark.r6o-insertion::before {
-  content: '';
-  display: inline-block;
-  width: 2px;
-  height: .9em;
-  background: #198754;
-  vertical-align: text-bottom;
-  border-radius: 1px;
-  margin-left: -1px;
+  content: '∅';
+  color: #198754;
+  font-size: .8em;
+  font-family: monospace;
 }
 #page-source mark.r6o-insertion.selected::before,
 #page-source mark.r6o-insertion.hovered::before {
-  background: #0d6efd;
-  width: 2px;
+  color: #0d6efd;
 }
 .line-mgmt-row {
   display: flex;
@@ -202,12 +196,27 @@ body { overflow: hidden; }
   word-break: break-word;
   color: #212529;
 }
-.normalized-text mark.norm-highlight {
+.normalized-text mark.norm-annot {
+  background: rgba(255, 220, 0, 0.18);
+  border-bottom: 1px solid #d0a800;
+  border-radius: 0;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+}
+.normalized-text mark.norm-annot.norm-highlight,
+.normalized-text mark.norm-annot.hovered {
   background: rgba(255, 150, 0, 0.45);
   border-bottom: 2px solid #d97706;
-  border-radius: 2px;
-  padding: 0;
-  color: inherit;
+}
+.normalized-text mark.norm-annot.norm-validated {
+  background: rgba(25, 135, 84, 0.15);
+  border-bottom-color: #198754;
+}
+.normalized-text mark.norm-annot.norm-validated.norm-highlight,
+.normalized-text mark.norm-annot.norm-validated.hovered {
+  background: rgba(25, 135, 84, 0.30);
+  border-bottom-color: #198754;
 }
 
 /* ── Status badge ── */
@@ -245,7 +254,7 @@ body { overflow: hidden; }
 .annot-row.validated { opacity: .7; }
 
 /* ── Insert / refine mode cursor hints ── */
-#page-source.insert-cursor { cursor: crosshair; }
+#page-source.insert-cursor { cursor: text; }
 #page-source.refine-cursor { cursor: col-resize; }
 
 /* ── Validated section ── */
@@ -328,6 +337,14 @@ body { overflow: hidden; }
     </form>
   </div>
 
+  <!-- Save error banner -->
+  <div v-if="saveError"
+       style="background:#f8d7da;color:#842029;padding:6px 12px;font-size:.85rem;display:flex;align-items:center;gap:8px;border-bottom:1px solid #f5c2c7;">
+    <i class="fa-solid fa-triangle-exclamation"></i>
+    Something went wrong, the server might be down.
+    <button @click="saveError=false" style="margin-left:auto;background:none;border:none;color:inherit;cursor:pointer;">✕</button>
+  </div>
+
   <!-- 3-panel editor -->
   <div id="editor-panels">
 
@@ -373,7 +390,9 @@ body { overflow: hidden; }
         <div class="annot-row"
              :data-annot-id="annot.id"
              :class="{ hovered: hoveredAnnotationId === annot.id, selected: selectedAnnotationId === annot.id }"
-             @mousedown="onRowMousedown(annot, $event)">
+             @mousedown="onRowMousedown(annot, $event)"
+             @mouseenter="onRowMouseenter(annot.id)"
+             @mouseleave="onRowMouseleave()">
           <label class="annot-row-label" style="flex:1;display:flex;align-items:center;gap:4px;">
             <span v-if="isInsertion(annot)" class="annot-ins-chip" title="insertion">[+]</span>
             <span v-else-if="isSpaceExact(annot)" class="annot-orig-sp" title="space">[SPACE]</span>
@@ -382,8 +401,11 @@ body { overflow: hidden; }
             <span class="annot-arrow">→</span>
 
             <span v-if="!getBodyValue(annot)" class="annot-del-chip">deleted</span>
+            <span v-else-if="isInsertion(annot) && !getBodyValue(annot).trim()" class="annot-orig-sp">[SPACE]</span>
+            <span v-else-if="isInsertion(annot)" class="annot-ins-chip">[[ getBodyValue(annot) ]]</span>
             <input v-else type="text" class="annot-target"
               :value="getBodyValue(annot)"
+              @focus="selectedAnnotationId = annot.id"
               @blur="onAnnotBlur(annot, $event)"
               @keydown.enter.prevent="$event.target.blur()"
               @keydown.tab.prevent="tabToNext(annot)">
@@ -424,15 +446,20 @@ body { overflow: hidden; }
           <div class="annot-row validated"
                :data-annot-id="annot.id"
                :class="{ hovered: hoveredAnnotationId === annot.id, selected: selectedAnnotationId === annot.id }"
-               @mousedown="onRowMousedown(annot, $event)">
+               @mousedown="onRowMousedown(annot, $event)"
+               @mouseenter="onRowMouseenter(annot.id)"
+               @mouseleave="onRowMouseleave()">
             <label class="annot-row-label" style="flex:1;display:flex;align-items:center;gap:4px;">
               <span v-if="isInsertion(annot)" class="annot-ins-chip" title="insertion">[+]</span>
               <span v-else-if="isSpaceExact(annot)" class="annot-orig-sp" title="space">[SPACE]</span>
               <span v-else class="annot-orig" :title="getExact(annot)">[[ getExact(annot) ]]</span>
               <span class="annot-arrow">→</span>
               <span v-if="!getBodyValue(annot)" class="annot-del-chip">deleted</span>
+              <span v-else-if="isInsertion(annot) && !getBodyValue(annot).trim()" class="annot-orig-sp">[SPACE]</span>
+              <span v-else-if="isInsertion(annot)" class="annot-ins-chip">[[ getBodyValue(annot) ]]</span>
               <input v-else type="text" class="annot-target"
                 :value="getBodyValue(annot)"
+                @focus="selectedAnnotationId = annot.id"
                 @blur="onAnnotBlur(annot, $event)"
                 @keydown.enter.prevent="$event.target.blur()">
             </label>
@@ -447,7 +474,7 @@ body { overflow: hidden; }
     <!-- Col 3: Normalized -->
     <div class="panel panel-normalized">
       <div class="panel-header">Normalized</div>
-      <pre class="normalized-text" v-html="normalizedPageHtml"></pre>
+      <pre class="normalized-text" ref="normalizedText" v-html="normalizedPageHtml"></pre>
     </div>
 
   </div><!-- /#editor-panels -->
@@ -516,6 +543,7 @@ createApp({
       insertMode: false,
       refineMode: false,
       showValidated: false,
+      saveError: false,
     };
   },
 
@@ -565,11 +593,16 @@ createApp({
     normalizedPageText() { return applyAnnotations(this.fullText, this.annotations); },
 
     normalizedPositions() {
-      // Must use the same ordering as applyAnnotations: start asc, then end desc for
-      // ties so that the delta accumulates in the same sequence the text was built.
+      // Sort ascending by start. For the same start position, zero-width insertions
+      // must come FIRST so their +1 delta is accumulated before the following
+      // substitution's normalised position is computed. Without this, both land at
+      // the same normalised offset and the second mark is silently skipped.
       const ordered = [...this.annotations].sort((a, b) => {
         const ds = getStart(a) - getStart(b);
-        return ds !== 0 ? ds : getEnd(b) - getEnd(a);
+        if (ds !== 0) return ds;
+        const aZero = getStart(a) === getEnd(a) ? 0 : 1;
+        const bZero = getStart(b) === getEnd(b) ? 0 : 1;
+        return aZero - bZero;
       });
       const map = {}; let delta = 0;
       for (const a of ordered) {
@@ -582,20 +615,38 @@ createApp({
     },
 
     normalizedPageHtml() {
-      const text = this.normalizedPageText;
-      const id   = this.selectedAnnotationId ?? this.hoveredAnnotationId;
-      if (!id) return escapeHtml(text);
-      const pos = this.normalizedPositions[id];
-      if (!pos || pos.start === pos.end) return escapeHtml(text);
-      return escapeHtml(text.slice(0, pos.start))
-        + '<mark class="norm-highlight">' + escapeHtml(text.slice(pos.start, pos.end)) + '</mark>'
-        + escapeHtml(text.slice(pos.end));
+      const text      = this.normalizedPageText;
+      const selId     = this.selectedAnnotationId;
+      const positions = this.normalizedPositions;
+
+      // Render every annotation that has a non-empty span in the normalized text.
+      // Hover class is applied via direct DOM manipulation (_registerNormalizedListeners)
+      // so it doesn't trigger a recompute on every mousemove.
+      const annots = this.allAnnotationsSorted
+        .map(a => ({ a, pos: positions[a.id] }))
+        .filter(({ pos }) => pos && pos.start < pos.end)
+        .sort((x, y) => x.pos.start - y.pos.start);
+
+      let html = '', cursor = 0;
+      for (const { a, pos } of annots) {
+        if (pos.start < cursor) continue; // skip overlapping ranges
+        if (pos.start > cursor) html += escapeHtml(text.slice(cursor, pos.start));
+        const cls = ['norm-annot',
+          a.id === selId  ? 'norm-highlight'  : '',
+          a.validated_by  ? 'norm-validated'  : '',
+        ].filter(Boolean).join(' ');
+        html += `<mark class="${cls}" data-annotation="${escapeHtml(a.id)}">${escapeHtml(text.slice(pos.start, pos.end))}</mark>`;
+        cursor = pos.end;
+      }
+      if (cursor < text.length) html += escapeHtml(text.slice(cursor));
+      return html;
     },
   },
 
   mounted() {
     const el = this.$refs.pageSource;
     this._registerSourceListeners(el);
+    this._registerNormalizedListeners(this.$refs.normalizedText);
     document.addEventListener('keydown', this._handleKeydown);
   },
   beforeUnmount() {
@@ -700,6 +751,7 @@ createApp({
 
       // Hover: direct DOM class-toggle (fast — avoids sourceHtml re-render per event)
       el.addEventListener('mouseover', (evt) => {
+        if (this.selectedAnnotationId) return;
         const span = evt.target.closest('[data-annotation]');
         if (!span) return;
         const id = span.dataset.annotation;
@@ -721,20 +773,68 @@ createApp({
       });
     },
 
+    // ── Normalized panel listeners ────────────────────────────────────────────
+    _registerNormalizedListeners(el) {
+      // Hover: mirror source-panel convention — direct DOM class toggle,
+      // only hoveredAnnotationId (reactive) is set so the annot-list row highlights.
+      el.addEventListener('mouseover', (evt) => {
+        if (this.selectedAnnotationId) return;
+        const span = evt.target.closest('[data-annotation]');
+        if (!span) return;
+        const id = span.dataset.annotation;
+        if (id === this.hoveredAnnotationId) return;
+        // Clear previous hover in both panels
+        el.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
+        const src = this.$refs.pageSource;
+        src.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
+        // Apply hover in both panels
+        span.classList.add('hovered');
+        src.querySelector(`[data-annotation="${CSS.escape(id)}"]`)?.classList.add('hovered');
+        this.hoveredAnnotationId = id;
+        this._scrollAnnotRowIntoView(id);
+      });
+      el.addEventListener('mouseout', (evt) => {
+        const from = evt.target.closest('[data-annotation]');
+        const to   = evt.relatedTarget?.closest?.('[data-annotation]');
+        if (from && from !== to) {
+          from.classList.remove('hovered');
+          const id = from.dataset.annotation;
+          this.$refs.pageSource.querySelector(`[data-annotation="${CSS.escape(id)}"]`)?.classList.remove('hovered');
+          this.hoveredAnnotationId = null;
+        }
+      });
+      // Click: select annotation (same behaviour as source panel)
+      el.addEventListener('click', (evt) => {
+        const span = evt.target.closest('[data-annotation]');
+        if (!span) return;
+        const id = span.dataset.annotation;
+        const newSel = this.selectedAnnotationId === id ? null : id;
+        this.selectedAnnotationId = newSel;
+        if (newSel) {
+          const annot = this.allAnnotationsSorted.find(a => a.id === id);
+          if (annot) this._focusAnnotInput(annot);
+        }
+      });
+    },
+
     // ── Middle-panel helpers ──────────────────────────────────────────────────
     _findAnnotRow(id)   { return document.querySelector(`.panel-annots [data-annot-id="${id}"]`); },
+    _annotPanelHeaderHeight() {
+      const h = document.querySelector('.panel-annots .panel-header');
+      return h ? h.offsetHeight : 0;
+    },
     _scrollAnnotRowIntoView(id) {
       setTimeout(() => {
         const row = this._findAnnotRow(id); if (!row) return;
-        const p = document.querySelector('.panel-annots');
-        if (p) p.scrollTop = row.offsetTop - p.offsetTop;
+        const p = document.querySelector('.panel-annots'); if (!p) return;
+        p.scrollTop = row.offsetTop - p.offsetTop - this._annotPanelHeaderHeight();
       }, 0);
     },
     _focusAnnotInput(annot) {
       setTimeout(() => {
         const row = this._findAnnotRow(annot.id); if (!row) return;
-        const p = document.querySelector('.panel-annots');
-        if (p) p.scrollTop = row.offsetTop - p.offsetTop;
+        const p = document.querySelector('.panel-annots'); if (!p) return;
+        p.scrollTop = row.offsetTop - p.offsetTop - this._annotPanelHeaderHeight();
         row.querySelector('.annot-target')?.focus();
       }, 0);
     },
@@ -742,6 +842,21 @@ createApp({
       if (event.target.closest('button') || event.target.closest('.annot-target')) return;
       event.preventDefault();
       this.selectAnnotation(annot);
+    },
+    onRowMouseenter(id) {
+      if (this.selectedAnnotationId) return;
+      const src  = this.$refs.pageSource;
+      const norm = this.$refs.normalizedText;
+      src.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
+      norm.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
+      src.querySelector(`[data-annotation="${CSS.escape(id)}"]`)?.classList.add('hovered');
+      norm.querySelector(`[data-annotation="${CSS.escape(id)}"]`)?.classList.add('hovered');
+      this.hoveredAnnotationId = id;
+    },
+    onRowMouseleave() {
+      this.$refs.pageSource.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
+      this.$refs.normalizedText.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
+      this.hoveredAnnotationId = null;
     },
 
     // ── Annotation value edit ─────────────────────────────────────────────────
@@ -757,7 +872,7 @@ createApp({
       if (!pendingAnnotRaw) return;
       const annot = pendingAnnotRaw; pendingAnnotRaw = null; this.pendingAnnot = null;
       const posSel = getSelector(annot, 'TextPositionSelector');
-      annot.body   = [{ type:'TextualBody', value:(value||'').trim(),
+      annot.body   = [{ type:'TextualBody', value: value ?? '',
                         purpose: posSel.start === posSel.end ? 'insertion' : 'normalizing' }];
       annot.resp_id = CURRENT_USER_ID;
       this.annotations = [...this.annotations, annot];
@@ -776,7 +891,13 @@ createApp({
     // ── Persistent cross-column selection ────────────────────────────────────
     selectAnnotation(annot) {
       this.selectedAnnotationId = this.selectedAnnotationId === annot.id ? null : annot.id;
-      if (this.selectedAnnotationId) this._focusAnnotInput(annot);
+      if (this.selectedAnnotationId) {
+        // Clear any hover highlight so only the selection remains visible.
+        this.$refs.pageSource.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
+        this.$refs.normalizedText.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
+        this.hoveredAnnotationId = null;
+        this._focusAnnotInput(annot);
+      }
     },
 
     // ── Validate / un-validate ────────────────────────────────────────────────
@@ -802,7 +923,17 @@ createApp({
       if (next) { this.selectedAnnotationId = next.id; this._focusAnnotInput(next); }
     },
 
-    _handleKeydown(e) { if (e.key==='Escape' && this.pendingAnnot) { this.cancelPending(); e.preventDefault(); } },
+    _handleKeydown(e) {
+      if (e.key === 'Escape' && this.pendingAnnot) { this.cancelPending(); e.preventDefault(); return; }
+      if (e.key === 'Enter' && e.ctrlKey && this.selectedAnnotationId) {
+        const annot = this.annotations.find(a => a.id === this.selectedAnnotationId);
+        if (annot && !annot.validated_by) {
+          document.activeElement?.blur(); // commit any in-progress edit via onAnnotBlur
+          this.validateAnnotation(annot);
+          e.preventDefault();
+        }
+      }
+    },
 
     // ── Delete line ───────────────────────────────────────────────────────────
     async deleteLine(line, idx) {
@@ -826,10 +957,16 @@ createApp({
     },
 
     async saveAnnotations() {
-      await fetch(`/api/pages/${this.pageId}/annotations`, {
-        method:'PUT', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ annotations: this.annotations }),
-      });
+      try {
+        const r = await fetch(`/api/pages/${this.pageId}/annotations`, {
+          method:'PUT', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ annotations: this.annotations }),
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        this.saveError = false;
+      } catch {
+        this.saveError = true;
+      }
     },
     async setPageStatus(status) {
       this.pageStatus = status;
