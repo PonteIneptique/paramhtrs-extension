@@ -1,5 +1,6 @@
 from flask import Flask, render_template
 from flask_login import LoginManager
+from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 import os
 
@@ -10,6 +11,7 @@ app = Flask(
     static_folder=os.path.join(os.path.dirname(__file__), '..', 'static'),
     template_folder=os.path.join(os.path.dirname(__file__), '..', 'template'),
 )
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///./lines.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SEQ2SEQ_MODEL'] = os.getenv('SEQ2SEQ_MODEL', 'comma-project/normalization-byt5-small')
