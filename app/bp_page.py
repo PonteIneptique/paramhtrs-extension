@@ -4,7 +4,7 @@ from flask import Blueprint, render_template, request, jsonify, redirect, url_fo
 from flask_login import login_required, current_user
 from sqlalchemy import func
 
-from .models import db, Page, Line, Document, Project, User
+from .models import db, Page, Line, Document, Project, User, Work, PageWork, DocumentWork
 from .bp_auth import requires_access
 from .annot_utils import align_to_annotations, align_to_annotations_from_chunks, build_tei_from_annotations
 
@@ -108,6 +108,7 @@ def page_editor(page: Page):
         annotations=page.annotations or [],
         prev_page=page.prev,
         next_page=page.next,
+        works=page.works.all(),
     )
 
 
@@ -166,3 +167,34 @@ def page_export_tei(page: Page):
         mimetype="text/xml",
         headers={"Content-Disposition": f'attachment; filename="{page.label}.xml"'}
     )
+
+
+# -------------------------
+# Page works CRUD
+# -------------------------
+
+@bp_page.route("/api/pages/<int:page_id>/works", methods=["POST"])
+@requires_access(Page, 'page_id')
+def api_page_add_work(page: Page):
+    data = request.json or {}
+    title = (data.get("title") or "").strip()
+    if not title:
+        abort(400)
+    genre = (data.get("genre") or "").strip() or None
+    work = Work(title=title, genre=genre)
+    db.session.add(work)
+    db.session.flush()
+    db.session.add(PageWork(page_id=page.id, work_id=work.id))
+    db.session.commit()
+    return jsonify({"status": "ok", "work": {"id": work.id, "title": work.title, "genre": work.genre}})
+
+
+@bp_page.route("/api/pages/<int:page_id>/works/<int:work_id>", methods=["DELETE"])
+@requires_access(Page, 'page_id')
+def api_page_remove_work(page: Page, work_id):
+    PageWork.query.filter_by(page_id=page.id, work_id=work_id).delete()
+    if not PageWork.query.filter_by(work_id=work_id).count() and \
+       not DocumentWork.query.filter_by(work_id=work_id).count():
+        Work.query.filter_by(id=work_id).delete()
+    db.session.commit()
+    return jsonify({"status": "ok"})

@@ -45,6 +45,12 @@ class DocumentWork(db.Model):
     work_id     = db.Column(db.Integer, db.ForeignKey("works.id"),     primary_key=True)
 
 
+class PageWork(db.Model):
+    __tablename__ = "page_work"
+    page_id = db.Column(db.Integer, db.ForeignKey("pages.id"), primary_key=True)
+    work_id = db.Column(db.Integer, db.ForeignKey("works.id"), primary_key=True)
+
+
 class ProjectUser(db.Model):
     __tablename__ = "project_user"
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
@@ -144,6 +150,13 @@ class Page(db.Model):
     )
 
     annotations = db.Column(db.JSON, nullable=False, default=list)
+
+    works = db.relationship(
+        "Work",
+        secondary="page_work",
+        backref=db.backref("pages", lazy="dynamic"),
+        lazy="dynamic",
+    )
 
     lines = db.relationship(
         "Line",

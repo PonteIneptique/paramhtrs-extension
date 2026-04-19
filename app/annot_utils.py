@@ -225,9 +225,17 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
             annot_resp_id = None
             process_segment(original_text[cursor:start])
 
-        annot_resp_id = annot.get("resp_id")
         body = annot.get("body", [{}])[0]
-        process_segment(body.get("value", ""), orig_label=original_text[start:end])
+        if body.get("purpose") == "atr_noise":
+            raw_text = original_text[start:end]
+            resp_id = annot.get("resp_id")
+            resp_attr = ""
+            if users_by_id and resp_id and resp_id in users_by_id:
+                resp_attr = f' resp="#{escape(users_by_id[resp_id])}"'
+            body_parts.append(f'<unclear reason="illegible" cert="low"{resp_attr}>{escape(raw_text)}</unclear>')
+        else:
+            annot_resp_id = annot.get("resp_id")
+            process_segment(body.get("value", ""), orig_label=original_text[start:end])
         cursor = end
 
     if cursor < len(original_text):

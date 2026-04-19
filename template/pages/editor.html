@@ -121,6 +121,12 @@ body { overflow: hidden; }
 #page-source mark.r6o-insertion.hovered::before {
   color: #0d6efd;
 }
+#page-source mark.r6o-atr-noise {
+  background: rgba(220, 53, 69, 0.12);
+  text-decoration: line-through;
+  color: #842029;
+  border-bottom-color: #dc3545;
+}
 .line-mgmt-row {
   display: flex;
   align-items: center;
@@ -182,6 +188,17 @@ body { overflow: hidden; }
   flex: 1 1 0;
   font-style: italic;
 }
+.annot-atr-chip {
+  font-size: .7rem;
+  font-weight: bold;
+  background: #dc3545;
+  color: #fff;
+  border-radius: 3px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: default;
+}
 .annot-arrow { color: #adb5bd; flex-shrink: 0; padding: 0 2px; }
 .annot-target {
   font-family: 'JunicodeVF', serif;
@@ -196,6 +213,8 @@ body { overflow: hidden; }
 .annot-del { color: #adb5bd; cursor: pointer; flex-shrink: 0; background: none; border: none; padding: 0 2px; }
 .annot-del:hover { color: #dc3545; }
 .annot-pending .annot-target { border-color: #86b7fe; }
+.validate-hint { display: none; font-size: .65em; }
+.validate-btn:hover .validate-hint { display: inline; }
 
 /* ── Normalized panel ── */
 .normalized-text {
@@ -227,6 +246,13 @@ body { overflow: hidden; }
 .normalized-text mark.norm-annot.norm-validated.hovered {
   background: rgba(25, 135, 84, 0.30);
   border-bottom-color: #198754;
+}
+.normalized-text mark.norm-atr-noise {
+  text-decoration: line-through;
+  color: #842029;
+  background: rgba(220, 53, 69, 0.10);
+  border-bottom-color: #dc3545;
+  opacity: 0.8;
 }
 
 /* ── Status badge ── */
@@ -321,16 +347,17 @@ body { overflow: hidden; }
       {% endif %}
     </div>
 
-    <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#editPageForm">
+    <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#pageMetaModal">
       <i class="fa-solid fa-pen"></i>
+    </button>
+
+    <button class="btn btn-sm btn-outline-warning" title="Remove all unvalidated annotations"
+            @click="confirmClearPending" :disabled="!pendingAnnotationsSorted.length">
+      <i class="fa-solid fa-broom"></i>
     </button>
 
     <a href="{{ url_for('bp_page.page_export_tei', page_id=page.id) }}" class="btn btn-sm btn-info">
       <i class="fa-solid fa-download"></i> TEI
-    </a>
-
-    <a href="{{ url_for('bp_page.page_delete', page_id=page.id) }}" class="btn btn-sm btn-outline-danger">
-      <i class="fa-solid fa-trash"></i>
     </a>
 
     <!-- Page status -->
@@ -348,14 +375,6 @@ body { overflow: hidden; }
     </div>
   </div>
 
-  <!-- Rename form (collapsed) -->
-  <div class="collapse" id="editPageForm">
-    <form method="post" action="{{ url_for('bp_page.page_update', page_id=page.id) }}"
-          class="d-flex gap-2 p-2 bg-light border-bottom">
-      <input type="text" class="form-control form-control-sm" name="label" value="{{ page.label }}" required>
-      <button type="submit" class="btn btn-sm btn-primary">Save</button>
-    </form>
-  </div>
 
   <!-- Save error banner -->
   <div v-if="saveError"
@@ -435,7 +454,8 @@ body { overflow: hidden; }
             <span v-else-if="isSpaceExact(annot)" class="annot-orig-sp" title="space">[SPACE]</span>
             <span v-else class="annot-orig" :title="getExact(annot)">[[ getExact(annot) ]]</span>
             <span class="annot-arrow">→</span>
-            <span v-if="!getBodyValue(annot)" class="annot-del-chip">deleted</span>
+            <span v-if="isAtrNoise(annot)" class="annot-atr-chip">[ATR NOISE]</span>
+            <span v-else-if="!getBodyValue(annot)" class="annot-del-chip">deleted</span>
             <span v-else-if="isInsertion(annot) && !getBodyValue(annot).trim()" class="annot-orig-sp">[SPACE]</span>
             <span v-else-if="isInsertion(annot)" class="annot-ins-chip">[[ getBodyValue(annot) ]]</span>
             <input v-else type="text" class="annot-target"
@@ -445,8 +465,8 @@ body { overflow: hidden; }
               @keydown.enter.prevent="$event.target.blur()"
               @keydown.tab.prevent="tabToNext(annot)">
           </label>
-          <button class="btn btn-sm btn-outline-success py-0 px-1" title="Validate"
-                  @click.stop="validateAnnotation(annot)">✓</button>
+          <button class="btn btn-sm btn-outline-success py-0 px-1 validate-btn" title="Validate (Ctrl+Enter)"
+                  @click.stop="validateAnnotation(annot)">✓<span class="validate-hint"> (Ctrl+Enter)</span></button>
           <button class="annot-del" @click.stop="removeAnnotation(annot)" title="Remove">✕</button>
         </div>
       </template>
@@ -461,6 +481,11 @@ body { overflow: hidden; }
           @keydown.enter.prevent="commitPending($event.target.value)"
           @keydown.esc="cancelPending"
           @blur="commitPending($event.target.value)">
+        <button v-if="!pendingAnnot?.isIns"
+                class="btn btn-sm btn-danger py-0 px-1" style="font-size:.7em; white-space:nowrap; flex-shrink:0;"
+                @mousedown.prevent="markAtrNoise()" title="Mark as ATR noise">
+          ATR NOISE
+        </button>
         <button class="annot-del" @click="cancelPending" title="Cancel">✕</button>
       </div>
 
@@ -514,6 +539,89 @@ body { overflow: hidden; }
   </div><!-- /#editor-panels -->
 </div><!-- /#editor-root -->
 
+<!-- Page metadata modal -->
+<div class="modal fade" id="pageMetaModal" tabindex="-1" aria-labelledby="pageMetaModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="pageMetaModalLabel">
+          <i class="fa-solid fa-pen me-2"></i>Page metadata — <span class="fw-normal text-muted">{{ page.label }}</span>
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Label -->
+        <h6 class="text-uppercase text-muted small fw-semibold mb-2">Label</h6>
+        <form method="post" action="{{ url_for('bp_page.page_update', page_id=page.id) }}"
+              class="d-flex gap-2 mb-4">
+          <input type="text" class="form-control" name="label" value="{{ page.label }}" required>
+          <button type="submit" class="btn btn-primary" style="white-space:nowrap;">Save label</button>
+        </form>
+
+        <!-- Works -->
+        <h6 class="text-uppercase text-muted small fw-semibold mb-2">Works</h6>
+        <div class="mb-3" id="page-works-chips">
+          {% for work in works %}
+          <span class="badge bg-primary me-1 mb-1" data-work-id="{{ work.id }}" style="font-size:.85em;">
+            {{ work.title }}{% if work.genre %} <em>({{ work.genre }})</em>{% endif %}
+            <button type="button" class="btn-close btn-close-white btn-sm ms-1"
+                    aria-label="Remove" style="font-size:.5em;"
+                    onclick="pageRemoveWork({{ work.id }})"></button>
+          </span>
+          {% else %}
+          <span class="text-muted small" id="page-no-works-label">No works linked yet.</span>
+          {% endfor %}
+        </div>
+        <div class="border rounded p-3 bg-light">
+          <p class="mb-2 small text-muted fw-semibold">Link a new work</p>
+          <div class="d-flex gap-2 align-items-end flex-wrap">
+            <div class="flex-grow-1" style="min-width:140px;">
+              <label class="form-label form-label-sm mb-1 small">Title <span class="text-danger">*</span></label>
+              <input type="text" class="form-control form-control-sm" id="page-work-title" placeholder="e.g. Vie de saint Martin">
+            </div>
+            <div style="min-width:120px;">
+              <label class="form-label form-label-sm mb-1 small">Genre</label>
+              <input type="text" class="form-control form-control-sm" id="page-work-genre" placeholder="e.g. hagiography">
+            </div>
+            <button class="btn btn-sm btn-primary" onclick="pageAddWork()">Add</button>
+          </div>
+        </div>
+
+        <!-- Danger zone -->
+        <hr class="mt-4">
+        <h6 class="text-uppercase text-muted small fw-semibold mb-2">Danger zone</h6>
+        <a href="{{ url_for('bp_page.page_delete', page_id=page.id) }}" class="btn btn-outline-danger btn-sm">
+          <i class="fa-solid fa-trash me-1"></i>Delete this page
+        </a>
+
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Clear pending confirmation modal -->
+<div class="modal fade" id="clearPendingModal" tabindex="-1" aria-labelledby="clearPendingModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="clearPendingModalLabel">Remove unvalidated annotations</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        This will permanently remove all <strong id="clearPendingCount"></strong> unvalidated annotation(s) from this page. Validated annotations are kept. This cannot be undone.
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-danger" id="clearPendingConfirm">Remove</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script type="importmap">
 {
   "imports": {
@@ -538,7 +646,8 @@ function getBodyValue(annot) { return annot?.body?.[0]?.value ?? ''; }
 function isInsertion(annot) {
   return annot?.body?.[0]?.purpose === 'insertion' || getStart(annot) === getEnd(annot);
 }
-function isSpaceExact(annot) { return !isInsertion(annot) && getExact(annot).trim() === ''; }
+function isAtrNoise(annot) { return annot?.body?.[0]?.purpose === 'atr_noise'; }
+function isSpaceExact(annot) { return !isInsertion(annot) && !isAtrNoise(annot) && getExact(annot).trim() === ''; }
 function escapeHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
@@ -614,6 +723,7 @@ createApp({
           selId === a.id        ? 'selected'      : '',
           a.validated_by        ? 'r6o-validated' : '',
           isInsertion(a)        ? 'r6o-insertion' : '',
+          isAtrNoise(a)         ? 'r6o-atr-noise' : '',
         ].filter(Boolean).join(' ');
 
         if (s === e) {
@@ -673,6 +783,7 @@ createApp({
         const cls = ['norm-annot',
           a.id === selId  ? 'norm-highlight'  : '',
           a.validated_by  ? 'norm-validated'  : '',
+          isAtrNoise(a)   ? 'norm-atr-noise'  : '',
         ].filter(Boolean).join(' ');
         html += `<mark class="${cls}" data-annotation="${escapeHtml(a.id)}">${escapeHtml(text.slice(pos.start, pos.end))}</mark>`;
         cursor = pos.end;
@@ -700,7 +811,7 @@ createApp({
   },
 
   methods: {
-    getExact, getBodyValue, isInsertion, isSpaceExact,
+    getExact, getBodyValue, isInsertion, isAtrNoise, isSpaceExact,
     isInsertionExact(stub) { return stub?.isIns === true; },
 
     // ── DOM event listeners on #page-source (registered ONCE at mount) ────────
@@ -927,10 +1038,34 @@ createApp({
 
     cancelPending() { pendingAnnotRaw = null; this.pendingAnnot = null; },
 
+    // ── Mark selection as ATR noise ───────────────────────────────────────────
+    markAtrNoise() {
+      if (!pendingAnnotRaw) return;
+      const annot = pendingAnnotRaw; pendingAnnotRaw = null; this.pendingAnnot = null;
+      const exact = getSelector(annot, 'TextQuoteSelector').exact ?? '';
+      annot.body = [{ type: 'TextualBody', value: exact, purpose: 'atr_noise' }];
+      annot.resp_id = CURRENT_USER_ID;
+      this.annotations = [...this.annotations, annot];
+      this.saveAnnotations();
+    },
+
     // ── Remove annotation ─────────────────────────────────────────────────────
     removeAnnotation(annot) {
       this.annotations = this.annotations.filter(a => a.id !== annot.id);
       if (this.selectedAnnotationId === annot.id) this.selectedAnnotationId = null;
+      this.saveAnnotations();
+    },
+
+    // ── Clear all unvalidated ─────────────────────────────────────────────────
+    confirmClearPending() {
+      document.getElementById('clearPendingCount').textContent = this.pendingAnnotationsSorted.length;
+      const modal = new bootstrap.Modal(document.getElementById('clearPendingModal'));
+      document.getElementById('clearPendingConfirm').onclick = () => { modal.hide(); this.clearPending(); };
+      modal.show();
+    },
+    clearPending() {
+      this.annotations = this.annotations.filter(a => a.validated_by);
+      this.selectedAnnotationId = null;
       this.saveAnnotations();
     },
 
@@ -1001,6 +1136,14 @@ createApp({
           document.activeElement?.blur(); // commit any in-progress edit via onAnnotBlur
           this.validateAnnotation(annot);
           e.preventDefault();
+          // Focus the next pending annotation so the user can keep working without the mouse
+          this.$nextTick(() => {
+            const pending = this.allAnnotationsSorted.filter(a => !a.validated_by && a.id !== annot.id);
+            if (pending.length) {
+              this.selectedAnnotationId = pending[0].id;
+              this._focusAnnotInput(pending[0]);
+            }
+          });
         }
       }
     },
@@ -1047,5 +1190,45 @@ createApp({
     },
   },
 }).mount('#editor-root');
+</script>
+
+<script>
+const PAGE_ID = {{ page.id }};
+
+async function pageAddWork() {
+  const title = document.getElementById('page-work-title').value.trim();
+  if (!title) return;
+  const genre = document.getElementById('page-work-genre').value.trim();
+  const resp = await fetch(`/api/pages/${PAGE_ID}/works`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({title, genre}),
+  });
+  if (!resp.ok) { alert('Failed to add work'); return; }
+  const data = await resp.json();
+  const work = data.work;
+  document.getElementById('page-no-works-label')?.remove();
+  const chip = document.createElement('span');
+  chip.className = 'badge bg-primary me-1';
+  chip.dataset.workId = work.id;
+  chip.innerHTML = `${work.title}${work.genre ? ` <em>(${work.genre})</em>` : ''}
+    <button type="button" class="btn-close btn-close-white btn-sm ms-1" aria-label="Remove"
+            style="font-size:.5em;" onclick="pageRemoveWork(${work.id})"></button>`;
+  document.getElementById('page-works-chips').appendChild(chip);
+  document.getElementById('page-work-title').value = '';
+  document.getElementById('page-work-genre').value = '';
+}
+
+async function pageRemoveWork(workId) {
+  await fetch(`/api/pages/${PAGE_ID}/works/${workId}`, {method: 'DELETE'});
+  document.querySelector(`#page-works-chips [data-work-id="${workId}"]`)?.remove();
+  if (!document.querySelectorAll('#page-works-chips .badge').length) {
+    const span = document.createElement('span');
+    span.className = 'text-muted small';
+    span.id = 'page-no-works-label';
+    span.textContent = 'None';
+    document.getElementById('page-works-chips').appendChild(span);
+  }
+}
 </script>
 {% endblock %}
