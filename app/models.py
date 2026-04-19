@@ -78,7 +78,9 @@ class Project(db.Model):
         lazy="dynamic"
     )
 
-    def user_has_access(self, user: User) -> bool:
+    def user_has_access(self, user) -> bool:
+        if not getattr(user, 'is_authenticated', False):
+            return False
         if self.creator_id == user.id:
             return True
         return ProjectUser.query.filter(
@@ -124,7 +126,9 @@ class Document(db.Model):
         lazy="dynamic",
     )
 
-    def user_has_access(self, user: User) -> bool:
+    def user_has_access(self, user) -> bool:
+        if not getattr(user, 'is_authenticated', False):
+            return False
         project = Project.query.get(self.project_id)
         if project.user_has_access(user):
             return True
