@@ -1,17 +1,20 @@
 from flask import Flask, render_template
 from flask_login import LoginManager
+from dotenv import load_dotenv
 import os
+
+load_dotenv()
 
 app = Flask(
     __name__,
     static_folder=os.path.join(os.path.dirname(__file__), '..', 'static'),
     template_folder=os.path.join(os.path.dirname(__file__), '..', 'template'),
 )
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///./lines.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///./lines.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SEQ2SEQ_MODEL'] = "comma-project/normalization-byt5-small"
-app.config['MAX_CHUNK_BYTES'] = 512
-app.config['SECRET_KEY'] = 'jfbqh2brbsefonp12294810i23hrisnbfdhbdiauOJSOBSDFDU9 209IEWR'
+app.config['SEQ2SEQ_MODEL'] = os.getenv('SEQ2SEQ_MODEL', 'comma-project/normalization-byt5-small')
+app.config['MAX_CHUNK_BYTES'] = int(os.getenv('MAX_CHUNK_BYTES', 512))
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'jfbqh2brbsefonp12294810i23hrisnbfdhbdiauOJSOBSDFDU9 209IEWR')
 
 from .models import db, db_cli
 db.init_app(app)

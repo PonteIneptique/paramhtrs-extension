@@ -9,3 +9,4 @@ transformers==4.57.3
 saxonche==12.9.0
 flask-login==0.6.3
 rapidfuzz
+python-dotenv
