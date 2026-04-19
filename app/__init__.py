@@ -6,6 +6,9 @@ import os
 
 load_dotenv()
 
+import torch
+torch.set_num_threads(int(os.getenv('TORCH_NUM_THREADS', 4)))
+
 app = Flask(
     __name__,
     static_folder=os.path.join(os.path.dirname(__file__), '..', 'static'),
