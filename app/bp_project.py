@@ -1,3 +1,8 @@
+import io
+import json
+import os
+import zipfile
+
 from flask import (
     Blueprint,
     render_template,
@@ -6,13 +11,14 @@ from flask import (
     url_for,
     flash,
     abort,
-    jsonify
+    jsonify,
+    Response,
 )
 from sqlalchemy import or_
 from flask_login import login_required, current_user
-import os
 from .models import Project, Document, db, User, ProjectUser
 from .bp_auth import requires_access
+from .annot_utils import build_tei_from_annotations
 
 bp_project = Blueprint(
     "bp_project",
@@ -117,6 +123,30 @@ def project_users(project_id):
         project=project,
         users=users,
         project_user_ids=project_user_ids,
+    )
+
+
+@bp_project.route("/projects/<int:project_id>/download")
+@requires_access(Project, 'project_id')
+def project_download_zip(project: Project):
+    users_by_id = {u.id: u.nickname or u.username for u in User.query.all()}
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for document in Document.query.filter_by(project_id=project.id).order_by(Document.name).all():
+            if not document.user_has_access(current_user):
+                continue
+            safe_doc = document.name.replace("/", "_").replace("\\", "_")
+            for page in document.pages:
+                safe_label = page.label.replace("/", "_").replace("\\", "_")
+                tei = build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id)
+                zf.writestr(f"{safe_doc}/{safe_label}.xml", tei)
+                zf.writestr(f"{safe_doc}/{safe_label}.json", json.dumps(page.annotations or [], ensure_ascii=False, indent=2))
+    buf.seek(0)
+    safe_name = project.name.replace("/", "_").replace("\\", "_")
+    return Response(
+        buf.read(),
+        mimetype="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.zip"'},
     )
 
 

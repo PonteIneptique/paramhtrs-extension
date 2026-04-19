@@ -236,11 +236,24 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
     # Cleanup formatting
     full_body = " ".join(body_parts).replace(" \n", "\n").replace("\n ", "\n")
 
+    # Collect contributor ids that actually appear in the annotations
+    resp_stmts = ""
+    if users_by_id:
+        contributor_ids = {a.get("resp_id") for a in sorted_annots if a.get("resp_id")}
+        contributor_ids |= {a.get("validated_by") for a in sorted_annots if a.get("validated_by")}
+        stmts = []
+        for uid in sorted(contributor_ids):
+            name = users_by_id.get(uid)
+            if name:
+                stmts.append(f'        <respStmt><resp>annotator</resp><persName xml:id="{escape(name)}">{escape(name)}</persName></respStmt>')
+        resp_stmts = "\n" + "\n".join(stmts) if stmts else ""
+
     return f'''<TEI xmlns="http://www.tei-c.org/ns/1.0">
   <teiHeader>
     <fileDesc>
-      <titleStmt><title>Standoff Export</title></titleStmt>
-      <publicationStmt><p>Fast Standoff via cdifflib</p></publicationStmt>
+      <titleStmt><title>Standoff Export</title>{resp_stmts}
+      </titleStmt>
+      <publicationStmt><p>Exported from Abbreviarium</p></publicationStmt>
     </fileDesc>
   </teiHeader>
   <text>

@@ -13,7 +13,10 @@
     <h1 class="mb-0">{{ document.name }}</h1>
     <div class="d-flex gap-2">
       <a href="{{ url_for('bp_document.document_export_tei', document_id=document.id) }}" class="btn btn-sm btn-info">
-        <i class="fa-solid fa-download"></i> Export TEI
+        <i class="fa-solid fa-file-code"></i> Export TEI
+      </a>
+      <a href="{{ url_for('bp_document.document_download_zip', document_id=document.id) }}" class="btn btn-sm btn-success">
+        <i class="fa-solid fa-file-zipper"></i> Download ZIP
       </a>
       {% if can_edit %}
       <a href="{{ url_for('bp_document.document_users', document_id=document.id) }}" class="btn btn-sm btn-outline-warning">

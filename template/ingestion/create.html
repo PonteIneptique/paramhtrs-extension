@@ -23,8 +23,10 @@
   <!-- Step indicator -->
   <div class="d-flex gap-2 mb-4">
     <span :class="['badge', step >= 1 ? 'bg-primary' : 'bg-secondary']">1 Input</span>
-    <span class="text-muted">›</span>
-    <span :class="['badge', step >= 2 ? 'bg-primary' : 'bg-secondary']">2 Normalizing</span>
+    <template v-if="inputMode !== 'json'">
+      <span class="text-muted">›</span>
+      <span :class="['badge', step >= 2 ? 'bg-primary' : 'bg-secondary']">2 Normalizing</span>
+    </template>
   </div>
 
   <!-- ── STEP 1: input ──────────────────────────────────────────────── -->
@@ -68,6 +70,37 @@
       <input type="text" class="form-control" v-model="pageLabel" placeholder="e.g. fol. 12r, p. 5, col. A">
     </div>
 
+    <!-- IIIF Manifest (standalone — sets page label from canvas) -->
+    <div class="mb-3 p-3 border rounded bg-light">
+      <div class="fw-semibold small mb-2">
+        <i class="fa-solid fa-image"></i> IIIF Manifest
+        <span class="text-muted fw-normal">— optional, sets page label from a canvas</span>
+      </div>
+      <div class="input-group mb-2">
+        <input type="url" class="form-control form-control-sm" v-model="iiifUrl"
+          placeholder="https://…/manifest.json" @keydown.enter.prevent="fetchIiif">
+        <button class="btn btn-outline-primary btn-sm" @click="fetchIiif" :disabled="iiifLoading || !iiifUrl.trim()">
+          <span v-if="iiifLoading"><span class="spinner-border spinner-border-sm"></span></span>
+          <span v-else>Load</span>
+        </button>
+      </div>
+      <div v-if="iiifError" class="alert alert-danger py-1 small">[[ iiifError ]]</div>
+      <div v-if="iiifCanvases.length" class="mb-2">
+        <p class="small text-muted mb-1">Select a canvas to set the page label:</p>
+        <div class="iiif-canvas-list">
+          <div v-for="(c, i) in iiifCanvases" :key="i"
+               class="iiif-canvas-item"
+               :class="{selected: iiifSelectedCanvas === i}"
+               @click="selectIiifCanvas(i)">
+            [[ c.label || ('Canvas ' + (i+1)) ]]
+          </div>
+        </div>
+      </div>
+      <div v-if="iiifSelectedCanvas !== null" class="text-success small mt-1">
+        <i class="fa-solid fa-check"></i> Label set to "<strong>[[ pageLabel ]]</strong>"
+      </div>
+    </div>
+
     <!-- Input mode tabs -->
     <div class="mb-3">
       <ul class="nav nav-tabs mb-2">
@@ -82,8 +115,8 @@
           </button>
         </li>
         <li class="nav-item">
-          <button class="nav-link" :class="{active: inputMode==='iiif'}" @click="inputMode='iiif'">
-            <i class="fa-solid fa-image"></i> IIIF Manifest
+          <button class="nav-link" :class="{active: inputMode==='json'}" @click="inputMode='json'">
+            <i class="fa-solid fa-file-import"></i> Pre-aligned JSON
           </button>
         </li>
       </ul>
@@ -122,43 +155,39 @@
         </div>
       </div>
 
-      <!-- IIIF Manifest mode -->
-      <div v-if="inputMode === 'iiif'">
+      <!-- Pre-aligned JSON mode -->
+      <div v-if="inputMode === 'json'">
         <div class="alert alert-info py-2 small mb-2">
           <i class="fa-solid fa-circle-info"></i>
-          The IIIF tab sets the <strong>page label</strong> from the selected canvas.
-          Paste or upload the text lines using the <em>Paste text</em> or <em>ALTO</em> tabs.
+          Upload a JSON file of the form <code>{"lines": [{"abbr": "…", "expan": "…"}]}</code>.
+          Each <em>abbr</em>/<em>expan</em> pair is aligned directly — no normalization step.
         </div>
-        <div class="input-group mb-2">
-          <input type="url" class="form-control" v-model="iiifUrl"
-            placeholder="https://…/manifest.json" @keydown.enter.prevent="fetchIiif">
-          <button class="btn btn-outline-primary" @click="fetchIiif" :disabled="iiifLoading || !iiifUrl.trim()">
-            <span v-if="iiifLoading"><span class="spinner-border spinner-border-sm"></span></span>
-            <span v-else>Load</span>
-          </button>
+        <div class="drop-zone mb-2"
+             :class="{'drag-over': jsonDragging, 'has-file': jsonFileName}"
+             @dragover.prevent="jsonDragging=true"
+             @dragleave="jsonDragging=false"
+             @drop.prevent="onJsonDrop"
+             @click="$refs.jsonInput.click()">
+          <i class="fa-solid fa-file-import fa-2x mb-2 d-block"></i>
+          <span v-if="jsonFileName"><strong>[[ jsonFileName ]]</strong><br><small>[[ jsonLines.length ]] line(s) loaded</small></span>
+          <span v-else>Click or drag &amp; drop a JSON file here</span>
         </div>
-        <div v-if="iiifError" class="alert alert-danger py-1 small">[[ iiifError ]]</div>
-
-        <!-- Canvas list -->
-        <div v-if="iiifCanvases.length" class="mb-2">
-          <p class="small text-muted mb-1">Select a canvas to populate the page label:</p>
-          <div class="iiif-canvas-list">
-            <div v-for="(c, i) in iiifCanvases" :key="i"
-                 class="iiif-canvas-item"
-                 :class="{selected: iiifSelectedCanvas === i}"
-                 @click="selectIiifCanvas(i)">
-              [[ c.label || ('Canvas ' + (i+1)) ]]
-            </div>
+        <input type="file" ref="jsonInput" accept=".json" style="display:none" @change="onJsonFileSelect">
+        <div v-if="jsonLines.length" class="mt-3">
+          <p class="small text-muted mb-1">Preview (edit if needed):</p>
+          <div v-for="(line, i) in jsonLines" :key="i" class="d-flex gap-2 mb-1 align-items-center">
+            <span class="text-muted small" style="min-width:2em;">[[ i+1 ]].</span>
+            <input type="text" class="form-control form-control-sm" v-model="jsonLines[i].abbr" placeholder="abbr" style="flex:1">
+            <span class="text-muted">→</span>
+            <input type="text" class="form-control form-control-sm" v-model="jsonLines[i].expan" placeholder="expan" style="flex:1">
+            <button class="btn btn-sm btn-outline-danger" @click="jsonLines.splice(i,1)">✕</button>
           </div>
-        </div>
-        <div v-if="iiifSelectedCanvas !== null" class="text-success small mt-2">
-          <i class="fa-solid fa-check"></i> Label set to "<strong>[[ pageLabel ]]</strong>"
         </div>
       </div>
     </div>
 
-    <!-- Normalization batching options -->
-    <div class="mb-3 mt-3">
+    <!-- Normalization batching options (not shown for pre-aligned JSON) -->
+    <div v-if="inputMode !== 'json'" class="mb-3 mt-3">
       <label class="form-label fw-semibold small">Normalization batching</label>
       <div class="d-flex flex-wrap gap-3 align-items-start mb-2">
         <div class="form-check">
@@ -185,9 +214,13 @@
     </div>
 
     <div class="d-flex gap-2 mt-3">
-      <button class="btn btn-primary" @click="goNormalize" :disabled="!canProceed || normalizing">
+      <button v-if="inputMode !== 'json'" class="btn btn-primary" @click="goNormalize" :disabled="!canProceed || normalizing">
         <span v-if="normalizing"><span class="spinner-border spinner-border-sm"></span> Normalizing…</span>
         <span v-else>Normalize →</span>
+      </button>
+      <button v-else class="btn btn-primary" @click="goImportJson" :disabled="!canProceed || saving">
+        <span v-if="saving"><span class="spinner-border spinner-border-sm"></span> Saving…</span>
+        <span v-else>Import →</span>
       </button>
     </div>
     <div v-if="error" class="alert alert-danger mt-2">[[ error ]]</div>
@@ -238,6 +271,10 @@ createApp({
       dragging: false,
       // IIIF
       iiifUrl: '',
+      // Pre-aligned JSON
+      jsonFileName: '',
+      jsonLines: [],
+      jsonDragging: false,
       iiifLoading: false,
       iiifError: null,
       iiifCanvases: [],
@@ -259,8 +296,7 @@ createApp({
       if (this.inputMode === 'alto') {
         return this.altoLines.filter(l => l.text && l.text.trim()).map(l => ({ text: l.text.trim(), alto_id: l.alto_id || null }));
       }
-      // IIIF mode is label-only; lines come from paste/ALTO tabs
-      if (this.inputMode === 'iiif') return [];
+      if (this.inputMode === 'json') return [];
       return this.rawText.split('\n')
         .map(l => l.trim()).filter(Boolean)
         .map(text => ({ text, alto_id: null }));
@@ -272,7 +308,10 @@ createApp({
       {% if not document %}
       if (!this.selectedProjectId) return false;
       {% endif %}
-      return hasDoc && this.pageLabel.trim() && this.effectiveLines.length > 0;
+      if (this.inputMode === 'json') {
+        return !!(hasDoc && this.pageLabel.trim() && this.jsonLines.length > 0);
+      }
+      return !!(hasDoc && this.pageLabel.trim() && this.effectiveLines.length > 0);
     },
   },
   async created() {
@@ -386,6 +425,63 @@ createApp({
       // Only populate the page label from the canvas label
       if (this.iiifCanvases[idx]?.label) {
         this.pageLabel = this.iiifCanvases[idx].label;
+      }
+    },
+
+    // ── Pre-aligned JSON ──────────────────────────────────────────────
+    onJsonFileSelect(e) {
+      const file = e.target.files[0];
+      if (file) this.readJsonFile(file);
+    },
+    onJsonDrop(e) {
+      this.jsonDragging = false;
+      const file = e.dataTransfer.files[0];
+      if (file) this.readJsonFile(file);
+    },
+    readJsonFile(file) {
+      this.jsonFileName = file.name;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const data = JSON.parse(ev.target.result);
+          this.jsonLines = (data.lines || [])
+            .filter(l => l.abbr !== undefined || l.expan !== undefined)
+            .map(l => ({ abbr: String(l.abbr ?? ''), expan: String(l.expan ?? '') }));
+          this.error = null;
+        } catch (err) {
+          this.error = 'Could not parse JSON: ' + err.message;
+        }
+      };
+      reader.readAsText(file);
+    },
+    async goImportJson() {
+      this.error = null;
+      this.saving = true;
+      try {
+        {% if not document %}
+        if (!this.selectedDocumentId) {
+          const r = await fetch('/documents/new', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              project_id: this.selectedProjectId,
+              name: this.newDoc.name,
+              language: this.newDoc.language,
+              qid: this.newDoc.qid || null,
+            })
+          });
+          const data = await r.json();
+          if (!r.ok || data.status !== 'ok') throw new Error(data.error || 'Could not create document');
+          this.selectedDocumentId = data.id;
+        }
+        {% endif %}
+        const lines = this.jsonLines.map(l => ({ orig: l.abbr, alto_id: null }));
+        const chunks = this.jsonLines.map(l => ({ orig: l.abbr, reg: l.expan }));
+        await this._savePage(lines, '', chunks, '\n');
+      } catch(e) {
+        this.error = e.message || 'An error occurred';
+      } finally {
+        this.saving = false;
       }
     },
 

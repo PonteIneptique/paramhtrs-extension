@@ -1,4 +1,7 @@
+import io
+import json
 import os
+import zipfile
 
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, abort, Response
 from flask_login import login_required, current_user
@@ -218,7 +221,7 @@ def api_project_documents(project_id):
 @bp_document.route("/documents/<int:document_id>/export")
 @requires_access(Document, 'document_id')
 def document_export_tei(document: Document):
-    users_by_id = {u.id: u.nickname for u in User.query.filter(User.nickname.isnot(None)).all()}
+    users_by_id = {u.id: u.nickname or u.username for u in User.query.all()}
     parts = [f'<body n="{document.name}">']
     for page in document.pages:
         page_tei = build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id)
@@ -229,6 +232,30 @@ def document_export_tei(document: Document):
     tei_body = "\n".join(parts)
     return Response(tei_body, mimetype="text/xml",
                     headers={"Content-Disposition": f'attachment; filename="{document.name}.xml"'})
+
+
+# -------------------------
+# ZIP download of full document (TEI + annotations JSON per page)
+# -------------------------
+
+@bp_document.route("/documents/<int:document_id>/download")
+@requires_access(Document, 'document_id')
+def document_download_zip(document: Document):
+    users_by_id = {u.id: u.nickname or u.username for u in User.query.all()}
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for page in document.pages:
+            safe_label = page.label.replace("/", "_").replace("\\", "_")
+            tei = build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id)
+            zf.writestr(f"{safe_label}.xml", tei)
+            zf.writestr(f"{safe_label}.json", json.dumps(page.annotations or [], ensure_ascii=False, indent=2))
+    buf.seek(0)
+    safe_name = document.name.replace("/", "_").replace("\\", "_")
+    return Response(
+        buf.read(),
+        mimetype="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.zip"'},
+    )
 
 
 # -------------------------

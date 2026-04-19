@@ -159,7 +159,7 @@ def page_delete(page: Page):
 @bp_page.route("/pages/<int:page_id>/export")
 @requires_access(Page, 'page_id')
 def page_export_tei(page: Page):
-    users_by_id = {u.id: u.nickname for u in User.query.filter(User.nickname.isnot(None)).all()}
+    users_by_id = {u.id: u.nickname or u.username for u in User.query.all()}
     tei = build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id)
     return Response(
         tei,
