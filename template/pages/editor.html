@@ -537,6 +537,38 @@ body { overflow: hidden; }
     </div>
 
   </div><!-- /#editor-panels -->
+
+  <!-- Bulk validation modal (inside #editor-root so Vue directives work) -->
+  <div class="modal fade" id="bulkValidateModal" tabindex="-1" aria-hidden="true" data-bs-keyboard="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Validate similar annotations</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted small mb-2">
+            These unvalidated annotations share the same source &rarr; target mapping.
+            Select the ones you want to validate now:
+          </p>
+          <div v-for="a in bulkCandidates" :key="a.id" class="form-check mb-1">
+            <input class="form-check-input" type="checkbox"
+                   :id="'bulk-'+a.id" v-model="bulkChecked[a.id]">
+            <label class="form-check-label small" :for="'bulk-'+a.id">
+              <span class="text-muted fst-italic">[[ getPrefix(a) ]]</span><span class="fw-semibold">[[ getExact(a) ]]</span><span class="text-muted fst-italic">[[ getSuffix(a) ]]</span>
+              <span class="mx-1">&rarr;</span>
+              <strong>[[ getBodyValue(a) ]]</strong>
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Skip</button>
+          <button type="button" class="btn btn-success btn-sm" @click="confirmBulkValidation">Validate selected</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div><!-- /#editor-root -->
 
 <!-- Page metadata modal -->
@@ -639,9 +671,11 @@ const CURRENT_USER_ID = {{ current_user.id }};
 function getSelector(annot, type) {
   return (annot?.target?.selector || []).find(s => s.type === type) || {};
 }
-function getStart(annot) { return getSelector(annot, 'TextPositionSelector').start ?? 0; }
-function getEnd(annot)   { return getSelector(annot, 'TextPositionSelector').end   ?? 0; }
-function getExact(annot) { return getSelector(annot, 'TextQuoteSelector').exact ?? ''; }
+function getStart(annot)  { return getSelector(annot, 'TextPositionSelector').start ?? 0; }
+function getEnd(annot)    { return getSelector(annot, 'TextPositionSelector').end   ?? 0; }
+function getExact(annot)  { return getSelector(annot, 'TextQuoteSelector').exact  ?? ''; }
+function getPrefix(annot) { return getSelector(annot, 'TextQuoteSelector').prefix ?? ''; }
+function getSuffix(annot) { return getSelector(annot, 'TextQuoteSelector').suffix ?? ''; }
 function getBodyValue(annot) { return annot?.body?.[0]?.value ?? ''; }
 function isInsertion(annot) {
   return annot?.body?.[0]?.purpose === 'insertion' || getStart(annot) === getEnd(annot);
@@ -690,6 +724,8 @@ createApp({
       sourceWidth: 33,
       annotsWidth: 28,
       saveError: false,
+      bulkCandidates: [],
+      bulkChecked: {},
     };
   },
 
@@ -811,7 +847,7 @@ createApp({
   },
 
   methods: {
-    getExact, getBodyValue, isInsertion, isAtrNoise, isSpaceExact,
+    getExact, getPrefix, getSuffix, getBodyValue, isInsertion, isAtrNoise, isSpaceExact,
     isInsertionExact(stub) { return stub?.isIns === true; },
 
     // ── DOM event listeners on #page-source (registered ONCE at mount) ────────
@@ -1085,6 +1121,29 @@ createApp({
     validateAnnotation(annot) {
       this.annotations = this.annotations.map(a => a.id===annot.id ? {...a, validated_by:CURRENT_USER_ID} : a);
       this.saveAnnotations();
+      const srcExact = getExact(annot);
+      const tgtValue = getBodyValue(annot);
+      const similar = this.annotations.filter(a =>
+        !a.validated_by && a.id !== annot.id &&
+        getExact(a) === srcExact && getBodyValue(a) === tgtValue
+      );
+      if (similar.length > 0) {
+        this.bulkCandidates = similar;
+        this.bulkChecked = Object.fromEntries(similar.map(a => [a.id, true]));
+        new bootstrap.Modal(document.getElementById('bulkValidateModal')).show();
+      }
+    },
+    confirmBulkValidation() {
+      const toValidate = new Set(
+        Object.entries(this.bulkChecked).filter(([,v]) => v).map(([id]) => id)
+      );
+      this.annotations = this.annotations.map(a =>
+        toValidate.has(a.id) ? {...a, validated_by: CURRENT_USER_ID} : a
+      );
+      bootstrap.Modal.getInstance(document.getElementById('bulkValidateModal'))?.hide();
+      this.bulkCandidates = [];
+      this.bulkChecked = {};
+      this.saveAnnotations();
     },
     unvalidateAnnotation(annot) {
       this.annotations = this.annotations.map(a => {
@@ -1130,6 +1189,11 @@ createApp({
 
     _handleKeydown(e) {
       if (e.key === 'Escape' && this.pendingAnnot) { this.cancelPending(); e.preventDefault(); return; }
+      if (e.key === 'Enter' && e.ctrlKey && this.bulkCandidates.length > 0) {
+        e.preventDefault();
+        this.confirmBulkValidation();
+        return;
+      }
       if (e.key === 'Enter' && e.ctrlKey && this.selectedAnnotationId) {
         const annot = this.annotations.find(a => a.id === this.selectedAnnotationId);
         if (annot && !annot.validated_by) {
