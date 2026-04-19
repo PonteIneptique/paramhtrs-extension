@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4" style="max-width: 640px;">
+  <h2>New Page</h2>
+  {% if document %}
+  <p class="text-muted">Document: <strong>{{ document.name }}</strong></p>
+  {% endif %}
+  <p>To add lines to a page, use the
+    <a href="{{ url_for('bp_norm.ingestion_new', document_id=document.id if document else '') }}">ingestion wizard</a>.
+  </p>
+</div>
+{% endblock %}

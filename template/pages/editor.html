@@ -1,0 +1,1238 @@
+{% extends "base.html" %}
+{% block morestyle %}
+<style>
+/* ── Override base container for the editor page ── */
+/* Prevent the page from scrolling (panels scroll internally) */
+body { overflow: hidden; }
+/* Remove the mt-5 / horizontal padding from the base container,
+   but keep the 60 px left gap so the fixed sidebar never overlaps text. */
+.container {
+  margin-left: 60px !important;
+  margin-top: 0 !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  max-width: calc(100vw - 60px) !important;
+  width: calc(100vw - 60px) !important;
+}
+
+/* ── Layout ── */
+#editor-root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;   /* full height: no navbar above, no mt-5 */
+}
+/* Main toolbar is the first flex child — it never scrolls */
+#editor-toolbar {
+  flex: 0 0 auto;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  padding: 8px 12px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #dee2e6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+#editor-panels {
+  flex: 1 1 0;
+  display: flex;
+  overflow: hidden;
+}
+.panel {
+  overflow-y: auto;
+  padding: 0;    /* padding moved to inner content so sticky headers reach edges */
+}
+/* All scrollable content inside a panel gets horizontal padding */
+.panel > *:not(.panel-header):not(.panel-toolbar) { padding-left: 12px; padding-right: 12px; }
+#page-source, .normalized-text { padding: 8px 12px 12px; }
+.panel-source    { flex: 0 0 33%; min-width: 0; }
+.panel-annots    { flex: 0 0 28%; min-width: 0; }
+.panel-normalized{ flex: 1 1 0;  min-width: 0; }
+/* Drag-to-resize handle between panels */
+.panel-divider {
+  width: 5px;
+  flex-shrink: 0;
+  background: #dee2e6;
+  cursor: col-resize;
+  transition: background .15s;
+  z-index: 5;
+}
+.panel-divider:hover, .panel-divider.active { background: #6c757d; }
+/* Column header and toolbar stick to the top of each panel as the user scrolls */
+.panel-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #fff;
+  font-size: .75rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .05em; color: #6c757d;
+  padding: 8px 12px 6px;
+  margin-bottom: 0;
+  border-bottom: 1px solid #dee2e6;
+}
+
+/* ── Source panel ── */
+#page-source {
+  font-family: 'JunicodeVF', serif;
+  font-size: var(--editor-font, 1rem);
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
+  min-height: 60px;
+}
+#page-source mark {
+  /* reset browser default <mark> yellow */
+  background: rgba(255, 220, 0, 0.35);
+  border-bottom: 2px solid #f0a500;
+  border-radius: 0;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+}
+#page-source mark.selected {
+  background: rgba(255, 150, 0, 0.55);
+  border-bottom-color: #d97706;
+}
+#page-source mark.hovered {
+  background: rgba(255, 190, 30, 0.50);
+  border-bottom-color: #c97900;
+}
+#page-source mark.r6o-validated {
+  background: rgba(25, 135, 84, 0.20);
+  border-bottom-color: #198754;
+}
+/* Null insertion marker — ∅ via ::before so it doesn't affect text range positions */
+#page-source mark.r6o-insertion {
+  background: transparent;
+  border-bottom: none;
+  display: inline;
+  cursor: pointer;
+}
+#page-source mark.r6o-insertion::before {
+  content: '∅';
+  color: #198754;
+  font-size: .8em;
+  font-family: monospace;
+}
+#page-source mark.r6o-insertion.selected::before,
+#page-source mark.r6o-insertion.hovered::before {
+  color: #0d6efd;
+}
+#page-source mark.r6o-atr-noise {
+  background: rgba(220, 53, 69, 0.12);
+  text-decoration: line-through;
+  color: #842029;
+  border-bottom-color: #dc3545;
+}
+.line-mgmt-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: .8rem;
+}
+.line-mgmt-num { color: #adb5bd; min-width: 20px; }
+.line-mgmt-text {
+  font-family: 'JunicodeVF', serif;
+  flex: 1 1 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #495057;
+}
+.line-mgmt-del { color: #adb5bd; cursor: pointer; background: none; border: none; padding: 0; }
+.line-mgmt-del:hover { color: #dc3545; }
+
+/* ── Annotation panel ── */
+.annot-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: background .15s;
+}
+.annot-row:hover, .annot-row.hovered { background: #fff3cd; }
+.annot-orig {
+  font-family: 'JunicodeVF', serif;
+  font-weight: 600;
+  font-size: calc(var(--editor-font, 1rem) * 0.9);
+  white-space: nowrap;
+  color: #495057;
+  min-width: 40px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+.annot-orig-sp {
+  font-family: monospace;
+  font-size: .75rem;
+  font-weight: normal;
+  background: #e9ecef;
+  border-radius: 3px;
+  padding: 1px 5px;
+  color: #6c757d;
+  flex-shrink: 0;
+}
+.annot-del-chip {
+  font-size: .75rem;
+  background: #fde8e8;
+  color: #dc3545;
+  border-radius: 3px;
+  padding: 1px 6px;
+  flex: 1 1 0;
+  font-style: italic;
+}
+.annot-atr-chip {
+  font-size: .7rem;
+  font-weight: bold;
+  background: #dc3545;
+  color: #fff;
+  border-radius: 3px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: default;
+}
+.annot-arrow { color: #adb5bd; flex-shrink: 0; padding: 0 2px; }
+.annot-target {
+  font-family: 'JunicodeVF', serif;
+  font-size: calc(var(--editor-font, 1rem) * 0.9);
+  flex: 1 1 0;
+  min-width: 0;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+.annot-target:focus { border-color: #86b7fe; outline: none; box-shadow: 0 0 0 2px rgba(13,110,253,.15); }
+.annot-del { color: #adb5bd; cursor: pointer; flex-shrink: 0; background: none; border: none; padding: 0 2px; }
+.annot-del:hover { color: #dc3545; }
+.annot-pending .annot-target { border-color: #86b7fe; }
+.validate-hint { display: none; font-size: .65em; }
+.validate-btn:hover .validate-hint { display: inline; }
+
+/* ── Normalized panel ── */
+.normalized-text {
+  font-family: 'JunicodeVF', serif;
+  font-size: var(--editor-font, 1rem);
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #212529;
+}
+.normalized-text mark.norm-annot {
+  background: rgba(255, 220, 0, 0.18);
+  border-bottom: 1px solid #d0a800;
+  border-radius: 0;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+}
+.normalized-text mark.norm-annot.norm-highlight,
+.normalized-text mark.norm-annot.hovered {
+  background: rgba(255, 150, 0, 0.45);
+  border-bottom: 2px solid #d97706;
+}
+.normalized-text mark.norm-annot.norm-validated {
+  background: rgba(25, 135, 84, 0.15);
+  border-bottom-color: #198754;
+}
+.normalized-text mark.norm-annot.norm-validated.norm-highlight,
+.normalized-text mark.norm-annot.norm-validated.hovered {
+  background: rgba(25, 135, 84, 0.30);
+  border-bottom-color: #198754;
+}
+.normalized-text mark.norm-atr-noise {
+  text-decoration: line-through;
+  color: #842029;
+  background: rgba(220, 53, 69, 0.10);
+  border-bottom-color: #dc3545;
+  opacity: 0.8;
+}
+
+/* ── Status badge ── */
+.status-pending { background: #dc3545; }
+.status-active  { background: #ffc107; color: #000; }
+.status-done    { background: #198754; }
+
+/* ── Panel toolbar — sticks just below the panel header ── */
+.panel-toolbar {
+  position: sticky;
+  top: 33px;   /* height of .panel-header (approx); keeps toolbar below it */
+  z-index: 9;
+  background: #fff;
+  display: flex;
+  gap: 4px;
+  padding: 4px 12px 6px;
+  border-bottom: 1px solid #f0f0f0;
+  margin-bottom: 0;
+}
+.panel-toolbar .btn { font-size: .75rem; padding: 2px 7px; }
+
+/* ── Insertion annotation chip ── */
+.annot-ins-chip {
+  font-size: .75rem;
+  background: #d1f5d3;
+  color: #157347;
+  border-radius: 3px;
+  padding: 1px 6px;
+  flex-shrink: 0;
+  font-style: italic;
+}
+
+/* ── Selected / validated rows ── */
+.annot-row.selected { background: #cfe2ff !important; }
+.annot-row.validated { opacity: .7; }
+
+/* ── Insert / refine mode cursor hints ── */
+#page-source.insert-cursor { cursor: text; }
+#page-source.refine-cursor { cursor: col-resize; }
+
+/* ── Annotation filter toggle ── */
+.annot-filter-btn { font-size: .7rem; padding: 1px 6px; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% if not current_user.nickname %}
+<div class="alert alert-warning mb-0 py-2 px-3 small" style="margin-left:60px; border-radius:0; position:sticky; top:0; z-index:100;">
+  <i class="fa-solid fa-triangle-exclamation"></i>
+  Your annotations will be saved without a proper identifier.
+  <a href="{{ url_for('bp_auth.profile') }}" class="alert-link">Fill in your profile</a> (nickname field) so your contributions appear correctly in TEI exports.
+</div>
+{% endif %}
+<div id="editor-root">
+
+  <!-- Toolbar -->
+  <div id="editor-toolbar">
+    <nav aria-label="breadcrumb" class="me-2">
+      <ol class="breadcrumb mb-0 small">
+        <li class="breadcrumb-item">
+          <a href="{{ url_for('bp_project.project_browse', project_id=document.project_id) }}">{{ document.project.name }}</a>
+        </li>
+        <li class="breadcrumb-item">
+          <a href="{{ url_for('bp_document.document_browse', document_id=document.id) }}">{{ document.name }}</a>
+        </li>
+        <li class="breadcrumb-item active">{{ page.label }}</li>
+      </ol>
+    </nav>
+
+    <div class="d-flex align-items-center gap-1 ms-auto">
+      <button class="btn btn-sm btn-outline-secondary" style="font-size:.75rem;padding:1px 6px"
+              @click="fontSize = +(Math.max(0.7, fontSize - 0.1)).toFixed(1)" title="Decrease font size">A−</button>
+      <span class="small text-muted" style="min-width:2.2em;text-align:center;font-size:.75rem">[[ fontSize ]]</span>
+      <button class="btn btn-sm btn-outline-secondary" style="font-size:.75rem;padding:1px 6px"
+              @click="fontSize = +(Math.min(2.5, fontSize + 0.1)).toFixed(1)" title="Increase font size">A+</button>
+    </div>
+
+    <div class="btn-group btn-group-sm">
+      {% if prev_page %}
+      <a href="{{ url_for('bp_page.page_editor', page_id=prev_page.id) }}" class="btn btn-outline-secondary">
+        &laquo; {{ prev_page.label }}
+      </a>
+      {% else %}
+      <button class="btn btn-outline-secondary" disabled>&laquo;</button>
+      {% endif %}
+      {% if next_page %}
+      <a href="{{ url_for('bp_page.page_editor', page_id=next_page.id) }}" class="btn btn-outline-secondary">
+        {{ next_page.label }} &raquo;
+      </a>
+      {% else %}
+      <button class="btn btn-outline-secondary" disabled>&raquo;</button>
+      {% endif %}
+    </div>
+
+    <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#pageMetaModal">
+      <i class="fa-solid fa-pen"></i>
+    </button>
+
+    <button class="btn btn-sm btn-outline-warning" title="Remove all unvalidated annotations"
+            @click="confirmClearPending" :disabled="!pendingAnnotationsSorted.length">
+      <i class="fa-solid fa-broom"></i>
+    </button>
+
+    <a href="{{ url_for('bp_page.page_export_tei', page_id=page.id) }}" class="btn btn-sm btn-info">
+      <i class="fa-solid fa-download"></i> TEI
+    </a>
+
+    <!-- Page status -->
+    <div class="btn-group btn-group-sm">
+      <button class="btn btn-sm btn-secondary disabled" disabled>Status:</button>
+      <button type="button" class="btn btn-sm"
+        :class="pageStatus === 'pending' ? 'btn-danger' : 'btn-outline-secondary'"
+        @click="setPageStatus('pending')">Pending</button>
+      <button type="button" class="btn btn-sm"
+        :class="pageStatus === 'active' ? 'btn-warning' : 'btn-outline-secondary'"
+        @click="setPageStatus('active')">In progress</button>
+      <button type="button" class="btn btn-sm"
+        :class="pageStatus === 'done' ? 'btn-success' : 'btn-outline-secondary'"
+        @click="setPageStatus('done')">Done</button>
+    </div>
+  </div>
+
+
+  <!-- Save error banner -->
+  <div v-if="saveError"
+       style="background:#f8d7da;color:#842029;padding:6px 12px;font-size:.85rem;display:flex;align-items:center;gap:8px;border-bottom:1px solid #f5c2c7;">
+    <i class="fa-solid fa-triangle-exclamation"></i>
+    Something went wrong, the server might be down.
+    <button @click="saveError=false" style="margin-left:auto;background:none;border:none;color:inherit;cursor:pointer;">✕</button>
+  </div>
+
+  <!-- 3-panel editor -->
+  <div id="editor-panels">
+
+    <!-- Col 1: Source -->
+    <div class="panel panel-source" :style="panelSourceStyle">
+      <div class="panel-header">Source</div>
+      <div class="panel-toolbar">
+        <button class="btn btn-sm btn-outline-secondary"
+                :class="{active: refineMode}"
+                @click="toggleRefineMode"
+                title="Refine span: draw a new selection to update the selected annotation">
+          ✂ Refine span
+        </button>
+        <button class="btn btn-sm btn-outline-secondary"
+                :class="{active: insertMode}"
+                @click="toggleInsertMode"
+                title="Insert: click a position in the source to create a zero-width insertion">
+          + Insert
+        </button>
+      </div>
+      <div id="page-source" ref="pageSource"
+           :class="{'insert-cursor': insertMode, 'refine-cursor': refineMode}"
+           v-html="sourceHtml"></div>
+
+      <template v-if="lines.length">
+        <hr class="my-3">
+        <div class="panel-header">Lines</div>
+        <div v-for="(line, idx) in lines" :key="line.id" class="line-mgmt-row">
+          <span class="line-mgmt-num">#[[ idx + 1 ]]</span>
+          <span class="line-mgmt-text" :title="line.original_text">[[ line.original_text ]]</span>
+          <button class="line-mgmt-del" @click="deleteLine(line, idx)" title="Delete line">
+            <i class="fa-solid fa-trash-can"></i>
+          </button>
+        </div>
+      </template>
+    </div>
+
+    <div class="panel-divider" @mousedown.prevent="startResize('source', $event)"></div>
+
+    <!-- Col 2: Annotations -->
+    <div class="panel panel-annots" :style="panelAnnotsStyle">
+      <div class="panel-header d-flex align-items-center">
+        <span>Annotations</span>
+        <div class="btn-group ms-auto" style="gap:2px">
+          <button class="btn annot-filter-btn"
+                  :class="annotFilter==='pending' ? 'btn-secondary' : 'btn-outline-secondary'"
+                  @click="annotFilter='pending'">
+            Pending <span class="badge bg-light text-dark ms-1">[[ pendingAnnotationsSorted.length ]]</span>
+          </button>
+          <button class="btn annot-filter-btn"
+                  :class="annotFilter==='validated' ? 'btn-success' : 'btn-outline-secondary'"
+                  @click="annotFilter='validated'">
+            Validated <span class="badge bg-light text-dark ms-1">[[ validatedAnnotationsSorted.length ]]</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Pending annotations (shown when filter = pending) -->
+      <template v-if="annotFilter === 'pending'" v-for="annot in pendingAnnotationsSorted" :key="annot.id">
+        <div class="annot-row"
+             :data-annot-id="annot.id"
+             :class="{ hovered: hoveredAnnotationId === annot.id, selected: selectedAnnotationId === annot.id }"
+             @mousedown="onRowMousedown(annot, $event)"
+             @mouseenter="onRowMouseenter(annot.id)"
+             @mouseleave="onRowMouseleave()">
+          <label class="annot-row-label" style="flex:1;display:flex;align-items:center;gap:4px;">
+            <span v-if="isInsertion(annot)" class="annot-ins-chip" title="insertion">[+]</span>
+            <span v-else-if="isSpaceExact(annot)" class="annot-orig-sp" title="space">[SPACE]</span>
+            <span v-else class="annot-orig" :title="getExact(annot)">[[ getExact(annot) ]]</span>
+            <span class="annot-arrow">→</span>
+            <span v-if="isAtrNoise(annot)" class="annot-atr-chip">[ATR NOISE]</span>
+            <span v-else-if="!getBodyValue(annot)" class="annot-del-chip">deleted</span>
+            <span v-else-if="isInsertion(annot) && !getBodyValue(annot).trim()" class="annot-orig-sp">[SPACE]</span>
+            <span v-else-if="isInsertion(annot)" class="annot-ins-chip">[[ getBodyValue(annot) ]]</span>
+            <input v-else type="text" class="annot-target"
+              :value="getBodyValue(annot)"
+              @focus="selectedAnnotationId = annot.id"
+              @blur="onAnnotBlur(annot, $event)"
+              @keydown.enter.prevent="$event.target.blur()"
+              @keydown.tab.prevent="tabToNext(annot)">
+          </label>
+          <button class="btn btn-sm btn-outline-success py-0 px-1 validate-btn" title="Validate (Ctrl+Enter)"
+                  @click.stop="validateAnnotation(annot)">✓<span class="validate-hint"> (Ctrl+Enter)</span></button>
+          <button class="annot-del" @click.stop="removeAnnotation(annot)" title="Remove">✕</button>
+        </div>
+      </template>
+
+      <!-- Pending new annotation (always shown) -->
+      <div v-if="pendingAnnot" class="annot-row annot-pending">
+        <span v-if="isInsertionExact(pendingAnnot)" class="annot-ins-chip" title="insertion">[+]</span>
+        <span v-else-if="!pendingAnnot.exact.trim()" class="annot-orig-sp" title="space">[SPACE]</span>
+        <span v-else class="annot-orig" :title="pendingAnnot.exact">[[ pendingAnnot.exact ]]</span>
+        <span class="annot-arrow">→</span>
+        <input type="text" class="annot-target" ref="pendingInput"
+          @keydown.enter.prevent="commitPending($event.target.value)"
+          @keydown.esc="cancelPending"
+          @blur="commitPending($event.target.value)">
+        <button v-if="!pendingAnnot?.isIns"
+                class="btn btn-sm btn-danger py-0 px-1" style="font-size:.7em; white-space:nowrap; flex-shrink:0;"
+                @mousedown.prevent="markAtrNoise()" title="Mark as ATR noise">
+          ATR NOISE
+        </button>
+        <button class="annot-del" @click="cancelPending" title="Cancel">✕</button>
+      </div>
+
+      <div v-if="annotFilter==='pending' && !pendingAnnotationsSorted.length && !pendingAnnot"
+           class="text-muted small px-2 py-1">
+        No pending annotations.
+      </div>
+
+      <!-- Validated annotations (shown when filter = validated) -->
+      <template v-if="annotFilter === 'validated'" v-for="annot in validatedAnnotationsSorted" :key="annot.id">
+        <div class="annot-row validated"
+             :data-annot-id="annot.id"
+             :class="{ hovered: hoveredAnnotationId === annot.id, selected: selectedAnnotationId === annot.id }"
+             @mousedown="onRowMousedown(annot, $event)"
+             @mouseenter="onRowMouseenter(annot.id)"
+             @mouseleave="onRowMouseleave()">
+          <label class="annot-row-label" style="flex:1;display:flex;align-items:center;gap:4px;">
+            <span v-if="isInsertion(annot)" class="annot-ins-chip" title="insertion">[+]</span>
+            <span v-else-if="isSpaceExact(annot)" class="annot-orig-sp" title="space">[SPACE]</span>
+            <span v-else class="annot-orig" :title="getExact(annot)">[[ getExact(annot) ]]</span>
+            <span class="annot-arrow">→</span>
+            <span v-if="!getBodyValue(annot)" class="annot-del-chip">deleted</span>
+            <span v-else-if="isInsertion(annot) && !getBodyValue(annot).trim()" class="annot-orig-sp">[SPACE]</span>
+            <span v-else-if="isInsertion(annot)" class="annot-ins-chip">[[ getBodyValue(annot) ]]</span>
+            <input v-else type="text" class="annot-target"
+              :value="getBodyValue(annot)"
+              @focus="selectedAnnotationId = annot.id"
+              @blur="onAnnotBlur(annot, $event)"
+              @keydown.enter.prevent="$event.target.blur()">
+          </label>
+          <button class="btn btn-sm btn-outline-secondary py-0 px-1" title="Un-validate"
+                  @click.stop="unvalidateAnnotation(annot)">↩</button>
+          <button class="annot-del" @click.stop="removeAnnotation(annot)" title="Remove">✕</button>
+        </div>
+      </template>
+
+      <div v-if="annotFilter==='validated' && !validatedAnnotationsSorted.length"
+           class="text-muted small px-2 py-1">
+        No validated annotations.
+      </div>
+    </div>
+
+    <div class="panel-divider" @mousedown.prevent="startResize('annots', $event)"></div>
+
+    <!-- Col 3: Normalized -->
+    <div class="panel panel-normalized">
+      <div class="panel-header">Normalized</div>
+      <pre class="normalized-text" ref="normalizedText" v-html="normalizedPageHtml"></pre>
+    </div>
+
+  </div><!-- /#editor-panels -->
+</div><!-- /#editor-root -->
+
+<!-- Page metadata modal -->
+<div class="modal fade" id="pageMetaModal" tabindex="-1" aria-labelledby="pageMetaModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="pageMetaModalLabel">
+          <i class="fa-solid fa-pen me-2"></i>Page metadata — <span class="fw-normal text-muted">{{ page.label }}</span>
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Label -->
+        <h6 class="text-uppercase text-muted small fw-semibold mb-2">Label</h6>
+        <form method="post" action="{{ url_for('bp_page.page_update', page_id=page.id) }}"
+              class="d-flex gap-2 mb-4">
+          <input type="text" class="form-control" name="label" value="{{ page.label }}" required>
+          <button type="submit" class="btn btn-primary" style="white-space:nowrap;">Save label</button>
+        </form>
+
+        <!-- Works -->
+        <h6 class="text-uppercase text-muted small fw-semibold mb-2">Works</h6>
+        <div class="mb-3" id="page-works-chips">
+          {% for work in works %}
+          <span class="badge bg-primary me-1 mb-1" data-work-id="{{ work.id }}" style="font-size:.85em;">
+            {{ work.title }}{% if work.genre %} <em>({{ work.genre }})</em>{% endif %}
+            <button type="button" class="btn-close btn-close-white btn-sm ms-1"
+                    aria-label="Remove" style="font-size:.5em;"
+                    onclick="pageRemoveWork({{ work.id }})"></button>
+          </span>
+          {% else %}
+          <span class="text-muted small" id="page-no-works-label">No works linked yet.</span>
+          {% endfor %}
+        </div>
+        <div class="border rounded p-3 bg-light">
+          <p class="mb-2 small text-muted fw-semibold">Link a new work</p>
+          <div class="d-flex gap-2 align-items-end flex-wrap">
+            <div class="flex-grow-1" style="min-width:140px;">
+              <label class="form-label form-label-sm mb-1 small">Title <span class="text-danger">*</span></label>
+              <input type="text" class="form-control form-control-sm" id="page-work-title" placeholder="e.g. Vie de saint Martin">
+            </div>
+            <div style="min-width:120px;">
+              <label class="form-label form-label-sm mb-1 small">Genre</label>
+              <input type="text" class="form-control form-control-sm" id="page-work-genre" placeholder="e.g. hagiography">
+            </div>
+            <button class="btn btn-sm btn-primary" onclick="pageAddWork()">Add</button>
+          </div>
+        </div>
+
+        <!-- Danger zone -->
+        <hr class="mt-4">
+        <h6 class="text-uppercase text-muted small fw-semibold mb-2">Danger zone</h6>
+        <a href="{{ url_for('bp_page.page_delete', page_id=page.id) }}" class="btn btn-outline-danger btn-sm">
+          <i class="fa-solid fa-trash me-1"></i>Delete this page
+        </a>
+
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Clear pending confirmation modal -->
+<div class="modal fade" id="clearPendingModal" tabindex="-1" aria-labelledby="clearPendingModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="clearPendingModalLabel">Remove unvalidated annotations</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        This will permanently remove all <strong id="clearPendingCount"></strong> unvalidated annotation(s) from this page. Validated annotations are kept. This cannot be undone.
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-danger" id="clearPendingConfirm">Remove</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "vue": "https://unpkg.com/vue@3/dist/vue.esm-browser.js"
+  }
+}
+</script>
+
+<script type="module">
+import { createApp } from 'vue';
+
+const CURRENT_USER_ID = {{ current_user.id }};
+
+// ── Selector helpers ──────────────────────────────────────────────────────────
+function getSelector(annot, type) {
+  return (annot?.target?.selector || []).find(s => s.type === type) || {};
+}
+function getStart(annot) { return getSelector(annot, 'TextPositionSelector').start ?? 0; }
+function getEnd(annot)   { return getSelector(annot, 'TextPositionSelector').end   ?? 0; }
+function getExact(annot) { return getSelector(annot, 'TextQuoteSelector').exact ?? ''; }
+function getBodyValue(annot) { return annot?.body?.[0]?.value ?? ''; }
+function isInsertion(annot) {
+  return annot?.body?.[0]?.purpose === 'insertion' || getStart(annot) === getEnd(annot);
+}
+function isAtrNoise(annot) { return annot?.body?.[0]?.purpose === 'atr_noise'; }
+function isSpaceExact(annot) { return !isInsertion(annot) && !isAtrNoise(annot) && getExact(annot).trim() === ''; }
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function applyAnnotations(text, annotations) {
+  if (!annotations?.length) return text;
+  // Sort right-to-left; for equal start, process larger-end first so that
+  // deletions/substitutions are applied before same-start insertions (end===start).
+  const sorted = [...annotations].sort((a, b) => {
+    const ds = getStart(b) - getStart(a);
+    return ds !== 0 ? ds : getEnd(b) - getEnd(a);
+  });
+  let result = text;
+  for (const a of sorted) {
+    const s = getStart(a), e = getEnd(a);
+    result = result.slice(0, s) + getBodyValue(a) + result.slice(e);
+  }
+  return result;
+}
+
+// Module-level pending annotation (raw W3C object, not reactive)
+let pendingAnnotRaw = null;
+
+createApp({
+  delimiters: ['[[', ']]'],
+  data() {
+    return {
+      lines: {{ lines|tojson }},
+      fullText: {{ full_text|tojson }},
+      annotations: {{ annotations|tojson }},
+      pageId: {{ page.id }},
+      pageStatus: '{{ page.status }}',
+      hoveredAnnotationId: null,
+      selectedAnnotationId: null,
+      pendingAnnot: null,
+      insertMode: false,
+      refineMode: false,
+      annotFilter: 'pending',
+      fontSize: 1,
+      sourceWidth: 33,
+      annotsWidth: 28,
+      saveError: false,
+    };
+  },
+
+  computed: {
+    allAnnotationsSorted()       { return [...this.annotations].sort((a,b) => getStart(a)-getStart(b)); },
+    pendingAnnotationsSorted()   { return this.allAnnotationsSorted.filter(a => !a.validated_by); },
+    validatedAnnotationsSorted() { return this.allAnnotationsSorted.filter(a =>  a.validated_by); },
+    panelSourceStyle() { return { flex: `0 0 ${this.sourceWidth}%` }; },
+    panelAnnotsStyle() { return { flex: `0 0 ${this.annotsWidth}%` }; },
+
+    // ── Source panel HTML ─────────────────────────────────────────────────────
+    // Rebuilds whenever annotations or selectedAnnotationId changes.
+    // Hover state is applied via direct DOM class-toggling in _registerSourceListeners
+    // to avoid a full re-render on every mousemove.
+    sourceHtml() {
+      const text    = this.fullText;
+      const annots  = this.allAnnotationsSorted;
+      const selId   = this.selectedAnnotationId;
+      let html   = '';
+      let cursor = 0;
+
+      for (const a of annots) {
+        const s = getStart(a), e = getEnd(a);
+        const renderFrom = Math.max(s, cursor);
+
+        // Plain text before this annotation
+        if (s > cursor) html += escapeHtml(text.slice(cursor, s));
+
+        // Build class list
+        const cls = ['r6o-annotation',
+          selId === a.id        ? 'selected'      : '',
+          a.validated_by        ? 'r6o-validated' : '',
+          isInsertion(a)        ? 'r6o-insertion' : '',
+          isAtrNoise(a)         ? 'r6o-atr-noise' : '',
+        ].filter(Boolean).join(' ');
+
+        if (s === e) {
+          // Zero-width insertion marker — no text content, rendered via CSS ::before
+          html += `<mark class="${cls}" data-annotation="${escapeHtml(a.id)}"></mark>`;
+        } else if (renderFrom < e) {
+          html += `<mark class="${cls}" data-annotation="${escapeHtml(a.id)}">${escapeHtml(text.slice(renderFrom, e))}</mark>`;
+        }
+        cursor = Math.max(cursor, e);
+      }
+
+      if (cursor < text.length) html += escapeHtml(text.slice(cursor));
+      return html;
+    },
+
+    normalizedPageText() { return applyAnnotations(this.fullText, this.annotations); },
+
+    normalizedPositions() {
+      // Sort ascending by start. For the same start position, zero-width insertions
+      // must come FIRST so their +1 delta is accumulated before the following
+      // substitution's normalised position is computed. Without this, both land at
+      // the same normalised offset and the second mark is silently skipped.
+      const ordered = [...this.annotations].sort((a, b) => {
+        const ds = getStart(a) - getStart(b);
+        if (ds !== 0) return ds;
+        const aZero = getStart(a) === getEnd(a) ? 0 : 1;
+        const bZero = getStart(b) === getEnd(b) ? 0 : 1;
+        return aZero - bZero;
+      });
+      const map = {}; let delta = 0;
+      for (const a of ordered) {
+        const s = getStart(a), e = getEnd(a), val = getBodyValue(a);
+        const ns = s + delta;
+        map[a.id] = { start: ns, end: ns + val.length };
+        delta += val.length - (e - s);
+      }
+      return map;
+    },
+
+    normalizedPageHtml() {
+      const text      = this.normalizedPageText;
+      const selId     = this.selectedAnnotationId;
+      const positions = this.normalizedPositions;
+
+      // Render every annotation that has a non-empty span in the normalized text.
+      // Hover class is applied via direct DOM manipulation (_registerNormalizedListeners)
+      // so it doesn't trigger a recompute on every mousemove.
+      const annots = this.allAnnotationsSorted
+        .map(a => ({ a, pos: positions[a.id] }))
+        .filter(({ pos }) => pos && pos.start < pos.end)
+        .sort((x, y) => x.pos.start - y.pos.start);
+
+      let html = '', cursor = 0;
+      for (const { a, pos } of annots) {
+        if (pos.start < cursor) continue; // skip overlapping ranges
+        if (pos.start > cursor) html += escapeHtml(text.slice(cursor, pos.start));
+        const cls = ['norm-annot',
+          a.id === selId  ? 'norm-highlight'  : '',
+          a.validated_by  ? 'norm-validated'  : '',
+          isAtrNoise(a)   ? 'norm-atr-noise'  : '',
+        ].filter(Boolean).join(' ');
+        html += `<mark class="${cls}" data-annotation="${escapeHtml(a.id)}">${escapeHtml(text.slice(pos.start, pos.end))}</mark>`;
+        cursor = pos.end;
+      }
+      if (cursor < text.length) html += escapeHtml(text.slice(cursor));
+      return html;
+    },
+  },
+
+  watch: {
+    fontSize(val) {
+      document.getElementById('editor-root').style.setProperty('--editor-font', val + 'rem');
+    },
+  },
+
+  mounted() {
+    document.getElementById('editor-root').style.setProperty('--editor-font', this.fontSize + 'rem');
+    const el = this.$refs.pageSource;
+    this._registerSourceListeners(el);
+    this._registerNormalizedListeners(this.$refs.normalizedText);
+    document.addEventListener('keydown', this._handleKeydown);
+  },
+  beforeUnmount() {
+    document.removeEventListener('keydown', this._handleKeydown);
+  },
+
+  methods: {
+    getExact, getBodyValue, isInsertion, isAtrNoise, isSpaceExact,
+    isInsertionExact(stub) { return stub?.isIns === true; },
+
+    // ── DOM event listeners on #page-source (registered ONCE at mount) ────────
+    _registerSourceListeners(el) {
+      // Click: insert mode OR annotation select
+      el.addEventListener('click', (evt) => {
+        if (this.insertMode) {
+          // Compute caret position → create zero-width pending annotation
+          let pos = 0;
+          const pr = document.createRange();
+          pr.setStart(el, 0);
+          if (document.caretPositionFromPoint) {
+            const cp = document.caretPositionFromPoint(evt.clientX, evt.clientY);
+            if (cp) { pr.setEnd(cp.offsetNode, cp.offset); pos = pr.toString().length; }
+          } else if (document.caretRangeFromPoint) {
+            const cr = document.caretRangeFromPoint(evt.clientX, evt.clientY);
+            if (cr) { pr.setEnd(cr.startContainer, cr.startOffset); pos = pr.toString().length; }
+          }
+          const t  = this.fullText;
+          const id = crypto.randomUUID();
+          pendingAnnotRaw = { id, type:'Annotation', body:[],
+            target:{ annotation:id, selector:[
+              { type:'TextPositionSelector', start:pos, end:pos },
+              { type:'TextQuoteSelector', exact:'',
+                prefix:t.slice(Math.max(0,pos-10),pos), suffix:t.slice(pos,pos+10) },
+            ]}};
+          this.pendingAnnot = { id, exact:'', isIns:true };
+          this.insertMode = false;
+          this.$nextTick(() => {
+            const inp = this.$refs.pendingInput;
+            if (inp) (Array.isArray(inp) ? inp[0] : inp).focus();
+          });
+          return;
+        }
+
+        // Annotation span click → select / deselect
+        const span = evt.target.closest('[data-annotation]');
+        if (span) {
+          const id = span.dataset.annotation;
+          const newSel = this.selectedAnnotationId === id ? null : id;
+          this.selectedAnnotationId = newSel;
+          if (newSel) {
+            const annot = this.allAnnotationsSorted.find(a => a.id === id);
+            if (annot) this._focusAnnotInput(annot);
+          }
+        }
+      });
+
+      // Mouseup → new selection OR refine existing span
+      el.addEventListener('mouseup', () => {
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+        const range = sel.getRangeAt(0);
+        if (!el.contains(range.commonAncestorContainer)) return;
+
+        const pr = document.createRange();
+        pr.setStart(el, 0);
+        pr.setEnd(range.startContainer, range.startOffset);
+        const start = pr.toString().length;
+        const end   = start + range.toString().length;
+        if (start === end) return;
+
+        const t      = this.fullText;
+        const exact  = t.slice(start, end);
+        const prefix = t.slice(Math.max(0, start - 10), start);
+        const suffix = t.slice(end, end + 10);
+
+        if (this.refineMode && this.selectedAnnotationId) {
+          const tid = this.selectedAnnotationId;
+          this.annotations = this.annotations.map(a => a.id !== tid ? a : {
+            ...a, target: { ...a.target, selector: [
+              { type:'TextPositionSelector', start, end },
+              { type:'TextQuoteSelector', exact, prefix, suffix },
+            ]},
+          });
+          this.saveAnnotations();
+          this.refineMode = false;
+          sel.removeAllRanges();
+          return;
+        }
+
+        const id = crypto.randomUUID();
+        pendingAnnotRaw = { id, type:'Annotation', body:[],
+          target:{ annotation:id, selector:[
+            { type:'TextPositionSelector', start, end },
+            { type:'TextQuoteSelector', exact, prefix, suffix },
+          ]}};
+        this.pendingAnnot = { id, exact };
+        this.$nextTick(() => {
+          const inp = this.$refs.pendingInput;
+          if (inp) (Array.isArray(inp) ? inp[0] : inp).focus();
+        });
+      });
+
+      // Hover: direct DOM class-toggle (fast — avoids sourceHtml re-render per event)
+      el.addEventListener('mouseover', (evt) => {
+        if (this.selectedAnnotationId) return;
+        const span = evt.target.closest('[data-annotation]');
+        if (!span) return;
+        const id = span.dataset.annotation;
+        if (id !== this.hoveredAnnotationId) {
+          // Clear previous hover mark
+          el.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
+          span.classList.add('hovered');
+          this.hoveredAnnotationId = id;
+          this._scrollAnnotRowIntoView(id);
+        }
+      });
+      el.addEventListener('mouseout', (evt) => {
+        const from = evt.target.closest('[data-annotation]');
+        const to   = evt.relatedTarget?.closest?.('[data-annotation]');
+        if (from && from !== to) {
+          from.classList.remove('hovered');
+          this.hoveredAnnotationId = null;
+        }
+      });
+    },
+
+    // ── Normalized panel listeners ────────────────────────────────────────────
+    _registerNormalizedListeners(el) {
+      // Hover: mirror source-panel convention — direct DOM class toggle,
+      // only hoveredAnnotationId (reactive) is set so the annot-list row highlights.
+      el.addEventListener('mouseover', (evt) => {
+        if (this.selectedAnnotationId) return;
+        const span = evt.target.closest('[data-annotation]');
+        if (!span) return;
+        const id = span.dataset.annotation;
+        if (id === this.hoveredAnnotationId) return;
+        // Clear previous hover in both panels
+        el.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
+        const src = this.$refs.pageSource;
+        src.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
+        // Apply hover in both panels
+        span.classList.add('hovered');
+        src.querySelector(`[data-annotation="${CSS.escape(id)}"]`)?.classList.add('hovered');
+        this.hoveredAnnotationId = id;
+        this._scrollAnnotRowIntoView(id);
+      });
+      el.addEventListener('mouseout', (evt) => {
+        const from = evt.target.closest('[data-annotation]');
+        const to   = evt.relatedTarget?.closest?.('[data-annotation]');
+        if (from && from !== to) {
+          from.classList.remove('hovered');
+          const id = from.dataset.annotation;
+          this.$refs.pageSource.querySelector(`[data-annotation="${CSS.escape(id)}"]`)?.classList.remove('hovered');
+          this.hoveredAnnotationId = null;
+        }
+      });
+      // Click: select annotation (same behaviour as source panel)
+      el.addEventListener('click', (evt) => {
+        const span = evt.target.closest('[data-annotation]');
+        if (!span) return;
+        const id = span.dataset.annotation;
+        const newSel = this.selectedAnnotationId === id ? null : id;
+        this.selectedAnnotationId = newSel;
+        if (newSel) {
+          const annot = this.allAnnotationsSorted.find(a => a.id === id);
+          if (annot) this._focusAnnotInput(annot);
+        }
+      });
+    },
+
+    // ── Middle-panel helpers ──────────────────────────────────────────────────
+    _findAnnotRow(id)   { return document.querySelector(`.panel-annots [data-annot-id="${id}"]`); },
+    _annotPanelHeaderHeight() {
+      const h = document.querySelector('.panel-annots .panel-header');
+      return h ? h.offsetHeight : 0;
+    },
+    _scrollAnnotRowIntoView(id) {
+      setTimeout(() => {
+        const row = this._findAnnotRow(id); if (!row) return;
+        const p = document.querySelector('.panel-annots'); if (!p) return;
+        p.scrollTop = row.offsetTop - p.offsetTop - this._annotPanelHeaderHeight();
+      }, 0);
+    },
+    _focusAnnotInput(annot) {
+      setTimeout(() => {
+        const row = this._findAnnotRow(annot.id); if (!row) return;
+        const p = document.querySelector('.panel-annots'); if (!p) return;
+        p.scrollTop = row.offsetTop - p.offsetTop - this._annotPanelHeaderHeight();
+        row.querySelector('.annot-target')?.focus();
+      }, 0);
+    },
+    onRowMousedown(annot, event) {
+      if (event.target.closest('button') || event.target.closest('.annot-target')) return;
+      event.preventDefault();
+      this.selectAnnotation(annot);
+    },
+    onRowMouseenter(id) {
+      if (this.selectedAnnotationId) return;
+      const src  = this.$refs.pageSource;
+      const norm = this.$refs.normalizedText;
+      src.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
+      norm.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
+      src.querySelector(`[data-annotation="${CSS.escape(id)}"]`)?.classList.add('hovered');
+      norm.querySelector(`[data-annotation="${CSS.escape(id)}"]`)?.classList.add('hovered');
+      this.hoveredAnnotationId = id;
+    },
+    onRowMouseleave() {
+      this.$refs.pageSource.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
+      this.$refs.normalizedText.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
+      this.hoveredAnnotationId = null;
+    },
+
+    // ── Annotation value edit ─────────────────────────────────────────────────
+    onAnnotBlur(annot, evt) {
+      this.annotations = this.annotations.map(a =>
+        a.id !== annot.id || !a.body?.[0] ? a : { ...a, resp_id: CURRENT_USER_ID, body:[{ ...a.body[0], value:evt.target.value }] }
+      );
+      this.saveAnnotations();
+    },
+
+    // ── Commit pending annotation ─────────────────────────────────────────────
+    commitPending(value) {
+      if (!pendingAnnotRaw) return;
+      const annot = pendingAnnotRaw; pendingAnnotRaw = null; this.pendingAnnot = null;
+      const posSel = getSelector(annot, 'TextPositionSelector');
+      annot.body   = [{ type:'TextualBody', value: value ?? '',
+                        purpose: posSel.start === posSel.end ? 'insertion' : 'normalizing' }];
+      annot.resp_id = CURRENT_USER_ID;
+      this.annotations = [...this.annotations, annot];
+      this.saveAnnotations();
+    },
+
+    cancelPending() { pendingAnnotRaw = null; this.pendingAnnot = null; },
+
+    // ── Mark selection as ATR noise ───────────────────────────────────────────
+    markAtrNoise() {
+      if (!pendingAnnotRaw) return;
+      const annot = pendingAnnotRaw; pendingAnnotRaw = null; this.pendingAnnot = null;
+      const exact = getSelector(annot, 'TextQuoteSelector').exact ?? '';
+      annot.body = [{ type: 'TextualBody', value: exact, purpose: 'atr_noise' }];
+      annot.resp_id = CURRENT_USER_ID;
+      this.annotations = [...this.annotations, annot];
+      this.saveAnnotations();
+    },
+
+    // ── Remove annotation ─────────────────────────────────────────────────────
+    removeAnnotation(annot) {
+      this.annotations = this.annotations.filter(a => a.id !== annot.id);
+      if (this.selectedAnnotationId === annot.id) this.selectedAnnotationId = null;
+      this.saveAnnotations();
+    },
+
+    // ── Clear all unvalidated ─────────────────────────────────────────────────
+    confirmClearPending() {
+      document.getElementById('clearPendingCount').textContent = this.pendingAnnotationsSorted.length;
+      const modal = new bootstrap.Modal(document.getElementById('clearPendingModal'));
+      document.getElementById('clearPendingConfirm').onclick = () => { modal.hide(); this.clearPending(); };
+      modal.show();
+    },
+    clearPending() {
+      this.annotations = this.annotations.filter(a => a.validated_by);
+      this.selectedAnnotationId = null;
+      this.saveAnnotations();
+    },
+
+    // ── Persistent cross-column selection ────────────────────────────────────
+    selectAnnotation(annot) {
+      this.selectedAnnotationId = this.selectedAnnotationId === annot.id ? null : annot.id;
+      if (this.selectedAnnotationId) {
+        // Clear any hover highlight so only the selection remains visible.
+        this.$refs.pageSource.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
+        this.$refs.normalizedText.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
+        this.hoveredAnnotationId = null;
+        this._focusAnnotInput(annot);
+      }
+    },
+
+    // ── Validate / un-validate ────────────────────────────────────────────────
+    validateAnnotation(annot) {
+      this.annotations = this.annotations.map(a => a.id===annot.id ? {...a, validated_by:CURRENT_USER_ID} : a);
+      this.saveAnnotations();
+    },
+    unvalidateAnnotation(annot) {
+      this.annotations = this.annotations.map(a => {
+        if (a.id !== annot.id) return a;
+        const { validated_by, ...rest } = a; return rest;
+      });
+      this.saveAnnotations();
+    },
+
+    toggleInsertMode() { this.insertMode = !this.insertMode; if (this.insertMode) this.refineMode = false; },
+    toggleRefineMode() { this.refineMode = !this.refineMode; if (this.refineMode) this.insertMode = false; },
+
+    startResize(which, evt) {
+      const panels = document.getElementById('editor-panels');
+      const startX     = evt.clientX;
+      const startSrc   = this.sourceWidth;
+      const startAnnots = this.annotsWidth;
+      const divider = evt.currentTarget;
+      divider.classList.add('active');
+      const onMove = (e) => {
+        const pct = (e.clientX - startX) / panels.offsetWidth * 100;
+        if (which === 'source') {
+          this.sourceWidth = Math.max(10, Math.min(60, startSrc + pct));
+        } else {
+          this.annotsWidth = Math.max(10, Math.min(60, startAnnots + pct));
+        }
+      };
+      const onUp = () => {
+        divider.classList.remove('active');
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    },
+
+    // ── Tab cycling ───────────────────────────────────────────────────────────
+    tabToNext(cur) {
+      const all  = this.allAnnotationsSorted;
+      const next = all[(all.findIndex(a => a.id === cur.id) + 1) % all.length];
+      if (next) { this.selectedAnnotationId = next.id; this._focusAnnotInput(next); }
+    },
+
+    _handleKeydown(e) {
+      if (e.key === 'Escape' && this.pendingAnnot) { this.cancelPending(); e.preventDefault(); return; }
+      if (e.key === 'Enter' && e.ctrlKey && this.selectedAnnotationId) {
+        const annot = this.annotations.find(a => a.id === this.selectedAnnotationId);
+        if (annot && !annot.validated_by) {
+          document.activeElement?.blur(); // commit any in-progress edit via onAnnotBlur
+          this.validateAnnotation(annot);
+          e.preventDefault();
+          // Focus the next pending annotation after the current one (wrap around if needed)
+          this.$nextTick(() => {
+            const sorted = this.allAnnotationsSorted;
+            const curIdx = sorted.findIndex(a => a.id === annot.id);
+            const nextAfter = sorted.slice(curIdx + 1).find(a => !a.validated_by);
+            const fallback = sorted.find(a => !a.validated_by && a.id !== annot.id);
+            const target = nextAfter || fallback;
+            if (target) {
+              this.selectedAnnotationId = target.id;
+              this._focusAnnotInput(target);
+            }
+          });
+        }
+      }
+    },
+
+    // ── Delete line ───────────────────────────────────────────────────────────
+    async deleteLine(line, idx) {
+      if (!confirm(`Delete line #${idx+1}? Annotations on this line will also be removed.`)) return;
+      const r = await fetch(`${ROOT}/api/lines/${line.id}/delete`, { method:'POST' });
+      if (!r.ok) return;
+      let charStart = 0;
+      for (let i = 0; i < idx; i++) charStart += this.lines[i].original_text.length + 1;
+      const lineLen     = line.original_text.length, charEnd = charStart + lineLen;
+      const removedChars = lineLen + (idx < this.lines.length - 1 ? 1 : 0);
+      this.annotations = this.annotations
+        .filter(a => !(getStart(a) >= charStart && getStart(a) <= charEnd))
+        .map(a => {
+          const pos = getSelector(a, 'TextPositionSelector');
+          if (pos && pos.start > charEnd) { pos.start -= removedChars; pos.end -= removedChars; }
+          return a;
+        });
+      this.lines.splice(idx, 1);
+      this.fullText = this.lines.map(l => l.original_text).join('\n');
+      await this.saveAnnotations();
+    },
+
+    async saveAnnotations() {
+      try {
+        const r = await fetch(`${ROOT}/api/pages/${this.pageId}/annotations`, {
+          method:'PUT', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ annotations: this.annotations }),
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        this.saveError = false;
+      } catch {
+        this.saveError = true;
+      }
+    },
+    async setPageStatus(status) {
+      this.pageStatus = status;
+      await fetch(`${ROOT}/api/pages/${this.pageId}/status`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ status }),
+      });
+    },
+  },
+}).mount('#editor-root');
+</script>
+
+<script>
+const PAGE_ID = {{ page.id }};
+
+async function pageAddWork() {
+  const title = document.getElementById('page-work-title').value.trim();
+  if (!title) return;
+  const genre = document.getElementById('page-work-genre').value.trim();
+  const resp = await fetch(`${ROOT}/api/pages/${PAGE_ID}/works`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({title, genre}),
+  });
+  if (!resp.ok) { alert('Failed to add work'); return; }
+  const data = await resp.json();
+  const work = data.work;
+  document.getElementById('page-no-works-label')?.remove();
+  const chip = document.createElement('span');
+  chip.className = 'badge bg-primary me-1';
+  chip.dataset.workId = work.id;
+  chip.innerHTML = `${work.title}${work.genre ? ` <em>(${work.genre})</em>` : ''}
+    <button type="button" class="btn-close btn-close-white btn-sm ms-1" aria-label="Remove"
+            style="font-size:.5em;" onclick="pageRemoveWork(${work.id})"></button>`;
+  document.getElementById('page-works-chips').appendChild(chip);
+  document.getElementById('page-work-title').value = '';
+  document.getElementById('page-work-genre').value = '';
+}
+
+async function pageRemoveWork(workId) {
+  await fetch(`${ROOT}/api/pages/${PAGE_ID}/works/${workId}`, {method: 'DELETE'});
+  document.querySelector(`#page-works-chips [data-work-id="${workId}"]`)?.remove();
+  if (!document.querySelectorAll('#page-works-chips .badge').length) {
+    const span = document.createElement('span');
+    span.className = 'text-muted small';
+    span.id = 'page-no-works-label';
+    span.textContent = 'None';
+    document.getElementById('page-works-chips').appendChild(span);
+  }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4" style="max-width: 640px;">
+  <nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="{{ url_for('bp_project.project_lists') }}">Projects</a></li>
+      {% if project %}
+      <li class="breadcrumb-item"><a href="{{ url_for('bp_project.project_browse', project_id=project.id) }}">{{ project.name }}</a></li>
+      {% endif %}
+      <li class="breadcrumb-item active">New Document</li>
+    </ol>
+  </nav>
+
+  <h2>New Document</h2>
+  <form method="post" action="{{ url_for('bp_document.document_create') }}">
+    {% if project %}
+    <input type="hidden" name="project_id" value="{{ project.id }}">
+    {% else %}
+    <div class="mb-3">
+      <label for="project_id" class="form-label">Project</label>
+      <select name="project_id" id="project_id" class="form-select" required>
+        <!-- populated server-side if needed -->
+      </select>
+    </div>
+    {% endif %}
+
+    <div class="mb-3">
+      <label for="name" class="form-label">Name <span class="text-danger">*</span></label>
+      <input type="text" class="form-control" id="name" name="name" required placeholder="e.g. Compte de 1342">
+    </div>
+    <div class="mb-3">
+      <label for="description" class="form-label">Description</label>
+      <textarea class="form-control" id="description" name="description" rows="2"></textarea>
+    </div>
+    <div class="mb-3">
+      <label for="language" class="form-label">Language</label>
+      <select class="form-select" id="language" name="language">
+        {% for code, label in languages %}
+        <option value="{{ code }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="mb-3">
+      <label for="qid" class="form-label">Biblissima QID <small class="text-muted">(optional)</small></label>
+      <input type="text" class="form-control" id="qid" name="qid" placeholder="e.g. Q12345">
+    </div>
+    <button type="submit" class="btn btn-primary">Create Document</button>
+    {% if project %}
+    <a href="{{ url_for('bp_project.project_browse', project_id=project.id) }}" class="btn btn-outline-secondary ms-2">Cancel</a>
+    {% endif %}
+  </form>
+</div>
+{% endblock %}

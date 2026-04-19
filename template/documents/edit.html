@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4">
+  <nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="{{ url_for('bp_project.project_lists') }}">Projects</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('bp_project.project_browse', project_id=document.project_id) }}">{{ document.project.name }}</a></li>
+      <li class="breadcrumb-item active">{{ document.name }}</li>
+    </ol>
+  </nav>
+
+  <div class="d-flex justify-content-between align-items-start mb-2">
+    <h1 class="mb-0">{{ document.name }}</h1>
+    <div class="d-flex gap-2">
+      <a href="{{ url_for('bp_document.document_export_tei', document_id=document.id) }}" class="btn btn-sm btn-info">
+        <i class="fa-solid fa-file-code"></i> Export TEI
+      </a>
+      <a href="{{ url_for('bp_document.document_download_zip', document_id=document.id) }}" class="btn btn-sm btn-success">
+        <i class="fa-solid fa-file-zipper"></i> Download ZIP
+      </a>
+      {% if can_edit %}
+      <a href="{{ url_for('bp_document.document_users', document_id=document.id) }}" class="btn btn-sm btn-outline-warning">
+        <i class="fa-solid fa-users"></i> Access
+      </a>
+      {% endif %}
+    </div>
+  </div>
+  <p class="text-muted">{{ document.description }}</p>
+  <div class="mb-1">
+    <span class="badge bg-secondary">{{ document.language }}</span>
+    {% if document.qid %}<span class="badge bg-light text-dark ms-1">{{ document.qid }}</span>{% endif %}
+  </div>
+
+  {% if can_edit %}
+  <!-- Edit form (collapsed) -->
+  <button class="btn btn-outline-secondary btn-sm mt-2 mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#editDocForm">
+    Edit Metadata
+  </button>
+  <div class="collapse" id="editDocForm">
+    <form method="post" action="{{ url_for('bp_document.document_update', document_id=document.id) }}" class="mt-2 mb-3 p-3 border rounded bg-white">
+      <div class="mb-2">
+        <label class="form-label">Name</label>
+        <input type="text" class="form-control form-control-sm" name="name" value="{{ document.name }}" required>
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Description</label>
+        <textarea class="form-control form-control-sm" name="description" rows="2">{{ document.description }}</textarea>
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Language</label>
+        <select class="form-select form-select-sm" name="language">
+          {% for code, label in languages %}
+          <option value="{{ code }}" {% if code == document.language %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="mb-2">
+        <label class="form-label">QID</label>
+        <input type="text" class="form-control form-control-sm" name="qid" value="{{ document.qid or '' }}">
+      </div>
+      <div class="mb-2">
+        <label class="form-label">IIIF Manifest URL</label>
+        <input type="text" class="form-control form-control-sm" name="iiif_manifest_url"
+               value="{{ document.iiif_manifest_url or '' }}" placeholder="https://...">
+      </div>
+      <button type="submit" class="btn btn-sm btn-primary">Save</button>
+      <a href="{{ url_for('bp_document.document_delete', document_id=document.id) }}" class="btn btn-sm btn-danger ms-2">Delete Document</a>
+    </form>
+  </div>
+
+  <!-- Works (tag-chips) -->
+  <div class="mt-3 mb-1" id="works-section">
+    <strong>Works:</strong>
+    <span id="works-chips">
+      {% for work in document.works %}
+      <span class="badge bg-primary me-1" data-work-id="{{ work.id }}">
+        {{ work.title }}{% if work.genre %} <em>({{ work.genre }})</em>{% endif %}
+        <button type="button" class="btn-close btn-close-white btn-sm ms-1"
+                aria-label="Remove" style="font-size:.6em;"
+                onclick="removeWork({{ work.id }})"></button>
+      </span>
+      {% else %}
+      <span class="text-muted" id="no-works-label">None</span>
+      {% endfor %}
+    </span>
+    <button class="btn btn-sm btn-outline-secondary ms-2" type="button"
+            data-bs-toggle="collapse" data-bs-target="#addWorkForm">+ Work</button>
+    <div class="collapse mt-2" id="addWorkForm">
+      <div class="d-flex gap-2 align-items-end">
+        <div>
+          <label class="form-label form-label-sm mb-0">Title</label>
+          <input type="text" class="form-control form-control-sm" id="work-title" placeholder="Title">
+        </div>
+        <div>
+          <label class="form-label form-label-sm mb-0">Genre</label>
+          <input type="text" class="form-control form-control-sm" id="work-genre" placeholder="e.g. hagiography">
+        </div>
+        <button class="btn btn-sm btn-primary" onclick="addWork()">Add</button>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <hr>
+
+  <!-- Pages list -->
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="mb-0">Pages</h2>
+    <div class="d-flex gap-2">
+      <a href="{{ url_for('bp_norm.ingestion_new', document_id=document.id, input_tab='comma') }}" class="btn btn-sm btn-outline-info">
+        <i class="fa-solid fa-cloud-arrow-down"></i> From CoMMA
+      </a>
+      <a href="{{ url_for('bp_norm.ingestion_new', document_id=document.id) }}" class="btn btn-sm btn-primary">
+        <i class="fa-solid fa-plus"></i> Add Page
+      </a>
+    </div>
+  </div>
+
+  {% if pages %}
+  <div class="list-group">
+    {% for page in pages %}
+    {% set total = page.line_count %}
+    <a href="{{ url_for('bp_page.page_editor', page_id=page.id) }}"
+       class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+      <div>
+        <strong>{{ page.label }}</strong>
+        <small class="text-muted ms-2">{{ total }} line(s)</small>
+      </div>
+      <div class="d-flex align-items-center gap-3">
+        <span class="badge
+          {% if page.status == 'done' %}bg-success
+          {% elif page.status == 'active' %}bg-warning text-dark
+          {% else %}bg-secondary{% endif %}">{{ page.status }}</span>
+        <span class="text-muted"><i class="fa-solid fa-chevron-right"></i></span>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-muted">No pages yet.
+    <a href="{{ url_for('bp_norm.ingestion_new', document_id=document.id) }}">Add the first page.</a>
+  </p>
+  {% endif %}
+</div>
+{% if can_edit %}
+<script>
+const DOCUMENT_ID = {{ document.id }};
+
+async function addWork() {
+    const title = document.getElementById('work-title').value.trim();
+    if (!title) return;
+    const genre = document.getElementById('work-genre').value.trim();
+    const resp = await fetch(`${ROOT}/api/documents/${DOCUMENT_ID}/works`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({title, genre}),
+    });
+    if (!resp.ok) { alert('Failed to add work'); return; }
+    const data = await resp.json();
+    const work = data.work;
+    document.getElementById('no-works-label')?.remove();
+    const chip = document.createElement('span');
+    chip.className = 'badge bg-primary me-1';
+    chip.dataset.workId = work.id;
+    chip.innerHTML = `${work.title}${work.genre ? ` <em>(${work.genre})</em>` : ''}
+        <button type="button" class="btn-close btn-close-white btn-sm ms-1" aria-label="Remove"
+                style="font-size:.6em;" onclick="removeWork(${work.id})"></button>`;
+    document.getElementById('works-chips').appendChild(chip);
+    document.getElementById('work-title').value = '';
+    document.getElementById('work-genre').value = '';
+}
+
+async function removeWork(workId) {
+    await fetch(`${ROOT}/api/documents/${DOCUMENT_ID}/works/${workId}`, {method: 'DELETE'});
+    document.querySelector(`[data-work-id="${workId}"]`)?.remove();
+}
+</script>
+{% endif %}
+{% endblock %}
