@@ -119,6 +119,11 @@
             <i class="fa-solid fa-file-import"></i> Pre-aligned JSON
           </button>
         </li>
+        <li class="nav-item">
+          <button class="nav-link" :class="{active: inputMode==='comma'}" @click="inputMode='comma'">
+            <i class="fa-solid fa-cloud-arrow-down"></i> CoMMA
+          </button>
+        </li>
       </ul>
 
       <!-- Text paste mode -->
@@ -184,9 +189,42 @@
           </div>
         </div>
       </div>
+
+      <!-- CoMMA mode -->
+      <div v-if="inputMode === 'comma'">
+        <div class="alert alert-info py-2 small mb-2">
+          <i class="fa-solid fa-circle-info"></i>
+          Paste a CoMMA page URL (<code>https://comma.inria.fr/doc/…/p/…</code>)
+          or enter a resource URI and passage reference directly.
+          Lines are extracted server-side (no CORS issue).
+        </div>
+        <label class="form-label form-label-sm fw-semibold">CoMMA URL or resource URI</label>
+        <div class="input-group mb-2">
+          <input type="url" class="form-control form-control-sm" v-model="commaUrl"
+                 placeholder="https://comma.inria.fr/doc/…/p/… or https://data.biblissima.fr/entity/Q…"
+                 @input="parseCommaUrl" @keydown.enter.prevent="fetchComma">
+          <input type="text" class="form-control form-control-sm" style="max-width:150px"
+                 v-model="commaRef" placeholder="Passage (e.g. f41-18v)"
+                 @keydown.enter.prevent="fetchComma">
+          <button class="btn btn-outline-primary btn-sm" @click="fetchComma"
+                  :disabled="commaLoading || !commaRef.trim()">
+            <span v-if="commaLoading"><span class="spinner-border spinner-border-sm"></span></span>
+            <span v-else>Load</span>
+          </button>
+        </div>
+        <div v-if="commaError" class="alert alert-danger py-1 small">[[ commaError ]]</div>
+        <div v-if="commaLines.length" class="mt-3">
+          <p class="small text-muted mb-1">Extracted <strong>[[ commaLines.length ]]</strong> lines — edit if needed:</p>
+          <div v-for="(line, i) in commaLines" :key="i" class="d-flex gap-2 mb-1 align-items-center">
+            <span class="text-muted small" style="min-width:2em;">[[ i+1 ]].</span>
+            <input type="text" class="form-control form-control-sm" v-model="commaLines[i].text">
+            <button class="btn btn-sm btn-outline-danger" @click="commaLines.splice(i,1)">✕</button>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <!-- Normalization batching options (not shown for pre-aligned JSON) -->
+    <!-- Normalization batching options (not shown for pre-aligned JSON or CoMMA-then-direct) -->
     <div v-if="inputMode !== 'json'" class="mb-3 mt-3">
       <label class="form-label fw-semibold small">Normalization batching</label>
       <div class="d-flex flex-wrap gap-3 align-items-start mb-2">
@@ -228,18 +266,30 @@
 
   <!-- ── STEP 2: normalizing progress ──────────────────────────────── -->
   <div class="step" :class="{active: step === 2}">
-    <h4 class="mb-3">Normalizing…</h4>
-    <div class="mb-2 small text-muted">
-      <span v-if="normalizeProgress.total === null">Preparing chunks…</span>
-      <span v-else>[[ normalizeProgress.current ]] / [[ normalizeProgress.total ]] processed</span>
+    <div class="d-flex align-items-baseline gap-3 mb-2">
+      <h4 class="mb-0">Normalizing…</h4>
+      <span class="fs-5 fw-semibold text-primary" v-if="normalizeProgress.total !== null">
+        [[ normalizeProgress.current ]] / [[ normalizeProgress.total ]]
+      </span>
+      <span class="text-muted" v-else>preparing…</span>
     </div>
-    <div class="progress mb-3" style="height:12px;">
+    <div class="progress mb-3" style="height:14px;">
       <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
-           :style="{width: normalizeProgress.total ? (normalizeProgress.current / normalizeProgress.total * 100) + '%' : '0%'}">
+           :style="{width: normalizeProgress.total ? (normalizeProgress.current / normalizeProgress.total * 100) + '%' : '5%'}">
       </div>
     </div>
-    <div v-if="normalizeProgress.total > 0" class="small text-muted">
-      Last: <span class="font-monospace">[[ normalizeProgress.lastOrig ]]</span>
+    <div v-if="normalizeProgress.chunks.length" class="mt-2" style="max-height:260px;overflow-y:auto;">
+      <table class="table table-sm table-bordered mb-0" style="font-size:.8rem;">
+        <thead class="table-light sticky-top">
+          <tr><th style="width:50%">Source</th><th>Normalized</th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="(c, i) in [...normalizeProgress.chunks].reverse()" :key="i">
+            <td class="font-monospace text-muted">[[ c.orig ]]</td>
+            <td class="font-monospace">[[ c.reg ]]</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
     <button class="btn btn-sm btn-outline-secondary mt-3" @click="step=1">← Back</button>
     <div v-if="error" class="alert alert-danger mt-2">[[ error ]]</div>
@@ -275,6 +325,13 @@ createApp({
       jsonFileName: '',
       jsonLines: [],
       jsonDragging: false,
+      // CoMMA
+      commaUrl:      '',
+      commaResource: '',
+      commaRef:      '',
+      commaLines:    [],
+      commaLoading:  false,
+      commaError:    null,
       iiifLoading: false,
       iiifError: null,
       iiifCanvases: [],
@@ -286,7 +343,7 @@ createApp({
       delimiters: '¶;.',
       // state
       normalizing: false,
-      normalizeProgress: { current: 0, total: 0, lastOrig: '' },
+      normalizeProgress: { current: 0, total: null, chunks: [] },
       saving: false,
       error: null,
     };
@@ -297,6 +354,9 @@ createApp({
         return this.altoLines.filter(l => l.text && l.text.trim()).map(l => ({ text: l.text.trim(), alto_id: l.alto_id || null }));
       }
       if (this.inputMode === 'json') return [];
+      if (this.inputMode === 'comma') {
+        return this.commaLines.filter(l => l.text?.trim()).map(l => ({ text: l.text.trim(), alto_id: null }));
+      }
       return this.rawText.split('\n')
         .map(l => l.trim()).filter(Boolean)
         .map(text => ({ text, alto_id: null }));
@@ -311,10 +371,15 @@ createApp({
       if (this.inputMode === 'json') {
         return !!(hasDoc && this.pageLabel.trim() && this.jsonLines.length > 0);
       }
+      if (this.inputMode === 'comma') {
+        return !!(hasDoc && this.pageLabel.trim() && this.commaLines.length > 0);
+      }
       return !!(hasDoc && this.pageLabel.trim() && this.effectiveLines.length > 0);
     },
   },
   async created() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('input_tab') === 'comma') this.inputMode = 'comma';
     {% if not document %}
     await this.searchProjects();
     if (this.selectedProjectId) await this.loadDocuments();
@@ -324,7 +389,7 @@ createApp({
     {% if not document %}
     async searchProjects() {
       const q = this.projectSearch ? `&search=${encodeURIComponent(this.projectSearch)}` : '';
-      const r = await fetch(`/projects?format=json${q}`);
+      const r = await fetch(`${ROOT}/projects?format=json${q}`);
       this.projectOptions = await r.json();
     },
     async onProjectChange() {
@@ -333,7 +398,7 @@ createApp({
       if (this.selectedProjectId) await this.loadDocuments();
     },
     async loadDocuments() {
-      const r = await fetch(`/api/projects/${this.selectedProjectId}/documents`);
+      const r = await fetch(`${ROOT}/api/projects/${this.selectedProjectId}/documents`);
       this.documentOptions = await r.json();
     },
     {% endif %}
@@ -460,7 +525,7 @@ createApp({
       try {
         {% if not document %}
         if (!this.selectedDocumentId) {
-          const r = await fetch('/documents/new', {
+          const r = await fetch(`${ROOT}/documents/new`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
@@ -489,14 +554,14 @@ createApp({
     async goNormalize() {
       this.error = null;
       this.normalizing = true;
-      this.normalizeProgress = { current: 0, total: null, lastOrig: '' };
+      this.normalizeProgress = { current: 0, total: null, chunks: [] };
       this.step = 2;
 
       try {
         {% if not document %}
         // Create document if needed (only in project/doc selection mode)
         if (!this.selectedDocumentId) {
-          const r = await fetch('/documents/new', {
+          const r = await fetch(`${ROOT}/documents/new`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
@@ -514,7 +579,7 @@ createApp({
 
         // Stream normalize results
         const effLines = this.effectiveLines;
-        const response = await fetch('/api/normalize', {
+        const response = await fetch(`${ROOT}/api/normalize`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
@@ -524,6 +589,7 @@ createApp({
             delimiters: this.delimiters,
           })
         });
+        if (!response.ok) throw new Error(`Normalize failed: HTTP ${response.status}`);
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -542,11 +608,11 @@ createApp({
             if (!sseChunk.startsWith('data: ')) continue;
             const evt = JSON.parse(sseChunk.slice(6));
             if (evt.type === 'progress') {
-              this.normalizeProgress = {
-                current: evt.current,
-                total: evt.total,
-                lastOrig: evt.result?.orig || '',
-              };
+              const chunks = evt.result
+                ? [...this.normalizeProgress.chunks, evt.result]
+                : this.normalizeProgress.chunks;
+              this.normalizeProgress = { current: evt.current, total: evt.total, chunks };
+              await new Promise(r => setTimeout(r, 0)); // yield so Vue renders each chunk
             } else if (evt.type === 'done') {
               finalFullReg = evt.full_reg || '';
               finalChunks = evt.chunks || null;
@@ -560,16 +626,47 @@ createApp({
 
       } catch(e) {
         this.error = e.message || 'An error occurred';
-        this.step = 1;
+        // stay on step 2 so the error is visible; user can click ← Back
       } finally {
         this.normalizing = false;
+      }
+    },
+
+    // ── CoMMA import ──────────────────────────────────────────────────
+    parseCommaUrl() {
+      const m = this.commaUrl.match(/comma\.inria\.fr\/doc\/([^/]+)\/p\/([^?]+)/);
+      if (m) {
+        this.commaResource = decodeURIComponent(m[1]).split('?')[0];
+        this.commaRef      = decodeURIComponent(m[2]).split('?')[0];
+      } else {
+        this.commaResource = this.commaUrl.split('?')[0];
+      }
+    },
+    async fetchComma() {
+      this.commaError = null;
+      this.commaLoading = true;
+      this.commaLines = [];
+      try {
+        const resource = this.commaResource || this.commaUrl.split('?')[0];
+        const r = await fetch(
+          `${ROOT}/api/comma/document?resource=${encodeURIComponent(resource)}&ref=${encodeURIComponent(this.commaRef)}`
+        );
+        if (!r.ok) throw new Error(`Server error ${r.status}`);
+        const data = await r.json();
+        if (data.error) throw new Error(data.error);
+        this.commaLines = data.lines;
+        if (data.label && !this.pageLabel) this.pageLabel = data.label;
+      } catch (e) {
+        this.commaError = e.message;
+      } finally {
+        this.commaLoading = false;
       }
     },
 
     async _savePage(lines, full_reg, chunks = null, separator = '\n') {
       this.saving = true;
       try {
-        const r = await fetch('/pages/new', {
+        const r = await fetch(`${ROOT}/pages/new`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({

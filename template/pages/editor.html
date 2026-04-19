@@ -1136,12 +1136,16 @@ createApp({
           document.activeElement?.blur(); // commit any in-progress edit via onAnnotBlur
           this.validateAnnotation(annot);
           e.preventDefault();
-          // Focus the next pending annotation so the user can keep working without the mouse
+          // Focus the next pending annotation after the current one (wrap around if needed)
           this.$nextTick(() => {
-            const pending = this.allAnnotationsSorted.filter(a => !a.validated_by && a.id !== annot.id);
-            if (pending.length) {
-              this.selectedAnnotationId = pending[0].id;
-              this._focusAnnotInput(pending[0]);
+            const sorted = this.allAnnotationsSorted;
+            const curIdx = sorted.findIndex(a => a.id === annot.id);
+            const nextAfter = sorted.slice(curIdx + 1).find(a => !a.validated_by);
+            const fallback = sorted.find(a => !a.validated_by && a.id !== annot.id);
+            const target = nextAfter || fallback;
+            if (target) {
+              this.selectedAnnotationId = target.id;
+              this._focusAnnotInput(target);
             }
           });
         }
@@ -1151,7 +1155,7 @@ createApp({
     // ── Delete line ───────────────────────────────────────────────────────────
     async deleteLine(line, idx) {
       if (!confirm(`Delete line #${idx+1}? Annotations on this line will also be removed.`)) return;
-      const r = await fetch(`/api/lines/${line.id}/delete`, { method:'POST' });
+      const r = await fetch(`${ROOT}/api/lines/${line.id}/delete`, { method:'POST' });
       if (!r.ok) return;
       let charStart = 0;
       for (let i = 0; i < idx; i++) charStart += this.lines[i].original_text.length + 1;
@@ -1171,7 +1175,7 @@ createApp({
 
     async saveAnnotations() {
       try {
-        const r = await fetch(`/api/pages/${this.pageId}/annotations`, {
+        const r = await fetch(`${ROOT}/api/pages/${this.pageId}/annotations`, {
           method:'PUT', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ annotations: this.annotations }),
         });
@@ -1183,7 +1187,7 @@ createApp({
     },
     async setPageStatus(status) {
       this.pageStatus = status;
-      await fetch(`/api/pages/${this.pageId}/status`, {
+      await fetch(`${ROOT}/api/pages/${this.pageId}/status`, {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ status }),
       });
@@ -1199,7 +1203,7 @@ async function pageAddWork() {
   const title = document.getElementById('page-work-title').value.trim();
   if (!title) return;
   const genre = document.getElementById('page-work-genre').value.trim();
-  const resp = await fetch(`/api/pages/${PAGE_ID}/works`, {
+  const resp = await fetch(`${ROOT}/api/pages/${PAGE_ID}/works`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({title, genre}),
@@ -1220,7 +1224,7 @@ async function pageAddWork() {
 }
 
 async function pageRemoveWork(workId) {
-  await fetch(`/api/pages/${PAGE_ID}/works/${workId}`, {method: 'DELETE'});
+  await fetch(`${ROOT}/api/pages/${PAGE_ID}/works/${workId}`, {method: 'DELETE'});
   document.querySelector(`#page-works-chips [data-work-id="${workId}"]`)?.remove();
   if (!document.querySelectorAll('#page-works-chips .badge').length) {
     const span = document.createElement('span');

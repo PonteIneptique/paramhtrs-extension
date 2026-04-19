@@ -64,14 +64,14 @@ const documentId = {{ document.id }};
 
 async function addUser(userId, btn) {
   btn.disabled = true;
-  const resp = await fetch(`/api/documents/${documentId}/users/${userId}`, {method: 'POST'});
+  const resp = await fetch(`${ROOT}/api/documents/${documentId}/users/${userId}`, {method: 'POST'});
   if (resp.ok) { location.reload(); }
   else { btn.disabled = false; alert('Error adding user'); }
 }
 
 async function removeUser(userId, btn) {
   btn.disabled = true;
-  const resp = await fetch(`/api/documents/${documentId}/users/${userId}`, {method: 'DELETE'});
+  const resp = await fetch(`${ROOT}/api/documents/${documentId}/users/${userId}`, {method: 'DELETE'});
   if (resp.ok) { location.reload(); }
   else { btn.disabled = false; alert('Error removing user'); }
 }

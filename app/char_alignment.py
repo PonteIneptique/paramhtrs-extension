@@ -25,8 +25,7 @@ from typing import List, Optional, Tuple
 
 import regex as re
 
-# ── reuse data constants from alignment.py (no algorithm imports) ─────────────
-from .alignment import (
+from .alignment_types import (
     Alignment,
     OperationCode,
     MAP_RE_ABBR_SIMPLIFICATION,

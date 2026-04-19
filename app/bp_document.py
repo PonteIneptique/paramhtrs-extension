@@ -7,7 +7,7 @@ from flask import Blueprint, render_template, request, jsonify, redirect, url_fo
 from flask_login import login_required, current_user
 from .models import db, Document, DocumentUser, DocumentWork, Work, Project, Page, Line, User
 from .bp_auth import requires_access
-from .annot_utils import build_tei_from_annotations
+from .annot_utils import build_tei_from_annotations, page_metadata
 
 bp_document = Blueprint(
     "bp_document", __name__,
@@ -224,7 +224,7 @@ def document_export_tei(document: Document):
     users_by_id = {u.id: u.nickname or u.username for u in User.query.all()}
     parts = [f'<body n="{document.name}">']
     for page in document.pages:
-        page_tei = build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id)
+        page_tei = build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id, metadata=page_metadata(page))
         parts.append(f'<ab n="{page.label}">')
         parts.append(page_tei)
         parts.append('</ab>')
@@ -246,9 +246,10 @@ def document_download_zip(document: Document):
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for page in document.pages:
             safe_label = page.label.replace("/", "_").replace("\\", "_")
-            tei = build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id)
+            tei = build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id, metadata=page_metadata(page))
             zf.writestr(f"{safe_label}.xml", tei)
             zf.writestr(f"{safe_label}.json", json.dumps(page.annotations or [], ensure_ascii=False, indent=2))
+            zf.writestr(f"{safe_label}_source.txt", page.full_text)
     buf.seek(0)
     safe_name = document.name.replace("/", "_").replace("\\", "_")
     return Response(

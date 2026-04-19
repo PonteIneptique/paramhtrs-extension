@@ -6,7 +6,7 @@ from sqlalchemy import func
 
 from .models import db, Page, Line, Document, Project, User, Work, PageWork, DocumentWork
 from .bp_auth import requires_access
-from .annot_utils import align_to_annotations, align_to_annotations_from_chunks, build_tei_from_annotations
+from .annot_utils import align_to_annotations, align_to_annotations_from_chunks, build_tei_from_annotations, page_metadata
 
 bp_page = Blueprint(
     "bp_page", __name__,
@@ -161,7 +161,7 @@ def page_delete(page: Page):
 @requires_access(Page, 'page_id')
 def page_export_tei(page: Page):
     users_by_id = {u.id: u.nickname or u.username for u in User.query.all()}
-    tei = build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id)
+    tei = build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id, metadata=page_metadata(page))
     return Response(
         tei,
         mimetype="text/xml",

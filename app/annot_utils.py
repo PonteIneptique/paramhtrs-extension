@@ -161,7 +161,32 @@ def _escape_segment(text: str) -> str:
 
 
 
-def build_tei_from_annotations(original_text: str, annotations: list, users_by_id: dict = None) -> str:
+def page_metadata(page) -> dict:
+    """Extract TEI metadata dict from a Page ORM object."""
+    doc = page.document
+    all_works = list(page.works.all()) + [w for w in doc.works.all()]
+    seen, unique_works = set(), []
+    for w in all_works:
+        if w.id not in seen:
+            seen.add(w.id)
+            unique_works.append({"title": w.title, "genre": w.genre})
+    return {
+        "title": page.label,
+        "document": doc.name,
+        "project": doc.project.name,
+        "language": doc.language,
+        "qid": doc.qid,
+        "works": unique_works,
+    }
+
+
+def build_tei_from_annotations(original_text: str, annotations: list, users_by_id: dict = None, metadata: dict = None) -> str:
+    """Build a TEI XML document from annotations.
+
+    metadata dict (all keys optional):
+        title, document, project, language, qid,
+        works: list[{"title": str, "genre": str|None}]
+    """
     sorted_annots = sorted(
         annotations,
         key=lambda a: _get_selector(a, "TextPositionSelector").get("start", 0)
@@ -244,7 +269,13 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
     # Cleanup formatting
     full_body = " ".join(body_parts).replace(" \n", "\n").replace("\n ", "\n")
 
-    # Collect contributor ids that actually appear in the annotations
+    meta = metadata or {}
+
+    # titleStmt
+    title_parts = [meta.get("document", ""), meta.get("title", "")]
+    title_str = escape(" — ".join(p for p in title_parts if p) or "Standoff Export")
+
+    # respStmt entries
     resp_stmts = ""
     if users_by_id:
         contributor_ids = {a.get("resp_id") for a in sorted_annots if a.get("resp_id")}
@@ -256,13 +287,46 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
                 stmts.append(f'        <respStmt><resp>annotator</resp><persName xml:id="{escape(name)}">{escape(name)}</persName></respStmt>')
         resp_stmts = "\n" + "\n".join(stmts) if stmts else ""
 
+    # sourceDesc / msDesc
+    source_desc_parts = []
+    if meta.get("qid"):
+        source_desc_parts.append(f'        <idno type="URI">{escape(meta["qid"])}</idno>')
+    ms_contents = ""
+    works = meta.get("works") or []
+    if works:
+        items = []
+        for w in works:
+            genre_attr = f' n="{escape(w["genre"])}"' if w.get("genre") else ""
+            items.append(f'          <msItem{genre_attr}><title>{escape(w["title"])}</title></msItem>')
+        ms_contents = "\n        <msContents>\n" + "\n".join(items) + "\n        </msContents>"
+
+    if source_desc_parts or ms_contents:
+        ms_ident = ""
+        if source_desc_parts:
+            ms_ident = "\n        <msIdentifier>\n" + "\n".join(source_desc_parts) + "\n        </msIdentifier>"
+        source_desc = f'''    <sourceDesc>
+      <msDesc>{ms_ident}{ms_contents}
+      </msDesc>
+    </sourceDesc>'''
+    else:
+        source_desc = "    <sourceDesc><p>Exported from Abbreviarium</p></sourceDesc>"
+
+    # profileDesc
+    lang = escape(meta.get("language", ""))
+    profile_desc = f'''    <profileDesc>
+      <langUsage><language ident="{lang}"/></langUsage>
+    </profileDesc>''' if lang else ""
+
+    profile_block = f"\n  {profile_desc}" if profile_desc else ""
+
     return f'''<TEI xmlns="http://www.tei-c.org/ns/1.0">
   <teiHeader>
     <fileDesc>
-      <titleStmt><title>Standoff Export</title>{resp_stmts}
+      <titleStmt><title>{title_str}</title>{resp_stmts}
       </titleStmt>
       <publicationStmt><p>Exported from Abbreviarium</p></publicationStmt>
-    </fileDesc>
+{source_desc}
+    </fileDesc>{profile_block}
   </teiHeader>
   <text>
     <body>

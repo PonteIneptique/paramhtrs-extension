@@ -42,6 +42,9 @@ from .bp_auth import login_manager, bp_auth
 app.register_blueprint(bp_auth)
 login_manager.init_app(app)
 
+from .bp_comma import bp_comma
+app.register_blueprint(bp_comma)
+
 from .bp_cli import cli_group
 app.cli.add_command(cli_group)
 

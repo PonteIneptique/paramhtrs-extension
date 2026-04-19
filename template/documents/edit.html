@@ -106,9 +106,14 @@
   <!-- Pages list -->
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h2 class="mb-0">Pages</h2>
-    <a href="{{ url_for('bp_norm.ingestion_new', document_id=document.id) }}" class="btn btn-sm btn-primary">
-      <i class="fa-solid fa-plus"></i> Add Page
-    </a>
+    <div class="d-flex gap-2">
+      <a href="{{ url_for('bp_norm.ingestion_new', document_id=document.id, input_tab='comma') }}" class="btn btn-sm btn-outline-info">
+        <i class="fa-solid fa-cloud-arrow-down"></i> From CoMMA
+      </a>
+      <a href="{{ url_for('bp_norm.ingestion_new', document_id=document.id) }}" class="btn btn-sm btn-primary">
+        <i class="fa-solid fa-plus"></i> Add Page
+      </a>
+    </div>
   </div>
 
   {% if pages %}
@@ -145,7 +150,7 @@ async function addWork() {
     const title = document.getElementById('work-title').value.trim();
     if (!title) return;
     const genre = document.getElementById('work-genre').value.trim();
-    const resp = await fetch(`/api/documents/${DOCUMENT_ID}/works`, {
+    const resp = await fetch(`${ROOT}/api/documents/${DOCUMENT_ID}/works`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({title, genre}),
@@ -166,7 +171,7 @@ async function addWork() {
 }
 
 async function removeWork(workId) {
-    await fetch(`/api/documents/${DOCUMENT_ID}/works/${workId}`, {method: 'DELETE'});
+    await fetch(`${ROOT}/api/documents/${DOCUMENT_ID}/works/${workId}`, {method: 'DELETE'});
     document.querySelector(`[data-work-id="${workId}"]`)?.remove();
 }
 </script>

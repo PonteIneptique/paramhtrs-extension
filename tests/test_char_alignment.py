@@ -3,7 +3,7 @@
 All 9 test cases from the original must pass with the same expected values,
 confirming that the character-level pipeline produces compatible output.
 """
-from app.alignment import Alignment
+from app.alignment_types import Alignment
 from app.char_alignment import align_words
 
 
