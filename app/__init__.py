@@ -49,6 +49,7 @@ app.register_blueprint(bp_page)
 from .bp_auth import login_manager, bp_auth
 app.register_blueprint(bp_auth)
 login_manager.init_app(app)
+login_manager.login_view = 'bp_auth.login'
 
 from .bp_comma import bp_comma
 app.register_blueprint(bp_comma)

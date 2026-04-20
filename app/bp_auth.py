@@ -196,7 +196,10 @@ def requires_access(cls, id_arg_name: str):
             if obj is None:
                 abort(404, f"{cls.__name__} with id {obj_id} not found")
 
-            # Check access (you can customize this logic)
+            # Unauthenticated users get redirected to login; authenticated but
+            # unauthorised users get 403.
+            if not current_user.is_authenticated:
+                return login_manager.unauthorized()
             if not obj.user_has_access(current_user):
                 abort(403, f"You do not have access to this {cls.__name__}")
 

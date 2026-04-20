@@ -79,14 +79,24 @@ def _make_page(creator, project=None, document=None):
 # ── anonymous access ──────────────────────────────────────────────────────────
 
 class TestAnonymousAccess:
-    def test_page_requires_login(self, app, client):
+    def test_page_redirects_to_login(self, app, client):
         with app.app_context():
             owner = _make_user("owner")
             _, _, page = _make_page(owner)
             page_id = page.id
         resp = client.get(f"/pages/{page_id}", follow_redirects=False)
-        # requires_access calls abort(403) for anonymous; flask-login may redirect to login
-        assert resp.status_code in (302, 403)
+        assert resp.status_code == 302
+        assert "/login" in resp.headers["Location"]
+
+    def test_login_redirect_preserves_next(self, app, client):
+        with app.app_context():
+            owner = _make_user("owner")
+            _, _, page = _make_page(owner)
+            page_id = page.id
+        resp = client.get(f"/pages/{page_id}", follow_redirects=True)
+        # Should land on the login page
+        assert resp.status_code == 200
+        assert b"login" in resp.data.lower()
 
     def test_anonymous_user_has_no_project_access(self, app):
         with app.app_context():
