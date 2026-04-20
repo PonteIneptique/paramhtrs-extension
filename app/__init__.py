@@ -20,6 +20,7 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SEQ2SEQ_MODEL'] = os.getenv('SEQ2SEQ_MODEL', 'comma-project/normalization-byt5-small')
 app.config['MAX_CHUNK_BYTES'] = int(os.getenv('MAX_CHUNK_BYTES', 512))
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'jfbqh2brbsefonp12294810i23hrisnbfdhbdiauOJSOBSDFDU9 209IEWR')
+app.config['SESSION_COOKIE_NAME'] = os.getenv('SESSION_COOKIE_NAME', 'paramhtr_session')
 
 from .models import db, db_cli
 db.init_app(app)
