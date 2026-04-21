@@ -345,3 +345,68 @@ camblances ou il auoient lor fiance. """
         f"  expected: {expected}\n"
         f"  got:      {als}"
     )
+
+
+def test_multi_char_expansion_no_duplication():
+    """ꝭ expands to 'is' (two chars).  The DP may match those two expansion
+    characters at non-contiguous positions in norm_reg separated by insertions.
+    The source character must appear exactly once in the resulting Alignment,
+    not be duplicated (regression for the parꝭꝭ / studẽ tiũ bug)."""
+
+    # Case 1: parꝭ → Parisienses
+    # ꝭ (U+A76D) expands to 'is'; the DP matches 'i' and 's' at positions
+    # separated by 'ienses' insertions — previously produced source='parꝭꝭ'.
+    abbr1  = "Cũ uniu\u0352sitas magr\u0303i \u204a scolares par\ua76d in nr\u0303a sp\xe3li gardia et \ua753tect\xf5e existant c\u0169"
+    expan1 = "Cum universitas magistri et scolares Parisienses in nostra speciali gardia et protectione existant cum"
+    expected1 = [
+        Alignment("Cũ", "Cum", "s"),
+        Alignment(" ", " ", "n"),
+        Alignment("uniu\u0352sitas", "universitas", "s"),
+        Alignment(" ", " ", "n"),
+        Alignment("magr\u0303i", "magistri", "s"),
+        Alignment(" ", " ", "n"),
+        Alignment("\u204a", "et", "s"),
+        Alignment(" scolares ", " scolares ", "n"),
+        Alignment("par\ua76d", "Parisienses", "s"),
+        Alignment(" in ", " in ", "n"),
+        Alignment("nr\u0303a", "nostra", "s"),
+        Alignment(" ", " ", "n"),
+        Alignment("sp\xe3li", "speciali", "s"),
+        Alignment(" gardia et ", " gardia et ", "n"),
+        Alignment("\ua753tect\xf5e", "protectione", "s"),
+        Alignment(" existant ", " existant ", "n"),
+        Alignment("c\u0169", "cum", "s"),
+    ]
+    result1 = align_words(abbr1, expan1)
+    assert result1 == expected1, (
+        f"Failed case 1\n  expected: {expected1}\n  got:      {result1}"
+    )
+
+    # Case 2: Parꝭ → Parisiensium  and  studẽtiũ → studentium
+    # studẽtiũ was previously split as 'studẽ tiũ' with a spurious space.
+    abbr2  = "magr\u0303o\ua775 \u204a scolari\u0169 Par\ua76d stud\u1ebdti\u0169 nos eisd\u0303 nr\u0303as c\xf5ces\ua75dimus lr\u0303as tenorem qui sequitur"
+    expan2 = "magistrorum et scolarium Parisiensium studentium nos eisdem nostras concessimus litteras tenorem qui sequitur"
+    expected2 = [
+        Alignment("magr\u0303o\ua775", "magistrorum", "s"),
+        Alignment(" ", " ", "n"),
+        Alignment("\u204a", "et", "s"),
+        Alignment(" ", " ", "n"),
+        Alignment("scolari\u0169", "scolarium", "s"),
+        Alignment(" ", " ", "n"),
+        Alignment("Par\ua76d", "Parisiensium", "s"),
+        Alignment(" ", " ", "n"),
+        Alignment("stud\u1ebdti\u0169", "studentium", "s"),
+        Alignment(" nos ", " nos ", "n"),
+        Alignment("eisd\u0303", "eisdem", "s"),
+        Alignment(" ", " ", "n"),
+        Alignment("nr\u0303as", "nostras", "s"),
+        Alignment(" ", " ", "n"),
+        Alignment("c\xf5ces\ua75dimus", "concessimus", "s"),
+        Alignment(" ", " ", "n"),
+        Alignment("lr\u0303as", "litteras", "s"),
+        Alignment(" tenorem qui sequitur", " tenorem qui sequitur", "n"),
+    ]
+    result2 = align_words(abbr2, expan2)
+    assert result2 == expected2, (
+        f"Failed case 2\n  expected: {expected2}\n  got:      {result2}"
+    )

@@ -315,6 +315,11 @@ def _group_by_span(
     # Accumulator for the current span.
     cur_span:    Optional[Tuple[int, int]] = None
     cur_reg_idx: List[Optional[int]]       = []
+    # Pure insertions buffered while cur_span is active.  We hold them until the
+    # next non-insertion op arrives: if it belongs to the *same* span the insertions
+    # are folded into the accumulator (preserving target order); if it belongs to a
+    # different span they are emitted as standalone groups first.
+    pending_ins: List[int] = []  # reg indices of buffered insertions
 
     def _flush():
         nonlocal cur_span, cur_reg_idx
@@ -344,28 +349,51 @@ def _group_by_span(
         cur_span    = None
         cur_reg_idx = []
 
-    for cop in char_ops:
-        if cop.exp_idx is not None:
-            span = abbr_spans[cop.exp_idx]
-            if span == cur_span:
-                cur_reg_idx.append(cop.reg_idx)
-            else:
-                _flush()
-                cur_span    = span
-                cur_reg_idx = [cop.reg_idx]
-        else:
-            # Pure insertion — flush current accumulator, emit standalone group.
-            _flush()
-            tgt_ch = reg[cop.reg_idx]
-            is_space_ins = (tgt_ch == ' ')
+    def _emit_pending():
+        nonlocal pending_ins
+        for reg_idx in pending_ins:
+            tgt_ch = reg[reg_idx]
             groups.append(SpanGroup(
                 source='',
                 target=tgt_ch,
                 is_null_space=False,
-                is_space_insertion=is_space_ins,
+                is_space_insertion=(tgt_ch == ' '),
             ))
+        pending_ins = []
+
+    for cop in char_ops:
+        if cop.exp_idx is not None:
+            span = abbr_spans[cop.exp_idx]
+            if span == cur_span:
+                # Same original character: fold any buffered insertions in (they
+                # sit between two expanded chars of the same source character, e.g.
+                # ꝭ→'is' matched at non-contiguous positions in norm_reg).
+                cur_reg_idx.extend(pending_ins)
+                pending_ins = []
+                cur_reg_idx.append(cop.reg_idx)
+            else:
+                # New span: flush current accumulator, emit pending insertions,
+                # then start fresh.
+                _flush()
+                _emit_pending()
+                cur_span    = span
+                cur_reg_idx = [cop.reg_idx]
+        else:
+            # Pure insertion: buffer it while an accumulator is active so we can
+            # decide later whether it belongs to the current span.
+            if cur_span is not None:
+                pending_ins.append(cop.reg_idx)
+            else:
+                tgt_ch = reg[cop.reg_idx]
+                groups.append(SpanGroup(
+                    source='',
+                    target=tgt_ch,
+                    is_null_space=False,
+                    is_space_insertion=(tgt_ch == ' '),
+                ))
 
     _flush()
+    _emit_pending()
     return groups
 
 
