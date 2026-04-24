@@ -1,0 +1,11 @@
+{
+  "name": "paramhtr-editor",
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-vm-modules node_modules/.bin/jest"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29",
+    "jest": "^29"
+  }
+}
