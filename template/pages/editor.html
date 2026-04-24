@@ -687,16 +687,23 @@ body { overflow: hidden; }
 
   </div><!-- /#editor-panels -->
 
-  <!-- Bulk validation modal (inside #editor-root so Vue directives work) -->
+  <!-- Bulk action modal (validate or delete similar annotations) -->
   <div class="modal fade" id="bulkValidateModal" tabindex="-1" aria-hidden="true" data-bs-keyboard="true">
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content">
         <div class="modal-header">
-          <h5 class="modal-title">Validate similar annotations</h5>
+          <h5 class="modal-title">
+            <span v-if="bulkMode === 'delete'">Delete similar annotations</span>
+            <span v-else>Validate similar annotations</span>
+          </h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
-          <p class="text-muted small mb-2">
+          <p class="text-muted small mb-2" v-if="bulkMode === 'delete'">
+            These unvalidated annotations share the same source text.
+            Select the ones you also want to delete:
+          </p>
+          <p class="text-muted small mb-2" v-else>
             These unvalidated annotations share the same source &rarr; target mapping.
             Select the ones you want to validate now:
           </p>
@@ -719,7 +726,8 @@ body { overflow: hidden; }
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Skip</button>
-          <button type="button" class="btn btn-success btn-sm" @click="confirmBulkValidation">Validate selected</button>
+          <button v-if="bulkMode === 'delete'" type="button" class="btn btn-danger btn-sm" @click="confirmBulkDeletion">Delete selected</button>
+          <button v-else type="button" class="btn btn-success btn-sm" @click="confirmBulkValidation">Validate selected</button>
         </div>
       </div>
     </div>

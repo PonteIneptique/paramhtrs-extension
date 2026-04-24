@@ -131,3 +131,28 @@ export function findSimilarAnnotations(annotations, targetAnnot) {
     getExact(a) === srcExact && getBodyValue(a) === tgtValue
   );
 }
+
+// ── Bulk deletion: find unvalidated annotations with same exact text ──────────
+// For insertions (start===end), matches by body value instead of exact text.
+// Returns [] for space insertions/removals — those are too generic to bulk-delete.
+export function findSimilarByExact(annotations, annot) {
+  if (isInsertion(annot)) {
+    const value = getBodyValue(annot);
+    if (!value?.trim()) return [];
+    return annotations.filter(a =>
+      a.id !== annot.id &&
+      !a.validated_by &&
+      isInsertion(a) &&
+      getBodyValue(a) === value
+    );
+  }
+  if (isSpaceExact(annot)) return [];
+  const exact = getExact(annot);
+  return annotations.filter(a =>
+    a.id !== annot.id &&
+    !a.validated_by &&
+    !isInsertion(a) &&
+    !isAtrNoise(a) &&
+    getExact(a) === exact
+  );
+}

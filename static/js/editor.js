@@ -5,6 +5,7 @@ import {
   escapeHtml, applyAnnotations,
   buildSourceHtml, computeNormalizedPositions, buildNormalizedPageHtml,
   findSimilarAnnotations,
+  findSimilarByExact,
 } from './editor-utils.js';
 
 // Module-level pending annotation (raw W3C object, not reactive)
@@ -39,6 +40,7 @@ export function createEditorApp(config) {
         saveError:           false,
         bulkCandidates:      [],
         bulkChecked:         {},
+        bulkMode:            'validate',
         showAnnotContext:     false,
         focusMode:           false,
         focusAnnotIndex:     0,
@@ -398,6 +400,14 @@ export function createEditorApp(config) {
         this.annotations = this.annotations.filter(a => a.id !== annot.id);
         if (this.selectedAnnotationId === annot.id) this.selectedAnnotationId = null;
         this.deleteAnnotation(annot);
+        if (this.focusMode) return;
+        const similar = findSimilarByExact(this.annotations, annot);
+        if (similar.length > 0) {
+          this.bulkMode = 'delete';
+          this.bulkCandidates = similar;
+          this.bulkChecked = Object.fromEntries(similar.map(a => [a.id, true]));
+          new bootstrap.Modal(document.getElementById('bulkValidateModal')).show();
+        }
       },
 
       // ── Clear all unvalidated ─────────────────────────────────────────────────
@@ -431,6 +441,7 @@ export function createEditorApp(config) {
         this.saveAnnotation(updated);
         const similar = findSimilarAnnotations(this.annotations, annot);
         if (similar.length > 0) {
+          this.bulkMode = 'validate';
           this.bulkCandidates = similar;
           this.bulkChecked = Object.fromEntries(similar.map(a => [a.id, true]));
           new bootstrap.Modal(document.getElementById('bulkValidateModal')).show();
@@ -446,7 +457,20 @@ export function createEditorApp(config) {
         bootstrap.Modal.getInstance(document.getElementById('bulkValidateModal'))?.hide();
         this.bulkCandidates = [];
         this.bulkChecked = {};
+        this.bulkMode = 'validate';
         this.saveAnnotations();
+      },
+      confirmBulkDeletion() {
+        const toDelete = new Set(
+          Object.entries(this.bulkChecked).filter(([,v]) => v).map(([id]) => id)
+        );
+        const removed = this.annotations.filter(a => toDelete.has(a.id));
+        this.annotations = this.annotations.filter(a => !toDelete.has(a.id));
+        bootstrap.Modal.getInstance(document.getElementById('bulkValidateModal'))?.hide();
+        this.bulkCandidates = [];
+        this.bulkChecked = {};
+        this.bulkMode = 'validate';
+        removed.forEach(a => this.deleteAnnotation(a));
       },
       unvalidateAnnotation(annot) {
         const { validated_by, ...updated } = annot;
@@ -502,7 +526,8 @@ export function createEditorApp(config) {
         if (e.key === 'Escape' && this.pendingAnnot) { this.cancelPending(); e.preventDefault(); return; }
         if (e.key === 'Enter' && e.ctrlKey && this.bulkCandidates.length > 0) {
           e.preventDefault();
-          this.confirmBulkValidation();
+          if (this.bulkMode === 'delete') this.confirmBulkDeletion();
+          else this.confirmBulkValidation();
           return;
         }
         if (e.key === 'Enter' && e.ctrlKey && this.selectedAnnotationId) {
