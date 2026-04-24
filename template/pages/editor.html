@@ -295,6 +295,20 @@ body { overflow: hidden; }
 
 /* ── Annotation filter toggle ── */
 .annot-filter-btn { font-size: .7rem; padding: 1px 6px; }
+
+/* ── Context prefix/suffix chips ── */
+.annot-ctx {
+  font-family: 'JunicodeVF', serif;
+  font-size: .72rem;
+  color: #adb5bd;
+  white-space: nowrap;
+  flex-shrink: 0;
+  max-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.annot-ctx-pre { text-align: right; direction: rtl; }
+.annot-ctx-suf { direction: ltr; }
 </style>
 {% endblock %}
 
@@ -427,17 +441,25 @@ body { overflow: hidden; }
     <div class="panel panel-annots" :style="panelAnnotsStyle">
       <div class="panel-header d-flex align-items-center">
         <span>Annotations</span>
-        <div class="btn-group ms-auto" style="gap:2px">
+        <div class="d-flex align-items-center ms-auto gap-1">
           <button class="btn annot-filter-btn"
-                  :class="annotFilter==='pending' ? 'btn-secondary' : 'btn-outline-secondary'"
-                  @click="annotFilter='pending'">
-            Pending <span class="badge bg-light text-dark ms-1">[[ pendingAnnotationsSorted.length ]]</span>
+                  :class="showAnnotContext ? 'btn-secondary' : 'btn-outline-secondary'"
+                  @click="showAnnotContext = !showAnnotContext"
+                  title="Show prefix/suffix context around each annotation">
+            ±ctx
           </button>
-          <button class="btn annot-filter-btn"
-                  :class="annotFilter==='validated' ? 'btn-success' : 'btn-outline-secondary'"
-                  @click="annotFilter='validated'">
-            Validated <span class="badge bg-light text-dark ms-1">[[ validatedAnnotationsSorted.length ]]</span>
-          </button>
+          <div class="btn-group" style="gap:2px">
+            <button class="btn annot-filter-btn"
+                    :class="annotFilter==='pending' ? 'btn-secondary' : 'btn-outline-secondary'"
+                    @click="annotFilter='pending'">
+              Pending <span class="badge bg-light text-dark ms-1">[[ pendingAnnotationsSorted.length ]]</span>
+            </button>
+            <button class="btn annot-filter-btn"
+                    :class="annotFilter==='validated' ? 'btn-success' : 'btn-outline-secondary'"
+                    @click="annotFilter='validated'">
+              Validated <span class="badge bg-light text-dark ms-1">[[ validatedAnnotationsSorted.length ]]</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -449,10 +471,12 @@ body { overflow: hidden; }
              @mousedown="onRowMousedown(annot, $event)"
              @mouseenter="onRowMouseenter(annot.id)"
              @mouseleave="onRowMouseleave()">
-          <label class="annot-row-label" style="flex:1;display:flex;align-items:center;gap:4px;">
+          <label class="annot-row-label" style="flex:1;display:flex;align-items:center;gap:4px;min-width:0;">
+            <span v-if="showAnnotContext && getPrefix(annot)" class="annot-ctx annot-ctx-pre" :title="getPrefix(annot)">[[ getPrefix(annot).slice(-6) ]]</span>
             <span v-if="isInsertion(annot)" class="annot-ins-chip" title="insertion">[+]</span>
             <span v-else-if="isSpaceExact(annot)" class="annot-orig-sp" title="space">[SPACE]</span>
             <span v-else class="annot-orig" :title="getExact(annot)">[[ getExact(annot) ]]</span>
+            <span v-if="showAnnotContext && getSuffix(annot)" class="annot-ctx annot-ctx-suf" :title="getSuffix(annot)">[[ getSuffix(annot).slice(0,6) ]]</span>
             <span class="annot-arrow">→</span>
             <span v-if="isAtrNoise(annot)" class="annot-atr-chip">[ATR NOISE]</span>
             <span v-else-if="!getBodyValue(annot)" class="annot-del-chip">deleted</span>
@@ -502,10 +526,12 @@ body { overflow: hidden; }
              @mousedown="onRowMousedown(annot, $event)"
              @mouseenter="onRowMouseenter(annot.id)"
              @mouseleave="onRowMouseleave()">
-          <label class="annot-row-label" style="flex:1;display:flex;align-items:center;gap:4px;">
+          <label class="annot-row-label" style="flex:1;display:flex;align-items:center;gap:4px;min-width:0;">
+            <span v-if="showAnnotContext && getPrefix(annot)" class="annot-ctx annot-ctx-pre" :title="getPrefix(annot)">[[ getPrefix(annot).slice(-6) ]]</span>
             <span v-if="isInsertion(annot)" class="annot-ins-chip" title="insertion">[+]</span>
             <span v-else-if="isSpaceExact(annot)" class="annot-orig-sp" title="space">[SPACE]</span>
             <span v-else class="annot-orig" :title="getExact(annot)">[[ getExact(annot) ]]</span>
+            <span v-if="showAnnotContext && getSuffix(annot)" class="annot-ctx annot-ctx-suf" :title="getSuffix(annot)">[[ getSuffix(annot).slice(0,6) ]]</span>
             <span class="annot-arrow">→</span>
             <span v-if="!getBodyValue(annot)" class="annot-del-chip">deleted</span>
             <span v-else-if="isInsertion(annot) && !getBodyValue(annot).trim()" class="annot-orig-sp">[SPACE]</span>
@@ -554,10 +580,17 @@ body { overflow: hidden; }
           <div v-for="a in bulkCandidates" :key="a.id" class="form-check mb-1">
             <input class="form-check-input" type="checkbox"
                    :id="'bulk-'+a.id" v-model="bulkChecked[a.id]">
-            <label class="form-check-label small" :for="'bulk-'+a.id">
-              <span class="text-muted fst-italic">[[ getPrefix(a) ]]</span><span class="fw-semibold">[[ getExact(a) ]]</span><span class="text-muted fst-italic">[[ getSuffix(a) ]]</span>
+            <label class="form-check-label small d-inline-flex align-items-center gap-1 flex-wrap" :for="'bulk-'+a.id">
+              <span class="text-muted fst-italic" style="font-family:'JunicodeVF',serif">[[ getPrefix(a) ]]</span><!--
+              --><span v-if="isInsertion(a)" class="annot-ins-chip" title="insertion">[+]</span>
+              <span v-else-if="isSpaceExact(a)" class="annot-orig-sp" title="space">[SPACE]</span>
+              <span v-else class="fw-semibold" style="font-family:'JunicodeVF',serif">[[ getExact(a) ]]</span><!--
+              --><span class="text-muted fst-italic" style="font-family:'JunicodeVF',serif">[[ getSuffix(a) ]]</span>
               <span class="mx-1">&rarr;</span>
-              <strong>[[ getBodyValue(a) ]]</strong>
+              <span v-if="isAtrNoise(a)" class="annot-atr-chip">[ATR NOISE]</span>
+              <span v-else-if="!getBodyValue(a)" class="annot-del-chip">deleted</span>
+              <span v-else-if="!getBodyValue(a).trim()" class="annot-orig-sp">[SPACE]</span>
+              <strong v-else style="font-family:'JunicodeVF',serif">[[ getBodyValue(a) ]]</strong>
             </label>
           </div>
         </div>
@@ -726,6 +759,7 @@ createApp({
       saveError: false,
       bulkCandidates: [],
       bulkChecked: {},
+      showAnnotContext: false,
     };
   },
 
