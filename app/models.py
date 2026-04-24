@@ -138,6 +138,88 @@ class Document(db.Model):
         ).count() > 0
 
 
+class Annotation(db.Model):
+    __tablename__ = "annotations"
+
+    id            = db.Column(db.String(36),  primary_key=True)
+    page_id       = db.Column(db.Integer, db.ForeignKey("pages.id"), nullable=False, index=True)
+    body_value    = db.Column(db.Text,        nullable=True)
+    body_purpose  = db.Column(db.String(50),  nullable=True)
+    target_start  = db.Column(db.Integer,     nullable=False, default=0)
+    target_end    = db.Column(db.Integer,     nullable=False, default=0)
+    target_exact  = db.Column(db.Text,        nullable=True)
+    target_prefix = db.Column(db.Text,        nullable=True)
+    target_suffix = db.Column(db.Text,        nullable=True)
+    resp_id       = db.Column(db.Integer,     nullable=True)
+    validated_by  = db.Column(db.Integer,     nullable=True)
+
+    page = db.relationship("Page", back_populates="annotation_rows")
+
+    def to_dict(self) -> dict:
+        d = {
+            "id":   self.id,
+            "type": "Annotation",
+            "body": [{"type": "TextualBody",
+                      "value":   self.body_value   or "",
+                      "purpose": self.body_purpose or "normalizing"}],
+            "target": {
+                "annotation": self.id,
+                "selector": [
+                    {"type": "TextPositionSelector",
+                     "start": self.target_start, "end": self.target_end},
+                    {"type": "TextQuoteSelector",
+                     "exact":  self.target_exact  or "",
+                     "prefix": self.target_prefix or "",
+                     "suffix": self.target_suffix or ""},
+                ],
+            },
+        }
+        if self.resp_id      is not None: d["resp_id"]     = self.resp_id
+        if self.validated_by is not None: d["validated_by"] = self.validated_by
+        return d
+
+    @classmethod
+    def from_dict(cls, page_id: int, data: dict) -> "Annotation":
+        sel  = data.get("target", {}).get("selector", [])
+        pos  = next((s for s in sel if s.get("type") == "TextPositionSelector"), {})
+        quo  = next((s for s in sel if s.get("type") == "TextQuoteSelector"),    {})
+        body = (data.get("body") or [{}])[0]
+        return cls(
+            id           = data["id"],
+            page_id      = page_id,
+            body_value   = body.get("value"),
+            body_purpose = body.get("purpose"),
+            target_start = pos.get("start", 0),
+            target_end   = pos.get("end",   0),
+            target_exact = quo.get("exact"),
+            target_prefix= quo.get("prefix"),
+            target_suffix= quo.get("suffix"),
+            resp_id      = data.get("resp_id"),
+            validated_by = data.get("validated_by"),
+        )
+
+    @classmethod
+    def upsert_from_dict(cls, page_id: int, data: dict) -> None:
+        """Update existing row or insert new one from a W3C annotation dict."""
+        existing = cls.query.filter_by(id=data["id"], page_id=page_id).first()
+        if existing:
+            sel  = data.get("target", {}).get("selector", [])
+            pos  = next((s for s in sel if s.get("type") == "TextPositionSelector"), {})
+            quo  = next((s for s in sel if s.get("type") == "TextQuoteSelector"),    {})
+            body = (data.get("body") or [{}])[0]
+            existing.body_value   = body.get("value")
+            existing.body_purpose = body.get("purpose")
+            existing.target_start = pos.get("start", 0)
+            existing.target_end   = pos.get("end",   0)
+            existing.target_exact = quo.get("exact")
+            existing.target_prefix= quo.get("prefix")
+            existing.target_suffix= quo.get("suffix")
+            existing.resp_id      = data.get("resp_id")
+            existing.validated_by = data.get("validated_by")
+        else:
+            db.session.add(cls.from_dict(page_id, data))
+
+
 class Page(db.Model):
     __tablename__ = "pages"
     id = db.Column(db.Integer, primary_key=True)
@@ -153,7 +235,23 @@ class Page(db.Model):
         ),
     )
 
-    annotations = db.Column(db.JSON, nullable=False, default=list)
+    annotation_rows = db.relationship(
+        "Annotation",
+        back_populates="page",
+        cascade="all, delete-orphan",
+        lazy="select",
+        order_by="Annotation.target_start",
+    )
+
+    @property
+    def annotations(self) -> list:
+        return [a.to_dict() for a in self.annotation_rows]
+
+    def set_annotations(self, annots: list) -> None:
+        """Replace all annotations for this page."""
+        Annotation.query.filter_by(page_id=self.id).delete(synchronize_session=False)
+        for data in annots:
+            db.session.add(Annotation.from_dict(self.id, data))
 
     works = db.relationship(
         "Work",
@@ -288,3 +386,43 @@ def db_upgrade():
 
         db.session.commit()
         click.echo("Upgrade complete")
+
+
+@db_cli.command("migrate-annotations")
+def db_migrate_annotations():
+    """Migrate page.annotations JSON column to the annotations table."""
+    with current_app.app_context():
+        db.create_all()
+        click.echo("Ensuring annotations table exists...")
+
+        result = db.session.execute(text("SELECT id, annotations FROM pages")).fetchall()
+        total = 0
+        skipped = 0
+        for page_id, ann_json in result:
+            if not ann_json:
+                continue
+            annots = json.loads(ann_json) if isinstance(ann_json, str) else ann_json
+            if not annots:
+                continue
+            existing = Annotation.query.filter_by(page_id=page_id).count()
+            if existing:
+                click.echo(f"  Page {page_id}: {existing} rows already present — skipping")
+                skipped += 1
+                continue
+            for ann_data in annots:
+                try:
+                    db.session.add(Annotation.from_dict(page_id, ann_data))
+                except Exception as exc:
+                    click.echo(f"  WARNING page {page_id} / ann {ann_data.get('id')}: {exc}")
+            total += len(annots)
+            click.echo(f"  Page {page_id}: {len(annots)} annotations")
+
+        db.session.commit()
+        click.echo(f"Migrated {total} annotations across {len(result) - skipped} pages.")
+
+        try:
+            db.session.execute(text("ALTER TABLE pages DROP COLUMN annotations"))
+            db.session.commit()
+            click.echo("Dropped pages.annotations column.")
+        except Exception as exc:
+            click.echo(f"Could not drop pages.annotations column (safe to ignore): {exc}")

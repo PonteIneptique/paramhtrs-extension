@@ -224,13 +224,16 @@ export function createEditorApp(config) {
 
           if (this.refineMode && this.selectedAnnotationId) {
             const tid = this.selectedAnnotationId;
-            this.annotations = this.annotations.map(a => a.id !== tid ? a : {
-              ...a, target: { ...a.target, selector: [
+            let updated;
+            this.annotations = this.annotations.map(a => {
+              if (a.id !== tid) return a;
+              updated = { ...a, target: { ...a.target, selector: [
                 { type:'TextPositionSelector', start, end },
                 { type:'TextQuoteSelector', exact, prefix, suffix },
-              ]},
+              ]}};
+              return updated;
             });
-            this.saveAnnotations();
+            this.saveAnnotation(updated);
             this.refineMode = false;
             sel.removeAllRanges();
             return;
@@ -354,10 +357,15 @@ export function createEditorApp(config) {
 
       // ── Annotation value edit ─────────────────────────────────────────────────
       onAnnotBlur(annot, evt) {
-        this.annotations = this.annotations.map(a =>
-          a.id !== annot.id || !a.body?.[0] ? a : { ...a, resp_id: CURRENT_USER_ID, body:[{ ...a.body[0], value:evt.target.value }] }
-        );
-        this.saveAnnotations();
+        if (!annot.body?.[0]) return;
+        const domValue = evt.target.value;
+        // Skip save when value hasn't changed — happens after Ctrl+Enter already
+        // folded the value into validateAnnotation, then focus moves to the next
+        // annotation and this input blurs a second time.
+        if (domValue === (annot.body[0].value ?? '')) return;
+        const updated = { ...annot, resp_id: CURRENT_USER_ID, body: [{ ...annot.body[0], value: domValue }] };
+        this.annotations = this.annotations.map(a => a.id !== annot.id ? a : updated);
+        this.saveAnnotation(updated);
       },
 
       // ── Commit pending annotation ─────────────────────────────────────────────
@@ -369,7 +377,7 @@ export function createEditorApp(config) {
                           purpose: posSel.start === posSel.end ? 'insertion' : 'normalizing' }];
         annot.resp_id = CURRENT_USER_ID;
         this.annotations = [...this.annotations, annot];
-        this.saveAnnotations();
+        this.saveAnnotation(annot);
       },
 
       cancelPending() { pendingAnnotRaw = null; this.pendingAnnot = null; },
@@ -382,14 +390,14 @@ export function createEditorApp(config) {
         annot.body = [{ type: 'TextualBody', value: exact, purpose: 'atr_noise' }];
         annot.resp_id = CURRENT_USER_ID;
         this.annotations = [...this.annotations, annot];
-        this.saveAnnotations();
+        this.saveAnnotation(annot);
       },
 
       // ── Remove annotation ─────────────────────────────────────────────────────
       removeAnnotation(annot) {
         this.annotations = this.annotations.filter(a => a.id !== annot.id);
         if (this.selectedAnnotationId === annot.id) this.selectedAnnotationId = null;
-        this.saveAnnotations();
+        this.deleteAnnotation(annot);
       },
 
       // ── Clear all unvalidated ─────────────────────────────────────────────────
@@ -418,8 +426,9 @@ export function createEditorApp(config) {
 
       // ── Validate / un-validate ────────────────────────────────────────────────
       validateAnnotation(annot) {
-        this.annotations = this.annotations.map(a => a.id===annot.id ? {...a, validated_by:CURRENT_USER_ID} : a);
-        this.saveAnnotations();
+        const updated = { ...annot, validated_by: CURRENT_USER_ID };
+        this.annotations = this.annotations.map(a => a.id === annot.id ? updated : a);
+        this.saveAnnotation(updated);
         const similar = findSimilarAnnotations(this.annotations, annot);
         if (similar.length > 0) {
           this.bulkCandidates = similar;
@@ -440,11 +449,9 @@ export function createEditorApp(config) {
         this.saveAnnotations();
       },
       unvalidateAnnotation(annot) {
-        this.annotations = this.annotations.map(a => {
-          if (a.id !== annot.id) return a;
-          const { validated_by, ...rest } = a; return rest;
-        });
-        this.saveAnnotations();
+        const { validated_by, ...updated } = annot;
+        this.annotations = this.annotations.map(a => a.id === annot.id ? updated : a);
+        this.saveAnnotation(updated);
       },
 
       toggleInsertMode() { this.insertMode = !this.insertMode; if (this.insertMode) this.refineMode = false; },
@@ -501,8 +508,18 @@ export function createEditorApp(config) {
         if (e.key === 'Enter' && e.ctrlKey && this.selectedAnnotationId) {
           const annot = this.annotations.find(a => a.id === this.selectedAnnotationId);
           if (annot && !annot.validated_by) {
-            document.activeElement?.blur();
-            this.validateAnnotation(annot);
+            // Read the current DOM value (user may have typed without blurring) and
+            // fold it into the annotation before validating — one PUT instead of three.
+            const activeEl = document.activeElement;
+            let base = annot;
+            if (activeEl?.classList.contains('annot-target') && annot.body?.[0]) {
+              const domValue = activeEl.value;
+              if (domValue !== (annot.body[0].value ?? '')) {
+                base = { ...annot, resp_id: CURRENT_USER_ID, body: [{ ...annot.body[0], value: domValue }] };
+                this.annotations = this.annotations.map(a => a.id !== annot.id ? a : base);
+              }
+            }
+            this.validateAnnotation(base);
             e.preventDefault();
             this.$nextTick(() => {
               const sorted = this.allAnnotationsSorted;
@@ -540,6 +557,29 @@ export function createEditorApp(config) {
         await this.saveAnnotations();
       },
 
+      async saveAnnotation(annot) {
+        try {
+          const r = await fetch(urls.saveAnnotation.replace('__ANN_ID__', annot.id), {
+            method: 'PUT', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(annot),
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          this.saveError = false;
+        } catch {
+          this.saveError = true;
+        }
+      },
+      async deleteAnnotation(annot) {
+        try {
+          const r = await fetch(urls.deleteAnnotation.replace('__ANN_ID__', annot.id), {
+            method: 'DELETE',
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          this.saveError = false;
+        } catch {
+          this.saveError = true;
+        }
+      },
       async saveAnnotations() {
         try {
           const r = await fetch(urls.saveAnnotations, {
@@ -590,13 +630,16 @@ export function createEditorApp(config) {
         this.$nextTick(() => this.refocusFocusInput());
       },
       focusValidateAndAdvance() {
-        this.saveFocusEdit();
         const cur = this.focusCurrent; if (!cur) return;
-        this.annotations = this.annotations.map(a =>
-          a.id === cur.id ? { ...a, validated_by: CURRENT_USER_ID } : a
-        );
+        // Combine pending edit + validation into one PUT
+        let updated = cur;
+        if (cur.body?.[0] && getBodyValue(cur) !== this.focusEditValue) {
+          updated = { ...updated, resp_id: CURRENT_USER_ID, body: [{ ...cur.body[0], value: this.focusEditValue }] };
+        }
+        updated = { ...updated, validated_by: CURRENT_USER_ID };
+        this.annotations = this.annotations.map(a => a.id === cur.id ? updated : a);
         this.focusValidated = true;
-        this.saveAnnotations();
+        this.saveAnnotation(updated);
         this.$nextTick(() => {
           const n = this.focusAnnotations.length;
           this.focusValidated = false;
@@ -620,10 +663,9 @@ export function createEditorApp(config) {
       saveFocusEdit() {
         const cur = this.focusCurrent;
         if (!cur || !cur.body?.[0] || getBodyValue(cur) === this.focusEditValue) return;
-        this.annotations = this.annotations.map(a =>
-          a.id !== cur.id ? a : { ...a, resp_id: CURRENT_USER_ID, body: [{ ...a.body[0], value: this.focusEditValue }] }
-        );
-        this.saveAnnotations();
+        const updated = { ...cur, resp_id: CURRENT_USER_ID, body: [{ ...cur.body[0], value: this.focusEditValue }] };
+        this.annotations = this.annotations.map(a => a.id !== cur.id ? a : updated);
+        this.saveAnnotation(updated);
       },
       refocusFocusInput() {
         this.$nextTick(() => {

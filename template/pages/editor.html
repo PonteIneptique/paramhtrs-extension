@@ -963,11 +963,13 @@ window.__EDITOR_CONFIG__ = {
   pageStatus:    {{ page.status|tojson }},
   currentUserId: {{ current_user.id }},
   urls: {
-    saveAnnotations: {{ url_for('bp_norm.api_page_save_annotations', page_id=page.id)|tojson }},
-    pageStatus:      {{ url_for('bp_page.api_page_status',           page_id=page.id)|tojson }},
-    addWork:         {{ url_for('bp_page.api_page_add_work',         page_id=page.id)|tojson }},
-    removeWork:      {{ url_for('bp_page.api_page_remove_work',      page_id=page.id, work_id=0)|tojson }}.replace('/0', '/__WORK_ID__'),
-    deleteLine:      {{ url_for('bp_norm.line_delete',               line_id=0)|tojson }}.replace('/0/', '/__LINE_ID__/'),
+    saveAnnotations:  {{ url_for('bp_norm.api_page_save_annotations',  page_id=page.id)|tojson }},
+    saveAnnotation:   {{ url_for('bp_norm.api_page_save_annotation',   page_id=page.id, annotation_id='__ANN_ID__')|tojson }},
+    deleteAnnotation: {{ url_for('bp_norm.api_page_delete_annotation', page_id=page.id, annotation_id='__ANN_ID__')|tojson }},
+    pageStatus:       {{ url_for('bp_page.api_page_status',            page_id=page.id)|tojson }},
+    addWork:          {{ url_for('bp_page.api_page_add_work',          page_id=page.id)|tojson }},
+    removeWork:       {{ url_for('bp_page.api_page_remove_work',       page_id=page.id, work_id=0)|tojson }}.replace('/0', '/__WORK_ID__'),
+    deleteLine:       {{ url_for('bp_norm.line_delete',                line_id=0)|tojson }}.replace('/0/', '/__LINE_ID__/'),
   },
 };
 </script>

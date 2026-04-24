@@ -5,7 +5,7 @@ import re
 from flask import Blueprint, render_template, request, jsonify, abort, Response, stream_with_context
 from flask_login import login_required, current_user
 
-from .models import db, Line, Page
+from .models import db, Line, Page, Annotation
 from .bp_auth import requires_access
 
 bp_norm = Blueprint(
@@ -163,16 +163,39 @@ def _enforce_max_bytes(chunks: list[str], max_bytes: int) -> list[str]:
 
 
 # -------------------------
-# Save annotations on a page (auto-save, replaces all annotations)
+# Single-annotation upsert (hot path: validate, edit, create)
+# -------------------------
+
+@bp_norm.route("/api/pages/<int:page_id>/annotations/<annotation_id>", methods=["PUT"])
+@requires_access(Page, 'page_id')
+def api_page_save_annotation(page: Page, annotation_id: str):
+    data = request.json
+    if not data or data.get("id") != annotation_id:
+        abort(400)
+    Annotation.upsert_from_dict(page.id, data)
+    db.session.commit()
+    return jsonify({"status": "ok"})
+
+
+@bp_norm.route("/api/pages/<int:page_id>/annotations/<annotation_id>", methods=["DELETE"])
+@requires_access(Page, 'page_id')
+def api_page_delete_annotation(page: Page, annotation_id: str):
+    Annotation.query.filter_by(id=annotation_id, page_id=page.id).delete()
+    db.session.commit()
+    return jsonify({"status": "ok"})
+
+
+# -------------------------
+# Bulk replace — kept for structural operations (line deletion, clear pending)
 # -------------------------
 
 @bp_norm.route("/api/pages/<int:page_id>/annotations", methods=["PUT"])
 @requires_access(Page, 'page_id')
 def api_page_save_annotations(page: Page):
     data = request.json
-    page.annotations = data.get("annotations", [])
+    page.set_annotations(data.get("annotations", []))
     db.session.commit()
-    return jsonify({"status": "ok", "normalized_text": page.normalized_text})
+    return jsonify({"status": "ok"})
 
 
 # -------------------------

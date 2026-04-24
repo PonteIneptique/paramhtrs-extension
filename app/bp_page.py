@@ -35,8 +35,7 @@ def page_create():
         max_order = db.session.query(func.max(Page.order)).filter_by(document_id=document_id).scalar()
         next_order = (max_order or 0) + 1
 
-        page = Page(document_id=document_id, label=label, order=next_order, status="pending",
-                    annotations=[])
+        page = Page(document_id=document_id, label=label, order=next_order, status="pending")
         db.session.add(page)
         db.session.flush()
 
@@ -60,15 +59,11 @@ def page_create():
         separator = data.get("separator", "\n")
         full_reg = (data.get("full_reg") or "").strip()
         if chunks:
-            # Prefer per-chunk alignment: each chunk was produced by the model
-            # from its own excerpt, so the DP sub-problems are smaller and
-            # better scoped.
-            page.annotations = align_to_annotations_from_chunks(chunks, separator=separator)
+            page.set_annotations(align_to_annotations_from_chunks(chunks, separator=separator))
         elif full_reg:
             full_text = "\n".join(orig_lines)
-            page.annotations = align_to_annotations(full_text, full_reg)
-        else:
-            page.annotations = []
+            page.set_annotations(align_to_annotations(full_text, full_reg))
+        # else: no annotations — leave empty
         db.session.commit()
         return jsonify({
             "status": "ok",
