@@ -10,6 +10,10 @@ import {
 // Module-level pending annotation (raw W3C object, not reactive)
 let pendingAnnotRaw = null;
 
+function _textParts(str) {
+  return str.split('\n').map((t, i, a) => ({ text: t, br: i < a.length - 1 }));
+}
+
 export function createEditorApp(config) {
   const CURRENT_USER_ID = config.currentUserId;
   const urls = config.urls;
@@ -36,6 +40,10 @@ export function createEditorApp(config) {
         bulkCandidates:      [],
         bulkChecked:         {},
         showAnnotContext:     false,
+        focusMode:           false,
+        focusAnnotIndex:     0,
+        focusEditValue:      '',
+        focusValidated:      false,
       };
     },
 
@@ -61,6 +69,74 @@ export function createEditorApp(config) {
           this.selectedAnnotationId,
           this.normalizedPositions,
         );
+      },
+
+      focusAnnotations() {
+        return this.pendingAnnotationsSorted.filter(
+          a => !isInsertion(a) && !isAtrNoise(a)
+        );
+      },
+      focusCurrent() {
+        if (!this.focusAnnotations.length) return null;
+        return this.focusAnnotations[Math.min(this.focusAnnotIndex, this.focusAnnotations.length - 1)];
+      },
+      focusWindowSegs() {
+        if (!this.focusCurrent) return [];
+        const text      = this.fullText;
+        const focusAnns = this.focusAnnotations;
+        const allAnns   = this.allAnnotationsSorted;
+        const cur       = this.focusCurrent;
+        const wS        = Math.max(0, getStart(cur) - 500);
+        const wE        = Math.min(text.length, getEnd(cur) + 500);
+        const inW       = allAnns.filter(a => getStart(a) >= wS && getEnd(a) <= wE);
+        const segs = []; let pos = wS;
+        for (const a of inW) {
+          const s = getStart(a), e = getEnd(a);
+          if (s > pos) segs.push({ type:'t', parts: _textParts(text.slice(pos, s)) });
+          const focusIdx   = focusAnns.indexOf(a);
+          const isNavigable = focusIdx >= 0;
+          segs.push({ type:'a', annId:a.id, isCurrent: a.id===cur.id, isNavigable,
+                      abbr: getExact(a), norm: getBodyValue(a),
+                      annIdx: isNavigable ? focusIdx : -1 });
+          pos = e;
+        }
+        if (pos < wE) segs.push({ type:'t', parts: _textParts(text.slice(pos, wE)) });
+        if (segs[0]?.type === 't' && segs[0].parts.length)
+          segs[0].parts[0].text = segs[0].parts[0].text.replace(/^\s+/, '');
+        return segs;
+      },
+      focusAnnData() {
+        if (!this.focusCurrent) return { left:[], right:[] };
+        const text = this.fullText;
+        const anns = this.focusAnnotations;
+        const cur  = this.focusCurrent;
+        const MAXD = 10;
+        const wS   = Math.max(0, getStart(cur) - 180);
+        const wE   = Math.min(text.length, getEnd(cur) + 180);
+        const inW  = anns.filter(a => getStart(a) >= wS && getEnd(a) <= wE);
+        const segs = []; let pos = wS;
+        for (const a of inW) {
+          const s = getStart(a), e = getEnd(a);
+          if (s > pos) {
+            const d = text.slice(pos, s).replace(/\n+/g,' ↵ ').trim();
+            if (d) segs.push({ type:'t', display: d });
+          }
+          segs.push({ type:'a', annId:a.id, isCurrent:a.id===cur.id,
+                      abbr:getExact(a), norm:getBodyValue(a), annIdx:anns.indexOf(a) });
+          pos = e;
+        }
+        if (pos < wE) {
+          const d = text.slice(pos, wE).replace(/\n+/g,' ↵ ').trim();
+          if (d) segs.push({ type:'t', display: d });
+        }
+        const ci = segs.findIndex(s => s.type==='a' && s.isCurrent);
+        const _fade = (s, d) => {
+          const f = Math.max(0.18, Math.pow(Math.max(0, 1 - d/MAXD), 1.3) * (s.type==='a'? 0.78:0.72));
+          return { ...s, opacity: f };
+        };
+        let n=0; const left  = [...segs.slice(0, ci)].reverse().map(s => { if(s.type==='a') n++; return _fade(s,n); }).reverse();
+        n=0;     const right = segs.slice(ci+1).map(s => { if(s.type==='a') n++; return _fade(s,n); });
+        return { left, right };
       },
     },
 
@@ -406,6 +482,16 @@ export function createEditorApp(config) {
       },
 
       _handleKeydown(e) {
+        if (this.focusMode) {
+          if (e.key === 'Escape') { this.exitFocusMode(); e.preventDefault(); }
+          const inp = this.$refs.focusModeInput;
+          const inpEl = inp && (Array.isArray(inp) ? inp[0] : inp);
+          if (document.activeElement !== inpEl) {
+            if (e.key === 'ArrowRight') { this.focusNavigate(1);  e.preventDefault(); }
+            if (e.key === 'ArrowLeft')  { this.focusNavigate(-1); e.preventDefault(); }
+          }
+          return;
+        }
         if (e.key === 'Escape' && this.pendingAnnot) { this.cancelPending(); e.preventDefault(); return; }
         if (e.key === 'Enter' && e.ctrlKey && this.bulkCandidates.length > 0) {
           e.preventDefault();
@@ -471,6 +557,79 @@ export function createEditorApp(config) {
         await fetch(urls.pageStatus, {
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ status }),
+        });
+      },
+
+      // ── Focus Mode ────────────────────────────────────────────────────────────
+      enterFocusMode() {
+        if (!this.focusAnnotations.length) return;
+        const selIdx = this.selectedAnnotationId
+          ? this.focusAnnotations.findIndex(a => a.id === this.selectedAnnotationId)
+          : -1;
+        this.focusAnnotIndex = selIdx >= 0 ? selIdx : 0;
+        this.focusEditValue  = getBodyValue(this.focusCurrent) ?? '';
+        this.focusMode = true;
+        this.$nextTick(() => this.refocusFocusInput());
+      },
+      exitFocusMode() {
+        this.saveFocusEdit();
+        this.focusMode = false;
+      },
+      focusNavigate(delta) {
+        this.saveFocusEdit();
+        const n = this.focusAnnotations.length;
+        if (!n) return;
+        this.focusAnnotIndex = (this.focusAnnotIndex + delta + n) % n;
+        this.focusEditValue  = getBodyValue(this.focusCurrent) ?? '';
+        this.$nextTick(() => this.refocusFocusInput());
+      },
+      focusJump(idx) {
+        this.saveFocusEdit();
+        this.focusAnnotIndex = idx;
+        this.focusEditValue  = getBodyValue(this.focusCurrent) ?? '';
+        this.$nextTick(() => this.refocusFocusInput());
+      },
+      focusValidateAndAdvance() {
+        this.saveFocusEdit();
+        const cur = this.focusCurrent; if (!cur) return;
+        this.annotations = this.annotations.map(a =>
+          a.id === cur.id ? { ...a, validated_by: CURRENT_USER_ID } : a
+        );
+        this.focusValidated = true;
+        this.saveAnnotations();
+        this.$nextTick(() => {
+          const n = this.focusAnnotations.length;
+          this.focusValidated = false;
+          if (!n) { this.exitFocusMode(); return; }
+          this.focusAnnotIndex = Math.min(this.focusAnnotIndex, n - 1);
+          this.focusEditValue  = getBodyValue(this.focusCurrent) ?? '';
+          this.refocusFocusInput();
+        });
+      },
+      focusDelete() {
+        const cur = this.focusCurrent; if (!cur) return;
+        this.removeAnnotation(cur);
+        this.$nextTick(() => {
+          const n = this.focusAnnotations.length;
+          if (!n) { this.exitFocusMode(); return; }
+          this.focusAnnotIndex = Math.min(this.focusAnnotIndex, n - 1);
+          this.focusEditValue  = getBodyValue(this.focusCurrent) ?? '';
+          this.refocusFocusInput();
+        });
+      },
+      saveFocusEdit() {
+        const cur = this.focusCurrent;
+        if (!cur || !cur.body?.[0] || getBodyValue(cur) === this.focusEditValue) return;
+        this.annotations = this.annotations.map(a =>
+          a.id !== cur.id ? a : { ...a, resp_id: CURRENT_USER_ID, body: [{ ...a.body[0], value: this.focusEditValue }] }
+        );
+        this.saveAnnotations();
+      },
+      refocusFocusInput() {
+        this.$nextTick(() => {
+          const inp = this.$refs.focusModeInput;
+          const el  = Array.isArray(inp) ? inp[0] : inp;
+          el?.focus(); el?.select();
         });
       },
     },
