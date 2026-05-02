@@ -9,5 +9,6 @@ torch==2.9.1+cpu
 transformers==4.57.3
 saxonche==12.9.0
 flask-login==0.6.3
+Flask-Migrate>=4.0
 rapidfuzz
 python-dotenv

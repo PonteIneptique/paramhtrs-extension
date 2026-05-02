@@ -127,6 +127,11 @@ body { overflow: hidden; }
   color: #842029;
   border-bottom-color: #dc3545;
 }
+#page-source mark.r6o-nonresolv-abbr {
+  background: rgba(121, 82, 179, 0.15);
+  border-bottom: 2px dashed #7952b3;
+  color: #3d1c86;
+}
 .line-mgmt-row {
   display: flex;
   align-items: center;
@@ -199,6 +204,17 @@ body { overflow: hidden; }
   flex-shrink: 0;
   cursor: default;
 }
+.annot-nonresolv-chip {
+  font-size: .7rem;
+  font-weight: bold;
+  background: #7952b3;
+  color: #fff;
+  border-radius: 3px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: default;
+}
 .annot-arrow { color: #adb5bd; flex-shrink: 0; padding: 0 2px; }
 .annot-target {
   font-family: 'JunicodeVF', serif;
@@ -253,6 +269,10 @@ body { overflow: hidden; }
   background: rgba(220, 53, 69, 0.10);
   border-bottom-color: #dc3545;
   opacity: 0.8;
+}
+.normalized-text mark.norm-nonresolv-abbr {
+  background: rgba(121, 82, 179, 0.12);
+  border-bottom: 1px dashed #7952b3;
 }
 
 /* ── Status badge ── */
@@ -387,6 +407,14 @@ body { overflow: hidden; }
                  white-space: nowrap; display: block; }
 /* active input */
 .fm-active-abbr { font-style: italic; opacity: .88; }
+.fm-type-chip {
+  font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 600;
+  border-radius: 4px; padding: 3px 10px; white-space: nowrap;
+  height: 37.8px; line-height: 37.8px; display: block; text-align: center;
+  min-width: 80px;
+}
+.fm-type-noise    { background: #ffe0e0; color: #b71c1c; border: 1.5px solid #ef9a9a; }
+.fm-type-nonresolv { background: #ede7f6; color: #4527a0; border: 1.5px solid #b39ddb; }
 .fm-norm-input {
   font-family: 'JunicodeVF', serif; font-size: 28px; font-weight: 500;
   height: 37.8px; line-height: 33px; color: oklch(13% 0.018 60);
@@ -425,6 +453,51 @@ body { overflow: hidden; }
   font-size: 9px; border: 1px solid oklch(38% 0.01 70); color: oklch(72% 0.01 75);
   font-family: 'Inter', sans-serif;
 }
+/* ── Unclear dropdown ── */
+.unclear-wrap { position: relative; display: inline-flex; }
+.unclear-btn {
+  background: #fff; border: 1px solid #dee2e6; border-radius: 4px;
+  cursor: pointer; font-size: .7em; padding: 2px 8px; white-space: nowrap;
+  color: #495057; display: flex; align-items: center; gap: 4px;
+  font-family: 'Inter', sans-serif;
+}
+.unclear-btn:hover { background: #f8f9fa; border-color: #adb5bd; }
+.unclear-menu {
+  position: absolute; top: calc(100% + 3px); right: 0;
+  background: #fff; border: 1px solid #dee2e6; border-radius: 5px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.12);
+  min-width: 220px; z-index: 200; overflow: hidden;
+}
+.unclear-item {
+  display: block; width: 100%; text-align: left; background: none; border: none;
+  padding: 6px 12px; font-size: .75em; cursor: pointer; color: #212529;
+  font-family: 'Inter', sans-serif; white-space: nowrap;
+}
+.unclear-item:hover { background: #f8f9fa; }
+.unclear-item.is-noise { color: #dc3545; }
+/* Focus-mode unclear button */
+.fm-unclear-btn {
+  background: #7952b3; border: 1px solid #6741a5;
+  border-radius: 5px; cursor: pointer; font-size: 11px; padding: 4px 12px;
+  white-space: nowrap; color: #fff;
+  display: flex; align-items: center; gap: 5px; font-family: 'Inter', sans-serif;
+  transition: background .15s;
+}
+.fm-unclear-btn:hover { background: #6741a5; }
+/* Teleported fixed menu */
+.fm-unclear-menu-fixed {
+  position: fixed;
+  background: #fff; border: 1px solid #dee2e6; border-radius: 5px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.18);
+  min-width: 230px; z-index: 9999; overflow: hidden;
+}
+.fm-unclear-item {
+  display: block; width: 100%; text-align: left; background: none; border: none;
+  padding: 7px 14px; font-size: 12px; cursor: pointer; color: #212529;
+  font-family: 'Inter', sans-serif; white-space: nowrap;
+}
+.fm-unclear-item:hover { background: #f8f9fa; }
+.fm-unclear-item.is-noise { color: #dc3545; }
 </style>
 {% endblock %}
 
@@ -602,6 +675,7 @@ body { overflow: hidden; }
             <span v-if="showAnnotContext && getSuffix(annot)" class="annot-ctx annot-ctx-suf" :title="getSuffix(annot)">[[ getSuffix(annot).slice(0,6) ]]</span>
             <span class="annot-arrow">→</span>
             <span v-if="isAtrNoise(annot)" class="annot-atr-chip">[ATR NOISE]</span>
+            <span v-else-if="isNonResolvAbbr(annot)" class="annot-nonresolv-chip">[N/R: [[ getNonResolvReason(annot) ]]]</span>
             <span v-else-if="!getBodyValue(annot)" class="annot-del-chip">deleted</span>
             <span v-else-if="isInsertion(annot) && !getBodyValue(annot).trim()" class="annot-orig-sp">[SPACE]</span>
             <span v-else-if="isInsertion(annot)" class="annot-ins-chip">[[ getBodyValue(annot) ]]</span>
@@ -619,21 +693,47 @@ body { overflow: hidden; }
       </template>
 
       <!-- Pending new annotation (always shown) -->
-      <div v-if="pendingAnnot" class="annot-row annot-pending">
-        <span v-if="isInsertionExact(pendingAnnot)" class="annot-ins-chip" title="insertion">[+]</span>
-        <span v-else-if="!pendingAnnot.exact.trim()" class="annot-orig-sp" title="space">[SPACE]</span>
-        <span v-else class="annot-orig" :title="pendingAnnot.exact">[[ pendingAnnot.exact ]]</span>
-        <span class="annot-arrow">→</span>
-        <input type="text" class="annot-target" ref="pendingInput"
-          @keydown.enter.prevent="commitPending($event.target.value)"
-          @keydown.esc="cancelPending"
-          @blur="commitPending($event.target.value)">
-        <button v-if="!pendingAnnot?.isIns"
-                class="btn btn-sm btn-danger py-0 px-1" style="font-size:.7em; white-space:nowrap; flex-shrink:0;"
-                @mousedown.prevent="markAtrNoise()" title="Mark as ATR noise">
-          ATR NOISE
-        </button>
-        <button class="annot-del" @click="cancelPending" title="Cancel">✕</button>
+      <div v-if="pendingAnnot" class="annot-row annot-pending" style="flex-direction:column; align-items:stretch; gap:4px;">
+        <!-- Row 1: orig → input + cancel -->
+        <div style="display:flex; align-items:center; gap:4px;">
+          <span v-if="isInsertionExact(pendingAnnot)" class="annot-ins-chip" title="insertion">[+]</span>
+          <span v-else-if="!pendingAnnot.exact.trim()" class="annot-orig-sp" title="space">[SPACE]</span>
+          <span v-else class="annot-orig" :title="pendingAnnot.exact">[[ pendingAnnot.exact ]]</span>
+          <span class="annot-arrow">→</span>
+          <input type="text" class="annot-target" ref="pendingInput"
+            placeholder="Normalized form"
+            title="Leave empty to treat as a deletion [e.g. space deletion]"
+            @keydown.enter.prevent="commitPending($event.target.value)"
+            @keydown.esc="cancelPending"
+            @blur="onPendingBlur($event)">
+          <button class="annot-del" @mousedown.prevent="cancelPending" title="Cancel">✕</button>
+        </div>
+        <!-- Row 2: unclear dropdown, right-aligned -->
+        <div v-if="!pendingAnnot?.isIns" style="display:flex; justify-content:flex-end;">
+          <div class="unclear-wrap">
+            <button class="unclear-btn" @mousedown.prevent="pendingUnclearOpen = !pendingUnclearOpen"
+                    title="Mark as unclear">
+              Mark as unclear <span style="font-size:.8em; opacity:.7;">▾</span>
+            </button>
+            <div v-if="pendingUnclearOpen" class="unclear-menu">
+              <button class="unclear-item is-noise" @mousedown.prevent="markAtrNoise()">
+                Mark as ATR Noise
+              </button>
+              <button class="unclear-item" @mousedown.prevent="markNonResolvAbbr('persName')">
+                Ambiguous person name
+              </button>
+              <button class="unclear-item" @mousedown.prevent="markNonResolvAbbr('orgName')">
+                Ambiguous organisation name
+              </button>
+              <button class="unclear-item" @mousedown.prevent="markNonResolvAbbr('placeName')">
+                Ambiguous place name
+              </button>
+              <button class="unclear-item" @mousedown.prevent="markNonResolvAbbr('other')">
+                Other ambiguous abbreviation
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div v-if="annotFilter==='pending' && !pendingAnnotationsSorted.length && !pendingAnnot"
@@ -656,7 +756,9 @@ body { overflow: hidden; }
             <span v-else class="annot-orig" :title="getExact(annot)">[[ getExact(annot) ]]</span>
             <span v-if="showAnnotContext && getSuffix(annot)" class="annot-ctx annot-ctx-suf" :title="getSuffix(annot)">[[ getSuffix(annot).slice(0,6) ]]</span>
             <span class="annot-arrow">→</span>
-            <span v-if="!getBodyValue(annot)" class="annot-del-chip">deleted</span>
+            <span v-if="isAtrNoise(annot)" class="annot-atr-chip">[ATR NOISE]</span>
+            <span v-else-if="isNonResolvAbbr(annot)" class="annot-nonresolv-chip">[N/R: [[ getNonResolvReason(annot) ]]]</span>
+            <span v-else-if="!getBodyValue(annot)" class="annot-del-chip">deleted</span>
             <span v-else-if="isInsertion(annot) && !getBodyValue(annot).trim()" class="annot-orig-sp">[SPACE]</span>
             <span v-else-if="isInsertion(annot)" class="annot-ins-chip">[[ getBodyValue(annot) ]]</span>
             <input v-else type="text" class="annot-target"
@@ -718,6 +820,7 @@ body { overflow: hidden; }
               --><span class="text-muted fst-italic" style="font-family:'JunicodeVF',serif">[[ getSuffix(a) ]]</span>
               <span class="mx-1">&rarr;</span>
               <span v-if="isAtrNoise(a)" class="annot-atr-chip">[ATR NOISE]</span>
+              <span v-else-if="isNonResolvAbbr(a)" class="annot-nonresolv-chip">[N/R: [[ getNonResolvReason(a) ]]]</span>
               <span v-else-if="!getBodyValue(a)" class="annot-del-chip">deleted</span>
               <span v-else-if="!getBodyValue(a).trim()" class="annot-orig-sp">[SPACE]</span>
               <strong v-else style="font-family:'JunicodeVF',serif">[[ getBodyValue(a) ]]</strong>
@@ -812,21 +915,52 @@ body { overflow: hidden; }
           <div class="fm-active-wrap" v-if="focusCurrent">
             <span class="fm-token">
               <span class="fm-tok-abbr fm-active-abbr">[[ getExact(focusCurrent) ]]</span>
-              <input ref="focusModeInput" :class="['fm-norm-input', focusValidated ? 'fm-validated' : '']"
+              <span v-if="isAtrNoise(focusCurrent)" class="fm-type-chip fm-type-noise">ATR Noise</span>
+              <span v-else-if="isNonResolvAbbr(focusCurrent)" class="fm-type-chip fm-type-nonresolv">
+                [[ getNonResolvReason(focusCurrent) ]]
+              </span>
+              <input v-else ref="focusModeInput" :class="['fm-norm-input', focusValidated ? 'fm-validated' : '']"
                      v-model="focusEditValue"
                      :style="{ width: Math.max(5, focusEditValue.length + 2) + 'ch' }"
+                     placeholder="Normalized form"
+                     title="Leave empty to treat as a deletion [e.g. space deletion]"
                      @keydown.tab.prevent="focusNavigate($event.shiftKey ? -1 : 1)"
                      @keydown.enter.exact.prevent="focusValidateAndAdvance"
                      @keydown.esc.prevent="exitFocusMode"
                      @blur="saveFocusEdit">
             </span>
-            <button class="fm-del-btn" @click.stop="focusDelete" tabindex="-1">
-              <svg width="10" height="10" viewBox="0 0 14 14" fill="none">
-                <path d="M2 3.5h10M5.5 3.5V2.5a.5.5 0 01.5-.5h2a.5.5 0 01.5.5v1M5 3.5l.5 8M9 3.5l-.5 8M7 3.5v8"
-                      stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              Delete
-            </button>
+            <div style="display:flex; align-items:center; justify-content:center; gap:8px;">
+              <button class="fm-del-btn" @click.stop="focusDelete" tabindex="-1">
+                <svg width="10" height="10" viewBox="0 0 14 14" fill="none">
+                  <path d="M2 3.5h10M5.5 3.5V2.5a.5.5 0 01.5-.5h2a.5.5 0 01.5.5v1M5 3.5l.5 8M9 3.5l-.5 8M7 3.5v8"
+                        stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                Delete
+              </button>
+              <button class="fm-unclear-btn" @click.stop="e => { const r = e.currentTarget.getBoundingClientRect(); focusMenuPos = { top: r.top - 4, left: r.left + r.width/2 }; focusUnclearOpen = !focusUnclearOpen; }" tabindex="-1">
+                ? Unclear <span style="font-size:.75em; opacity:.85;">▾</span>
+              </button>
+              <Teleport to="body">
+                <div v-if="focusUnclearOpen" class="fm-unclear-menu-fixed"
+                     :style="{ top: focusMenuPos.top + 'px', left: focusMenuPos.left + 'px', transform: 'translate(-50%, -100%)' }">
+                  <button class="fm-unclear-item is-noise" @click.stop="focusMarkAtrNoise()">
+                    Mark as ATR Noise
+                  </button>
+                  <button class="fm-unclear-item" @click.stop="focusMarkNonResolvAbbr('persName')">
+                    Ambiguous person name
+                  </button>
+                  <button class="fm-unclear-item" @click.stop="focusMarkNonResolvAbbr('orgName')">
+                    Ambiguous organisation name
+                  </button>
+                  <button class="fm-unclear-item" @click.stop="focusMarkNonResolvAbbr('placeName')">
+                    Ambiguous place name
+                  </button>
+                  <button class="fm-unclear-item" @click.stop="focusMarkNonResolvAbbr('other')">
+                    Other ambiguous abbreviation
+                  </button>
+                </div>
+              </Teleport>
+            </div>
           </div>
 
           <!-- right neighbours -->

@@ -23,7 +23,9 @@ app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'jfbqh2brbsefonp12294810i23hr
 app.config['SESSION_COOKIE_NAME'] = os.getenv('SESSION_COOKIE_NAME', 'paramhtr_session')
 
 from .models import db, db_cli
+from flask_migrate import Migrate
 db.init_app(app)
+migrate = Migrate(app, db)
 app.cli.add_command(db_cli)
 
 

@@ -1,10 +1,12 @@
 import { describe, test, expect } from '@jest/globals';
 import {
   getSelector, getStart, getEnd, getExact, getPrefix, getSuffix, getBodyValue,
-  isInsertion, isAtrNoise, isSpaceExact,
+  isInsertion, isAtrNoise, isNonResolvAbbr, getNonResolvReason, isSpaceExact,
   escapeHtml, applyAnnotations,
   buildSourceHtml, computeNormalizedPositions, buildNormalizedPageHtml,
   findSimilarAnnotations,
+  findSimilarByExact,
+  resolveAnnotationBounds,
 } from '../../static/js/editor-utils.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -23,6 +25,12 @@ function makeAnnot({ id = 'a1', start = 0, end = 3, exact = 'foo', prefix = '', 
     },
   };
   if (validated_by !== undefined) a.validated_by = validated_by;
+  return a;
+}
+
+function makeNonResolvAnnot({ id = 'nr1', start = 0, end = 3, exact = 'foo', reason = 'other' } = {}) {
+  const a = makeAnnot({ id, start, end, exact, value: exact, purpose: 'non_resolv_abbr' });
+  a.body[0].reason = reason;
   return a;
 }
 
@@ -342,5 +350,197 @@ describe('findSimilarAnnotations', () => {
     const target = makeAnnot({ id: 't', exact: 'foo', value: 'bar' });
     const other  = makeAnnot({ id: 'o', exact: 'abc', value: 'xyz' });
     expect(findSimilarAnnotations([target, other], target)).toHaveLength(0);
+  });
+});
+
+// ── findSimilarByExact ────────────────────────────────────────────────────────
+
+describe('findSimilarByExact', () => {
+  test('finds unvalidated annotations with same exact text, regardless of value', () => {
+    const target  = makeAnnot({ id: 't', exact: 'foo', value: 'bar' });
+    const sameVal = makeAnnot({ id: 's1', exact: 'foo', value: 'bar' });
+    const diffVal = makeAnnot({ id: 's2', exact: 'foo', value: 'baz' });
+    const result = findSimilarByExact([target, sameVal, diffVal], target);
+    expect(result).toHaveLength(2);
+    expect(result.map(a => a.id)).toEqual(expect.arrayContaining(['s1', 's2']));
+  });
+
+  test('excludes the target annotation itself', () => {
+    const target = makeAnnot({ id: 't', exact: 'foo' });
+    expect(findSimilarByExact([target], target)).toHaveLength(0);
+  });
+
+  test('excludes already-validated annotations', () => {
+    const target    = makeAnnot({ id: 't',  exact: 'foo' });
+    const validated = makeAnnot({ id: 'v',  exact: 'foo', validated_by: 1 });
+    expect(findSimilarByExact([target, validated], target)).toHaveLength(0);
+  });
+
+  test('excludes insertion annotations from regular annotation matches', () => {
+    const target    = makeAnnot({ id: 't', exact: 'foo' });
+    const insertion = makeInsertion({ id: 'i' });
+    expect(findSimilarByExact([target, insertion], target)).toHaveLength(0);
+  });
+
+  test('excludes ATR noise annotations', () => {
+    const target  = makeAnnot({ id: 't', exact: 'foo' });
+    const atrNoise = makeAnnot({ id: 'n', exact: 'foo', purpose: 'atr_noise' });
+    expect(findSimilarByExact([target, atrNoise], target)).toHaveLength(0);
+  });
+
+  test('returns empty array when no matching exact text', () => {
+    const target = makeAnnot({ id: 't', exact: 'foo' });
+    const other  = makeAnnot({ id: 'o', exact: 'bar' });
+    expect(findSimilarByExact([target, other], target)).toHaveLength(0);
+  });
+
+  test('for insertion target: finds other insertions with same body value', () => {
+    const target = makeInsertion({ id: 't', pos: 5, value: ';' });
+    const same   = makeInsertion({ id: 's', pos: 20, value: ';' });
+    const diff   = makeInsertion({ id: 'd', pos: 30, value: '.' });
+    const result = findSimilarByExact([target, same, diff], target);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('s');
+  });
+
+  test('for insertion target: excludes validated insertions', () => {
+    const target    = makeInsertion({ id: 't', value: ';' });
+    const validated = { ...makeInsertion({ id: 'v', value: ';' }), validated_by: 1 };
+    expect(findSimilarByExact([target, validated], target)).toHaveLength(0);
+  });
+
+  test('for insertion target: does not match regular annotations', () => {
+    const target  = makeInsertion({ id: 't', value: 'foo' });
+    const regular = makeAnnot({ id: 'r', exact: 'foo' });
+    expect(findSimilarByExact([target, regular], target)).toHaveLength(0);
+  });
+
+  test('for insertion target: returns empty when value is whitespace', () => {
+    const target = makeInsertion({ id: 't', value: ' ' });
+    const other  = makeInsertion({ id: 'o', value: ' ' });
+    expect(findSimilarByExact([target, other], target)).toHaveLength(0);
+  });
+
+  test('for space-exact target: returns empty', () => {
+    const target = makeAnnot({ id: 't', exact: ' ', value: '' });
+    const other  = makeAnnot({ id: 'o', exact: ' ', value: '' });
+    expect(findSimilarByExact([target, other], target)).toHaveLength(0);
+  });
+
+  test('excludes non-resolv-abbr annotations', () => {
+    const target   = makeAnnot({ id: 't', exact: 'foo' });
+    const nonResolv = makeNonResolvAnnot({ id: 'nr', exact: 'foo' });
+    expect(findSimilarByExact([target, nonResolv], target)).toHaveLength(0);
+  });
+});
+
+// ── isNonResolvAbbr ───────────────────────────────────────────────────────────
+
+describe('isNonResolvAbbr', () => {
+  test('true when purpose is non_resolv_abbr', () => {
+    expect(isNonResolvAbbr(makeNonResolvAnnot())).toBe(true);
+  });
+
+  test('false for normalizing', () => {
+    expect(isNonResolvAbbr(makeAnnot())).toBe(false);
+  });
+
+  test('false for atr_noise', () => {
+    expect(isNonResolvAbbr(makeAnnot({ purpose: 'atr_noise' }))).toBe(false);
+  });
+
+  test('false for null', () => {
+    expect(isNonResolvAbbr(null)).toBe(false);
+  });
+});
+
+// ── getNonResolvReason ────────────────────────────────────────────────────────
+
+describe('getNonResolvReason', () => {
+  test('returns stored reason', () => {
+    expect(getNonResolvReason(makeNonResolvAnnot({ reason: 'persName' }))).toBe('persName');
+  });
+
+  test('returns orgName when set', () => {
+    expect(getNonResolvReason(makeNonResolvAnnot({ reason: 'orgName' }))).toBe('orgName');
+  });
+
+  test('defaults to "other" when reason field is absent', () => {
+    const a = makeAnnot({ purpose: 'non_resolv_abbr' });
+    expect(getNonResolvReason(a)).toBe('other');
+  });
+
+  test('defaults to "other" for null annotation', () => {
+    expect(getNonResolvReason(null)).toBe('other');
+  });
+});
+
+// ── isSpaceExact: non_resolv_abbr not confused for space ──────────────────────
+
+describe('isSpaceExact with non_resolv_abbr', () => {
+  test('false for non_resolv_abbr with space-only exact', () => {
+    const a = makeNonResolvAnnot({ exact: ' ' });
+    expect(isSpaceExact(a)).toBe(false);
+  });
+});
+
+// ── resolveAnnotationBounds ───────────────────────────────────────────────────
+
+describe('resolveAnnotationBounds', () => {
+  test('no existing annotations: returns original bounds', () => {
+    expect(resolveAnnotationBounds(0, 8, [])).toEqual({ start: 0, end: 8 });
+  });
+
+  test('non-overlapping annotation: returns original bounds', () => {
+    const existing = [makeAnnot({ id: 'a1', start: 10, end: 15 })];
+    expect(resolveAnnotationBounds(0, 8, existing)).toEqual({ start: 0, end: 8 });
+  });
+
+  test('overlap at end: trims end to existing start', () => {
+    const existing = [makeAnnot({ id: 'a1', start: 5, end: 10 })];
+    expect(resolveAnnotationBounds(0, 8, existing)).toEqual({ start: 0, end: 5 });
+  });
+
+  test('overlap at start: advances start to existing end', () => {
+    const existing = [makeAnnot({ id: 'a1', start: 0, end: 5 })];
+    expect(resolveAnnotationBounds(2, 8, existing)).toEqual({ start: 5, end: 8 });
+  });
+
+  test('fully covered by one annotation: returns null', () => {
+    const existing = [makeAnnot({ id: 'a1', start: 0, end: 10 })];
+    expect(resolveAnnotationBounds(2, 8, existing)).toBeNull();
+  });
+
+  test('selection starts exactly at existing start: returns null', () => {
+    const existing = [makeAnnot({ id: 'a1', start: 0, end: 5 })];
+    expect(resolveAnnotationBounds(0, 8, existing)).toBeNull();
+  });
+
+  test('selection ends exactly at existing end (no overlap): returns original', () => {
+    const existing = [makeAnnot({ id: 'a1', start: 5, end: 10 })];
+    expect(resolveAnnotationBounds(0, 5, existing)).toEqual({ start: 0, end: 5 });
+  });
+
+  test('zero-width insertion is ignored for overlap', () => {
+    const existing = [makeInsertion({ id: 'ins1', pos: 5 })];
+    expect(resolveAnnotationBounds(0, 8, existing)).toEqual({ start: 0, end: 8 });
+  });
+
+  test('multiple overlaps: stops at first encountered', () => {
+    const existing = [
+      makeAnnot({ id: 'a1', start: 3, end: 5 }),
+      makeAnnot({ id: 'a2', start: 6, end: 8 }),
+    ];
+    expect(resolveAnnotationBounds(0, 10, existing)).toEqual({ start: 0, end: 3 });
+  });
+
+  test('adjacent annotation before selection: returns original bounds', () => {
+    const existing = [makeAnnot({ id: 'a1', start: 0, end: 3 })];
+    expect(resolveAnnotationBounds(3, 8, existing)).toEqual({ start: 3, end: 8 });
+  });
+
+  test('adjacent annotation after selection: returns original bounds', () => {
+    const existing = [makeAnnot({ id: 'a1', start: 8, end: 12 })];
+    expect(resolveAnnotationBounds(3, 8, existing)).toEqual({ start: 3, end: 8 });
   });
 });

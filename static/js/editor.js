@@ -1,11 +1,12 @@
 import { createApp } from 'vue';
 import {
   getSelector, getStart, getEnd, getExact, getPrefix, getSuffix, getBodyValue,
-  isInsertion, isAtrNoise, isSpaceExact,
+  isInsertion, isAtrNoise, isNonResolvAbbr, getNonResolvReason, isSpaceExact,
   escapeHtml, applyAnnotations,
   buildSourceHtml, computeNormalizedPositions, buildNormalizedPageHtml,
   findSimilarAnnotations,
   findSimilarByExact,
+  resolveAnnotationBounds,
 } from './editor-utils.js';
 
 // Module-level pending annotation (raw W3C object, not reactive)
@@ -34,6 +35,9 @@ export function createEditorApp(config) {
         insertMode:          false,
         refineMode:          false,
         annotFilter:         'pending',
+        pendingUnclearOpen:  false,
+        focusUnclearOpen:    false,
+        focusMenuPos:        { top: 0, left: 0 },
         fontSize:            1,
         sourceWidth:         33,
         annotsWidth:         28,
@@ -74,9 +78,7 @@ export function createEditorApp(config) {
       },
 
       focusAnnotations() {
-        return this.pendingAnnotationsSorted.filter(
-          a => !isInsertion(a) && !isAtrNoise(a)
-        );
+        return this.pendingAnnotationsSorted.filter(a => !isInsertion(a));
       },
       focusCurrent() {
         if (!this.focusAnnotations.length) return null;
@@ -154,13 +156,22 @@ export function createEditorApp(config) {
       this._registerSourceListeners(el);
       this._registerNormalizedListeners(this.$refs.normalizedText);
       document.addEventListener('keydown', this._handleKeydown);
+      this._closeDropdowns = (e) => {
+        if (!e.target.closest('.unclear-wrap') && !e.target.closest('.fm-unclear-wrap')) {
+          this.pendingUnclearOpen = false;
+          this.focusUnclearOpen   = false;
+        }
+      };
+      document.addEventListener('click', this._closeDropdowns);
     },
     beforeUnmount() {
       document.removeEventListener('keydown', this._handleKeydown);
+      document.removeEventListener('click', this._closeDropdowns);
     },
 
     methods: {
-      getExact, getPrefix, getSuffix, getBodyValue, isInsertion, isAtrNoise, isSpaceExact,
+      getExact, getPrefix, getSuffix, getBodyValue,
+      isInsertion, isAtrNoise, isNonResolvAbbr, getNonResolvReason, isSpaceExact,
       isInsertionExact(stub) { return stub?.isIns === true; },
 
       // ── DOM event listeners on #page-source (registered ONCE at mount) ────────
@@ -215,17 +226,21 @@ export function createEditorApp(config) {
           const pr = document.createRange();
           pr.setStart(el, 0);
           pr.setEnd(range.startContainer, range.startOffset);
-          const start = pr.toString().length;
-          const end   = start + range.toString().length;
-          if (start === end) return;
+          const rawStart = pr.toString().length;
+          const rawEnd   = rawStart + range.toString().length;
+          if (rawStart === rawEnd) return;
 
-          const t      = this.fullText;
-          const exact  = t.slice(start, end);
-          const prefix = t.slice(Math.max(0, start - 10), start);
-          const suffix = t.slice(end, end + 10);
+          const t = this.fullText;
 
           if (this.refineMode && this.selectedAnnotationId) {
-            const tid = this.selectedAnnotationId;
+            const tid    = this.selectedAnnotationId;
+            const others = this.annotations.filter(a => a.id !== tid);
+            const bounds = resolveAnnotationBounds(rawStart, rawEnd, others);
+            if (!bounds) { sel.removeAllRanges(); return; }
+            const { start, end } = bounds;
+            const exact  = t.slice(start, end);
+            const prefix = t.slice(Math.max(0, start - 10), start);
+            const suffix = t.slice(end, end + 10);
             let updated;
             this.annotations = this.annotations.map(a => {
               if (a.id !== tid) return a;
@@ -240,6 +255,13 @@ export function createEditorApp(config) {
             sel.removeAllRanges();
             return;
           }
+
+          const bounds = resolveAnnotationBounds(rawStart, rawEnd, this.annotations);
+          if (!bounds) { sel.removeAllRanges(); return; }
+          const { start, end } = bounds;
+          const exact  = t.slice(start, end);
+          const prefix = t.slice(Math.max(0, start - 10), start);
+          const suffix = t.slice(end, end + 10);
 
           const id = crypto.randomUUID();
           pendingAnnotRaw = { id, type:'Annotation', body:[],
@@ -374,6 +396,7 @@ export function createEditorApp(config) {
       commitPending(value) {
         if (!pendingAnnotRaw) return;
         const annot = pendingAnnotRaw; pendingAnnotRaw = null; this.pendingAnnot = null;
+        this.pendingUnclearOpen = false;
         const posSel = getSelector(annot, 'TextPositionSelector');
         annot.body   = [{ type:'TextualBody', value: value ?? '',
                           purpose: posSel.start === posSel.end ? 'insertion' : 'normalizing' }];
@@ -382,7 +405,13 @@ export function createEditorApp(config) {
         this.saveAnnotation(annot);
       },
 
-      cancelPending() { pendingAnnotRaw = null; this.pendingAnnot = null; },
+      cancelPending() { pendingAnnotRaw = null; this.pendingAnnot = null; this.pendingUnclearOpen = false; },
+
+      onPendingBlur(evt) {
+        const row = evt.currentTarget.closest('.annot-pending');
+        if (row && row.contains(evt.relatedTarget)) return;
+        this.commitPending(evt.target.value);
+      },
 
       // ── Mark selection as ATR noise ───────────────────────────────────────────
       markAtrNoise() {
@@ -393,6 +422,44 @@ export function createEditorApp(config) {
         annot.resp_id = CURRENT_USER_ID;
         this.annotations = [...this.annotations, annot];
         this.saveAnnotation(annot);
+      },
+
+      // ── Mark selection as non-resolvable abbreviation ────────────────────────
+      markNonResolvAbbr(reason) {
+        if (!pendingAnnotRaw) return;
+        const annot = pendingAnnotRaw; pendingAnnotRaw = null; this.pendingAnnot = null;
+        this.pendingUnclearOpen = false;
+        const exact = getSelector(annot, 'TextQuoteSelector').exact ?? '';
+        annot.body = [{ type: 'TextualBody', value: exact, purpose: 'non_resolv_abbr', reason }];
+        annot.resp_id = CURRENT_USER_ID;
+        this.annotations = [...this.annotations, annot];
+        this.saveAnnotation(annot);
+      },
+
+      // ── Focus-mode: mark current annotation as ATR noise or non-resolv ────────
+      _focusMarkAs(bodyUpdates) {
+        const cur = this.focusCurrent; if (!cur) return;
+        this.focusUnclearOpen = false;
+        const updated = { ...cur, resp_id: CURRENT_USER_ID, body: [{ ...cur.body[0], ...bodyUpdates }] };
+        this.annotations = this.annotations.map(a => a.id === cur.id ? updated : a);
+        this.saveAnnotation(updated);
+        this.$nextTick(() => {
+          const n = this.focusAnnotations.length;
+          if (!n) { this.exitFocusMode(); return; }
+          this.focusAnnotIndex = Math.min(this.focusAnnotIndex, n - 1);
+          this.focusEditValue  = getBodyValue(this.focusCurrent) ?? '';
+          this.refocusFocusInput();
+        });
+      },
+      focusMarkAtrNoise() {
+        const cur = this.focusCurrent; if (!cur) return;
+        const exact = getExact(cur);
+        this._focusMarkAs({ value: exact, purpose: 'atr_noise' });
+      },
+      focusMarkNonResolvAbbr(reason) {
+        const cur = this.focusCurrent; if (!cur) return;
+        const exact = getExact(cur);
+        this._focusMarkAs({ value: exact, purpose: 'non_resolv_abbr', reason });
       },
 
       // ── Remove annotation ─────────────────────────────────────────────────────
@@ -520,6 +587,8 @@ export function createEditorApp(config) {
           if (document.activeElement !== inpEl) {
             if (e.key === 'ArrowRight') { this.focusNavigate(1);  e.preventDefault(); }
             if (e.key === 'ArrowLeft')  { this.focusNavigate(-1); e.preventDefault(); }
+            if (e.key === 'Tab')        { this.focusNavigate(e.shiftKey ? -1 : 1); e.preventDefault(); }
+            if (e.key === 'Enter' && !e.ctrlKey) { this.focusValidateAndAdvance(); e.preventDefault(); }
           }
           return;
         }
@@ -639,8 +708,10 @@ export function createEditorApp(config) {
       exitFocusMode() {
         this.saveFocusEdit();
         this.focusMode = false;
+        this.focusUnclearOpen = false;
       },
       focusNavigate(delta) {
+        this.focusUnclearOpen = false;
         this.saveFocusEdit();
         const n = this.focusAnnotations.length;
         if (!n) return;
@@ -655,6 +726,7 @@ export function createEditorApp(config) {
         this.$nextTick(() => this.refocusFocusInput());
       },
       focusValidateAndAdvance() {
+        this.focusUnclearOpen = false;
         const cur = this.focusCurrent; if (!cur) return;
         // Combine pending edit + validation into one PUT
         let updated = cur;
@@ -675,6 +747,7 @@ export function createEditorApp(config) {
         });
       },
       focusDelete() {
+        this.focusUnclearOpen = false;
         const cur = this.focusCurrent; if (!cur) return;
         this.removeAnnotation(cur);
         this.$nextTick(() => {

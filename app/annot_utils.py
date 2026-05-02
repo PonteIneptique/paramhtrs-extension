@@ -197,7 +197,7 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
     word_count, cursor, tokens_on_line = 0, 0, 0
     annot_resp_id = None  # set per-annotation before calling process_segment
 
-    def process_segment(text, orig_label=None):
+    def process_segment(text, orig_label=None, span_type=None, span_subtype=None):
         nonlocal word_count, tokens_on_line, annot_resp_id
         local_ids = []
         has_internal_lb = orig_label and '\n' in orig_label
@@ -205,7 +205,13 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
         # Tokenize reg value (words, punctuation, or manual newlines)
         tokens = list(re.finditer(r"(\w+)|([^\w\s]+)|(\n)", text))
 
+        prev_end = 0
         for match in tokens:
+            # Preserve whitespace between tokens (spaces in source/value)
+            if match.start() > prev_end:
+                body_parts.append(escape(text[prev_end:match.start()]))
+            prev_end = match.end()
+
             val = match.group(0)
             if match.group(3):  # \n in regularization
                 body_parts.append('<lb/>\n        ')
@@ -235,11 +241,17 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
                 body_parts.append("\n        ")
                 tokens_on_line = 0
 
+        # Preserve any trailing whitespace in the segment
+        if prev_end < len(text):
+            body_parts.append(escape(text[prev_end:]))
+
         if orig_label and local_ids:
             resp_attr = ""
             if users_by_id and annot_resp_id and annot_resp_id in users_by_id:
                 resp_attr = f' resp="#{escape(users_by_id[annot_resp_id])}"'
-            span_entries.append(f'      <span target="{" ".join(local_ids)}"{resp_attr}>{escape(orig_label)}</span>')
+            type_attr    = f' type="{escape(span_type)}"'    if span_type    else ''
+            subtype_attr = f' subtype="{escape(span_subtype)}"' if span_subtype else ''
+            span_entries.append(f'      <span target="{" ".join(local_ids)}"{resp_attr}{type_attr}{subtype_attr}>{escape(orig_label)}</span>')
 
     # Main Loop
     for annot in sorted_annots:
@@ -258,6 +270,19 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
             if users_by_id and resp_id and resp_id in users_by_id:
                 resp_attr = f' resp="#{escape(users_by_id[resp_id])}"'
             body_parts.append(f'<unclear reason="illegible" cert="low"{resp_attr}>{escape(raw_text)}</unclear>')
+        elif body.get("purpose") == "non_resolv_abbr":
+            reason = body.get("reason", "other")
+            raw_text = original_text[start:end]
+            resp_id = annot.get("resp_id")
+            resp_attr = ""
+            if users_by_id and resp_id and resp_id in users_by_id:
+                resp_attr = f' resp="#{escape(users_by_id[resp_id])}"'
+            annot_resp_id = resp_id
+            pre_len = len(body_parts)
+            process_segment(raw_text, orig_label=raw_text, span_type="non_resolv_abbr", span_subtype=reason)
+            new_parts = body_parts[pre_len:]
+            del body_parts[pre_len:]
+            body_parts.append(f'<abbr type="{escape(reason)}"{resp_attr}>' + "".join(new_parts) + '</abbr>')
         else:
             annot_resp_id = annot.get("resp_id")
             process_segment(body.get("value", ""), orig_label=original_text[start:end])
@@ -266,8 +291,7 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
     if cursor < len(original_text):
         process_segment(original_text[cursor:])
 
-    # Cleanup formatting
-    full_body = " ".join(body_parts).replace(" \n", "\n").replace("\n ", "\n")
+    full_body = "".join(body_parts)
 
     meta = metadata or {}
 

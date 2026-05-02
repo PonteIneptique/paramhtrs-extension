@@ -13,9 +13,11 @@ export function getBodyValue(annot) { return annot?.body?.[0]?.value ?? ''; }
 export function isInsertion(annot) {
   return annot?.body?.[0]?.purpose === 'insertion' || getStart(annot) === getEnd(annot);
 }
-export function isAtrNoise(annot) { return annot?.body?.[0]?.purpose === 'atr_noise'; }
+export function isAtrNoise(annot)      { return annot?.body?.[0]?.purpose === 'atr_noise'; }
+export function isNonResolvAbbr(annot) { return annot?.body?.[0]?.purpose === 'non_resolv_abbr'; }
+export function getNonResolvReason(annot) { return annot?.body?.[0]?.reason ?? 'other'; }
 export function isSpaceExact(annot) {
-  return !isInsertion(annot) && !isAtrNoise(annot) && getExact(annot).trim() === '';
+  return !isInsertion(annot) && !isAtrNoise(annot) && !isNonResolvAbbr(annot) && getExact(annot).trim() === '';
 }
 
 // ── HTML escaping ─────────────────────────────────────────────────────────────
@@ -55,10 +57,11 @@ export function buildSourceHtml(fullText, annotsSorted, selectedAnnotationId) {
     if (s > cursor) html += escapeHtml(text.slice(cursor, s));
 
     const cls = ['r6o-annotation',
-      selId === a.id     ? 'selected'      : '',
-      a.validated_by     ? 'r6o-validated' : '',
-      isInsertion(a)     ? 'r6o-insertion' : '',
-      isAtrNoise(a)      ? 'r6o-atr-noise' : '',
+      selId === a.id     ? 'selected'           : '',
+      a.validated_by     ? 'r6o-validated'      : '',
+      isInsertion(a)     ? 'r6o-insertion'      : '',
+      isAtrNoise(a)      ? 'r6o-atr-noise'      : '',
+      isNonResolvAbbr(a) ? 'r6o-nonresolv-abbr' : '',
     ].filter(Boolean).join(' ');
 
     if (s === e) {
@@ -111,9 +114,10 @@ export function buildNormalizedPageHtml(normalizedText, annotsSorted, selectedAn
     if (pos.start < cursor) continue;
     if (pos.start > cursor) html += escapeHtml(text.slice(cursor, pos.start));
     const cls = ['norm-annot',
-      a.id === selId ? 'norm-highlight'  : '',
-      a.validated_by ? 'norm-validated'  : '',
-      isAtrNoise(a)  ? 'norm-atr-noise'  : '',
+      a.id === selId     ? 'norm-highlight'     : '',
+      a.validated_by     ? 'norm-validated'     : '',
+      isAtrNoise(a)      ? 'norm-atr-noise'     : '',
+      isNonResolvAbbr(a) ? 'norm-nonresolv-abbr': '',
     ].filter(Boolean).join(' ');
     html += `<mark class="${cls}" data-annotation="${escapeHtml(a.id)}">${escapeHtml(text.slice(pos.start, pos.end))}</mark>`;
     cursor = pos.end;
@@ -153,6 +157,28 @@ export function findSimilarByExact(annotations, annot) {
     !a.validated_by &&
     !isInsertion(a) &&
     !isAtrNoise(a) &&
+    !isNonResolvAbbr(a) &&
     getExact(a) === exact
   );
+}
+
+// ── Overlap resolution ────────────────────────────────────────────────────────
+// Returns adjusted {start, end} that avoids overlapping any existing annotation,
+// or null if the entire proposed span is covered by an existing annotation.
+export function resolveAnnotationBounds(start, end, existingAnnotations) {
+  const sorted = [...existingAnnotations]
+    .filter(a => !isInsertion(a))
+    .sort((a, b) => getStart(a) - getStart(b));
+  for (const a of sorted) {
+    const aStart = getStart(a);
+    const aEnd   = getEnd(a);
+    if (aEnd <= start || aStart >= end) continue; // no overlap
+    if (aStart >= start) {
+      end = aStart; // existing starts inside selection: trim our end
+    } else {
+      start = aEnd; // existing starts before selection: advance our start
+    }
+    if (start >= end) return null;
+  }
+  return start < end ? { start, end } : null;
 }

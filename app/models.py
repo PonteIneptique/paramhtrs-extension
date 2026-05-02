@@ -145,6 +145,7 @@ class Annotation(db.Model):
     page_id       = db.Column(db.Integer, db.ForeignKey("pages.id"), nullable=False, index=True)
     body_value    = db.Column(db.Text,        nullable=True)
     body_purpose  = db.Column(db.String(50),  nullable=True)
+    body_reason   = db.Column(db.String(50),  nullable=True)
     target_start  = db.Column(db.Integer,     nullable=False, default=0)
     target_end    = db.Column(db.Integer,     nullable=False, default=0)
     target_exact  = db.Column(db.Text,        nullable=True)
@@ -156,12 +157,15 @@ class Annotation(db.Model):
     page = db.relationship("Page", back_populates="annotation_rows")
 
     def to_dict(self) -> dict:
+        body_entry = {"type": "TextualBody",
+                      "value":   self.body_value   or "",
+                      "purpose": self.body_purpose or "normalizing"}
+        if self.body_reason:
+            body_entry["reason"] = self.body_reason
         d = {
             "id":   self.id,
             "type": "Annotation",
-            "body": [{"type": "TextualBody",
-                      "value":   self.body_value   or "",
-                      "purpose": self.body_purpose or "normalizing"}],
+            "body": [body_entry],
             "target": {
                 "annotation": self.id,
                 "selector": [
@@ -189,6 +193,7 @@ class Annotation(db.Model):
             page_id      = page_id,
             body_value   = body.get("value"),
             body_purpose = body.get("purpose"),
+            body_reason  = body.get("reason"),
             target_start = pos.get("start", 0),
             target_end   = pos.get("end",   0),
             target_exact = quo.get("exact"),
@@ -209,6 +214,7 @@ class Annotation(db.Model):
             body = (data.get("body") or [{}])[0]
             existing.body_value   = body.get("value")
             existing.body_purpose = body.get("purpose")
+            existing.body_reason  = body.get("reason")
             existing.target_start = pos.get("start", 0)
             existing.target_end   = pos.get("end",   0)
             existing.target_exact = quo.get("exact")
@@ -322,9 +328,9 @@ class Line(db.Model):
 # Flask CLI command to init DB
 # -------------------------
 
-@click.group("db")
+@click.group("dbmgmt")
 def db_cli():
-    """Database management commands"""
+    """Legacy database management commands (create/reset/drop/upgrade/migrate-annotations)"""
     return ""
 
 @db_cli.command("create")
@@ -357,6 +363,36 @@ def db_drop():
     click.echo("DB Dropped")
 
 
+@db_cli.command("list-users")
+def db_list_users():
+    """List all registered users."""
+    with current_app.app_context():
+        users = User.query.order_by(User.id).all()
+        if not users:
+            click.echo("No users found.")
+            return
+        click.echo(f"{'ID':<6} {'Username':<30} {'Nickname':<20} {'Admin':<6} {'Approved'}")
+        click.echo("-" * 70)
+        for u in users:
+            click.echo(f"{u.id:<6} {u.username:<30} {(u.nickname or ''):<20} {'yes' if u.is_admin else 'no':<6} {'yes' if u.is_approved else 'no'}")
+
+
+@db_cli.command("change-password")
+@click.argument("username")
+@click.option("--password", default=None, help="New password (prompted if omitted).")
+def db_change_password(username, password):
+    """Change the password for USERNAME."""
+    with current_app.app_context():
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            raise click.ClickException(f"No user found with username '{username}'.")
+        if not password:
+            password = click.prompt("New password", hide_input=True, confirmation_prompt=True)
+        user.set_password(password)
+        db.session.commit()
+        click.echo(f"Password updated for '{username}'.")
+
+
 @db_cli.command("upgrade")
 def db_upgrade():
     """Add any missing columns/tables to an existing database."""
@@ -369,12 +405,13 @@ def db_upgrade():
 
         # Columns to add: (table_name, column_name, column_def)
         new_columns = [
-            ("users",     "first_name",        "VARCHAR(100)"),
-            ("users",     "last_name",          "VARCHAR(100)"),
-            ("users",     "nickname",           "VARCHAR(80)"),
-            ("users",     "orcid",              "VARCHAR(30)"),
-            ("users",     "institution",        "VARCHAR(200)"),
-            ("documents", "iiif_manifest_url",  "TEXT"),
+            ("users",       "first_name",        "VARCHAR(100)"),
+            ("users",       "last_name",          "VARCHAR(100)"),
+            ("users",       "nickname",           "VARCHAR(80)"),
+            ("users",       "orcid",              "VARCHAR(30)"),
+            ("users",       "institution",        "VARCHAR(200)"),
+            ("documents",   "iiif_manifest_url",  "TEXT"),
+            ("annotations", "body_reason",        "VARCHAR(50)"),
         ]
         for table, col, col_def in new_columns:
             existing = [c["name"] for c in inspector.get_columns(table)]
