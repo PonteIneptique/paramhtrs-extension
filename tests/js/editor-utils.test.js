@@ -7,6 +7,7 @@ import {
   findSimilarAnnotations,
   findSimilarByExact,
   resolveAnnotationBounds,
+  findUnannotatedOccurrences,
 } from '../../static/js/editor-utils.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -542,5 +543,76 @@ describe('resolveAnnotationBounds', () => {
   test('adjacent annotation after selection: returns original bounds', () => {
     const existing = [makeAnnot({ id: 'a1', start: 8, end: 12 })];
     expect(resolveAnnotationBounds(3, 8, existing)).toEqual({ start: 3, end: 8 });
+  });
+});
+
+describe('findUnannotatedOccurrences', () => {
+  const text = 'Jo. was here and Jo. was there and Jo. again';
+  //            0123456789...         17  18 19 20  34  35 36 37
+
+  test('no annotations: returns all occurrences', () => {
+    const result = findUnannotatedOccurrences(text, 'Jo.', []);
+    expect(result).toEqual([
+      { start: 0,  end: 3  },
+      { start: 17, end: 20 },
+      { start: 35, end: 38 },
+    ]);
+  });
+
+  test('annotation covering first occurrence: skips it, returns rest', () => {
+    const existing = [makeAnnot({ id: 'a1', start: 0, end: 3, exact: 'Jo.' })];
+    const result = findUnannotatedOccurrences(text, 'Jo.', existing);
+    expect(result).toEqual([
+      { start: 17, end: 20 },
+      { start: 35, end: 38 },
+    ]);
+  });
+
+  test('all occurrences covered: returns []', () => {
+    const existing = [
+      makeAnnot({ id: 'a1', start: 0,  end: 3  }),
+      makeAnnot({ id: 'a2', start: 17, end: 20 }),
+      makeAnnot({ id: 'a3', start: 35, end: 38 }),
+    ];
+    expect(findUnannotatedOccurrences(text, 'Jo.', existing)).toEqual([]);
+  });
+
+  test('empty exact: returns []', () => {
+    expect(findUnannotatedOccurrences(text, '', [])).toEqual([]);
+  });
+
+  test('whitespace-only exact: returns []', () => {
+    expect(findUnannotatedOccurrences(text, '   ', [])).toEqual([]);
+  });
+
+  test('insertion annotation does not block a candidate', () => {
+    const ins = makeInsertion({ id: 'ins1', pos: 0 });
+    const result = findUnannotatedOccurrences(text, 'Jo.', [ins]);
+    expect(result).toHaveLength(3);
+  });
+
+  test('non-resolv annotation blocks its span', () => {
+    const existing = [makeNonResolvAnnot({ id: 'nr1', start: 0, end: 3, exact: 'Jo.' })];
+    const result = findUnannotatedOccurrences(text, 'Jo.', existing);
+    expect(result).not.toContainEqual({ start: 0, end: 3 });
+    expect(result).toHaveLength(2);
+  });
+
+  test('ATR noise annotation blocks its span', () => {
+    const existing = [makeAnnot({ id: 'a1', start: 17, end: 20, exact: 'Jo.', purpose: 'atr_noise', value: 'Jo.' })];
+    const result = findUnannotatedOccurrences(text, 'Jo.', existing);
+    expect(result).not.toContainEqual({ start: 17, end: 20 });
+    expect(result).toHaveLength(2);
+  });
+
+  test('adjacent annotation (touching but not overlapping) does not block', () => {
+    // annotation ends exactly where 'Jo.' starts at pos 17
+    const existing = [makeAnnot({ id: 'a1', start: 14, end: 17 })];
+    const result = findUnannotatedOccurrences(text, 'Jo.', existing);
+    expect(result).toContainEqual({ start: 17, end: 20 });
+  });
+
+  test('exact not present in text: returns []', () => {
+    expect(findUnannotatedOccurrences(text, 'xyz', [])).toEqual([]);
   });
 });

@@ -182,3 +182,22 @@ export function resolveAnnotationBounds(start, end, existingAnnotations) {
   }
   return start < end ? { start, end } : null;
 }
+
+// ── Unannotated occurrence finder ─────────────────────────────────────────────
+// Returns all {start, end} spans where `exact` appears in `fullText` and is
+// not already covered (even partially) by an existing non-insertion annotation.
+export function findUnannotatedOccurrences(fullText, exact, annotations) {
+  if (!exact || !exact.trim()) return [];
+  const nonInsert = annotations.filter(a => !isInsertion(a));
+  const results = [];
+  let idx = 0;
+  while (true) {
+    const pos = fullText.indexOf(exact, idx);
+    if (pos === -1) break;
+    const start = pos, end = pos + exact.length;
+    const overlaps = nonInsert.some(a => getStart(a) < end && getEnd(a) > start);
+    if (!overlaps) results.push({ start, end });
+    idx = pos + 1;
+  }
+  return results;
+}

@@ -796,6 +796,7 @@ body { overflow: hidden; }
         <div class="modal-header">
           <h5 class="modal-title">
             <span v-if="bulkMode === 'delete'">Delete similar annotations</span>
+            <span v-else-if="bulkMode === 'annotate'">Annotate similar occurrences</span>
             <span v-else>Validate similar annotations</span>
           </h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -804,6 +805,10 @@ body { overflow: hidden; }
           <p class="text-muted small mb-2" v-if="bulkMode === 'delete'">
             These unvalidated annotations share the same source text.
             Select the ones you also want to delete:
+          </p>
+          <p class="text-muted small mb-2" v-else-if="bulkMode === 'annotate'">
+            These occurrences have no annotation yet.
+            Select the ones you also want to annotate:
           </p>
           <p class="text-muted small mb-2" v-else>
             These unvalidated annotations share the same source &rarr; target mapping.
@@ -830,6 +835,7 @@ body { overflow: hidden; }
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Skip</button>
           <button v-if="bulkMode === 'delete'" type="button" class="btn btn-danger btn-sm" @click="confirmBulkDeletion">Delete selected</button>
+          <button v-else-if="bulkMode === 'annotate'" type="button" class="btn btn-primary btn-sm" @click="confirmBulkAnnotation">Annotate selected</button>
           <button v-else type="button" class="btn btn-success btn-sm" @click="confirmBulkValidation">Validate selected</button>
         </div>
       </div>

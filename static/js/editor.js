@@ -7,6 +7,7 @@ import {
   findSimilarAnnotations,
   findSimilarByExact,
   resolveAnnotationBounds,
+  findUnannotatedOccurrences,
 } from './editor-utils.js';
 
 // Module-level pending annotation (raw W3C object, not reactive)
@@ -403,6 +404,7 @@ export function createEditorApp(config) {
         annot.resp_id = CURRENT_USER_ID;
         this.annotations = [...this.annotations, annot];
         this.saveAnnotation(annot);
+        this._offerBulkAnnotation(annot);
       },
 
       cancelPending() { pendingAnnotRaw = null; this.pendingAnnot = null; this.pendingUnclearOpen = false; },
@@ -422,6 +424,7 @@ export function createEditorApp(config) {
         annot.resp_id = CURRENT_USER_ID;
         this.annotations = [...this.annotations, annot];
         this.saveAnnotation(annot);
+        this._offerBulkAnnotation(annot);
       },
 
       // ── Mark selection as non-resolvable abbreviation ────────────────────────
@@ -434,6 +437,44 @@ export function createEditorApp(config) {
         annot.resp_id = CURRENT_USER_ID;
         this.annotations = [...this.annotations, annot];
         this.saveAnnotation(annot);
+        this._offerBulkAnnotation(annot);
+      },
+
+      // ── Bulk annotation offer ─────────────────────────────────────────────────
+      _offerBulkAnnotation(annot) {
+        const exact = getExact(annot);
+        if (!exact || !exact.trim() || getStart(annot) === getEnd(annot)) return;
+        const t = this.fullText;
+        const occurrences = findUnannotatedOccurrences(t, exact, this.annotations);
+        if (!occurrences.length) return;
+        const drafts = occurrences.map(({ start, end }) => {
+          const id = crypto.randomUUID();
+          return {
+            id, type: 'Annotation', resp_id: CURRENT_USER_ID,
+            body: JSON.parse(JSON.stringify(annot.body)),
+            target: { annotation: id, selector: [
+              { type: 'TextPositionSelector', start, end },
+              { type: 'TextQuoteSelector',
+                exact: t.slice(start, end),
+                prefix: t.slice(Math.max(0, start - 10), start),
+                suffix: t.slice(end, end + 10) },
+            ]},
+          };
+        });
+        this.bulkMode = 'annotate';
+        this.bulkCandidates = drafts;
+        this.bulkChecked = Object.fromEntries(drafts.map(a => [a.id, true]));
+        new bootstrap.Modal(document.getElementById('bulkValidateModal')).show();
+      },
+
+      confirmBulkAnnotation() {
+        const toAdd = this.bulkCandidates.filter(a => this.bulkChecked[a.id]);
+        for (const a of toAdd) {
+          this.annotations = [...this.annotations, a];
+          this.saveAnnotation(a);
+        }
+        this.bulkCandidates = [];
+        bootstrap.Modal.getInstance(document.getElementById('bulkValidateModal'))?.hide();
       },
 
       // ── Focus-mode: mark current annotation as ATR noise or non-resolv ────────
