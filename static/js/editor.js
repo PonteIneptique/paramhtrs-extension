@@ -36,6 +36,7 @@ export function createEditorApp(config) {
         insertMode:          false,
         refineMode:          false,
         annotFilter:         'pending',
+        annotSort:           'position',
         pendingUnclearOpen:  false,
         focusUnclearOpen:    false,
         focusMenuPos:        { top: 0, left: 0 },
@@ -55,9 +56,21 @@ export function createEditorApp(config) {
     },
 
     computed: {
-      allAnnotationsSorted()       { return [...this.annotations].sort((a,b) => getStart(a)-getStart(b)); },
-      pendingAnnotationsSorted()   { return this.allAnnotationsSorted.filter(a => !a.validated_by); },
-      validatedAnnotationsSorted() { return this.allAnnotationsSorted.filter(a =>  a.validated_by); },
+      allAnnotationsSorted() {
+        return [...this.annotations].sort((a, b) => getStart(a) - getStart(b));
+      },
+      pendingAnnotationsSorted() {
+        const list = this.allAnnotationsSorted.filter(a => !a.validated_by);
+        return this.annotSort === 'alpha'
+          ? [...list].sort((a, b) => getExact(a).localeCompare(getExact(b), undefined, { sensitivity: 'base' }))
+          : list;
+      },
+      validatedAnnotationsSorted() {
+        const list = this.allAnnotationsSorted.filter(a => a.validated_by);
+        return this.annotSort === 'alpha'
+          ? [...list].sort((a, b) => getExact(a).localeCompare(getExact(b), undefined, { sensitivity: 'base' }))
+          : list;
+      },
       panelSourceStyle() { return { flex: `0 0 ${this.sourceWidth}%` }; },
       panelAnnotsStyle() { return { flex: `0 0 ${this.annotsWidth}%` }; },
 
@@ -588,6 +601,40 @@ export function createEditorApp(config) {
 
       toggleInsertMode() { this.insertMode = !this.insertMode; if (this.insertMode) this.refineMode = false; },
       toggleRefineMode() { this.refineMode = !this.refineMode; if (this.refineMode) this.insertMode = false; },
+
+      adjustAnnotationBoundary(side, delta, annotId = null) {
+        const id  = annotId ?? this.selectedAnnotationId;
+        const cur = this.annotations.find(a => a.id === id);
+        if (!cur) return;
+        const pos = getSelector(cur, 'TextPositionSelector');
+        let start = pos.start, end = pos.end;
+        if (side === 'start') start += delta;
+        else                  end   += delta;
+        start = Math.max(0, start);
+        end   = Math.min(this.fullText.length, end);
+        if (start >= end) return;
+        const others = this.annotations.filter(a => a.id !== cur.id && !isInsertion(a));
+        if (others.some(a => getStart(a) < end && getEnd(a) > start)) return;
+        const t = this.fullText;
+        const updated = { ...cur, target: { ...cur.target, selector: [
+          { type: 'TextPositionSelector', start, end },
+          { type: 'TextQuoteSelector',
+            exact:  t.slice(start, end),
+            prefix: t.slice(Math.max(0, start - 10), start),
+            suffix: t.slice(end, end + 10) },
+        ]}};
+        this.annotations = this.annotations.map(a => a.id === cur.id ? updated : a);
+        this.saveAnnotation(updated);
+        if (this.focusMode && this.focusCurrent?.id === id) {
+          this.focusEditValue = getBodyValue(updated) ?? '';
+        }
+      },
+
+      renderVisible(text) {
+        return escapeHtml(text ?? '')
+          .replace(/ /g, '<span class="tok-ws">·</span>')
+          .replace(/\n/g, '<span class="tok-ws">&#8629;</span>');
+      },
 
       startResize(which, evt) {
         const panels = document.getElementById('editor-panels');

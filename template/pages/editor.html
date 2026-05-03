@@ -287,12 +287,35 @@ body { overflow: hidden; }
   z-index: 9;
   background: #fff;
   display: flex;
-  gap: 4px;
-  padding: 4px 12px 6px;
+  flex-direction: column;
+  gap: 0;
+  padding: 0 12px;
   border-bottom: 1px solid #f0f0f0;
   margin-bottom: 0;
 }
+.panel-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0;
+}
+.panel-toolbar-row + .panel-toolbar-row {
+  border-top: 1px solid #f0f0f0;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
 .panel-toolbar .btn { font-size: .75rem; padding: 2px 7px; }
+/* visible whitespace symbols */
+.tok-ws { opacity: .4; font-style: normal; font-size: .82em; }
+/* focus-mode boundary nudge buttons */
+.fm-boundary-btn {
+  background: oklch(92% 0.01 70); border: 1px solid oklch(78% 0.01 70);
+  border-radius: 3px; cursor: pointer; color: oklch(32% 0.01 70);
+  padding: 1px 5px; font-size: 13px; line-height: 1;
+  font-family: 'Inter', sans-serif; transition: background .12s;
+  flex-shrink: 0;
+}
+.fm-boundary-btn:hover { background: oklch(85% 0.01 70); }
 
 /* ── Insertion annotation chip ── */
 .annot-ins-chip {
@@ -601,18 +624,33 @@ body { overflow: hidden; }
     <div class="panel panel-source" :style="panelSourceStyle">
       <div class="panel-header">Source</div>
       <div class="panel-toolbar">
-        <button class="btn btn-sm btn-outline-secondary"
-                :class="{active: refineMode}"
-                @click="toggleRefineMode"
-                title="Refine span: draw a new selection to update the selected annotation">
-          ✂ Refine span
-        </button>
-        <button class="btn btn-sm btn-outline-secondary"
-                :class="{active: insertMode}"
-                @click="toggleInsertMode"
-                title="Insert: click a position in the source to create a zero-width insertion">
-          + Insert
-        </button>
+        <div class="panel-toolbar-row">
+          <button class="btn btn-sm btn-outline-secondary"
+                  :class="{active: refineMode}"
+                  @click="toggleRefineMode"
+                  title="Refine span: draw a new selection to update the selected annotation">
+            ✂ Refine span
+          </button>
+          <button class="btn btn-sm btn-outline-secondary"
+                  :class="{active: insertMode}"
+                  @click="toggleInsertMode"
+                  title="Insert: click a position in the source to create a zero-width insertion">
+            + Insert
+          </button>
+        </div>
+        <div v-if="refineMode && selectedAnnotationId" class="panel-toolbar-row">
+          <span style="font-size:.7em; color:#6c757d; white-space:nowrap;">Left:</span>
+          <button class="btn btn-sm btn-outline-secondary py-0 px-1"
+                  @click="adjustAnnotationBoundary('start', -1)" title="Expand left boundary">‹</button>
+          <button class="btn btn-sm btn-outline-secondary py-0 px-1"
+                  @click="adjustAnnotationBoundary('start', +1)" title="Shrink left boundary">›</button>
+          <span style="width:1px;background:#dee2e6;align-self:stretch;flex-shrink:0;margin:0 2px;"></span>
+          <span style="font-size:.7em; color:#6c757d; white-space:nowrap;">Right:</span>
+          <button class="btn btn-sm btn-outline-secondary py-0 px-1"
+                  @click="adjustAnnotationBoundary('end', -1)" title="Shrink right boundary">‹</button>
+          <button class="btn btn-sm btn-outline-secondary py-0 px-1"
+                  @click="adjustAnnotationBoundary('end', +1)" title="Expand right boundary">›</button>
+        </div>
       </div>
       <div id="page-source" ref="pageSource"
            :class="{'insert-cursor': insertMode, 'refine-cursor': refineMode}"
@@ -644,6 +682,13 @@ body { overflow: hidden; }
                   title="Show prefix/suffix context around each annotation">
             ±ctx
           </button>
+          <button class="btn annot-filter-btn"
+                  :class="annotSort === 'alpha' ? 'btn-secondary' : 'btn-outline-secondary'"
+                  @click="annotSort = annotSort === 'alpha' ? 'position' : 'alpha'"
+                  :title="annotSort === 'alpha' ? 'Sorted A→Z (click for text order)' : 'Sorted by position (click for A→Z)'">
+            <span v-if="annotSort === 'alpha'">A→Z</span>
+            <span v-else>#</span>
+          </button>
           <div class="btn-group" style="gap:2px">
             <button class="btn annot-filter-btn"
                     :class="annotFilter==='pending' ? 'btn-secondary' : 'btn-outline-secondary'"
@@ -671,7 +716,7 @@ body { overflow: hidden; }
             <span v-if="showAnnotContext && getPrefix(annot)" class="annot-ctx annot-ctx-pre" :title="getPrefix(annot)">[[ getPrefix(annot).slice(-6) ]]</span>
             <span v-if="isInsertion(annot)" class="annot-ins-chip" title="insertion">[+]</span>
             <span v-else-if="isSpaceExact(annot)" class="annot-orig-sp" title="space">[SPACE]</span>
-            <span v-else class="annot-orig" :title="getExact(annot)">[[ getExact(annot) ]]</span>
+            <span v-else class="annot-orig" :title="getExact(annot)" v-html="renderVisible(getExact(annot))"></span>
             <span v-if="showAnnotContext && getSuffix(annot)" class="annot-ctx annot-ctx-suf" :title="getSuffix(annot)">[[ getSuffix(annot).slice(0,6) ]]</span>
             <span class="annot-arrow">→</span>
             <span v-if="isAtrNoise(annot)" class="annot-atr-chip">[ATR NOISE]</span>
@@ -698,7 +743,7 @@ body { overflow: hidden; }
         <div style="display:flex; align-items:center; gap:4px;">
           <span v-if="isInsertionExact(pendingAnnot)" class="annot-ins-chip" title="insertion">[+]</span>
           <span v-else-if="!pendingAnnot.exact.trim()" class="annot-orig-sp" title="space">[SPACE]</span>
-          <span v-else class="annot-orig" :title="pendingAnnot.exact">[[ pendingAnnot.exact ]]</span>
+          <span v-else class="annot-orig" :title="pendingAnnot.exact" v-html="renderVisible(pendingAnnot.exact)"></span>
           <span class="annot-arrow">→</span>
           <input type="text" class="annot-target" ref="pendingInput"
             placeholder="Normalized form"
@@ -753,7 +798,7 @@ body { overflow: hidden; }
             <span v-if="showAnnotContext && getPrefix(annot)" class="annot-ctx annot-ctx-pre" :title="getPrefix(annot)">[[ getPrefix(annot).slice(-6) ]]</span>
             <span v-if="isInsertion(annot)" class="annot-ins-chip" title="insertion">[+]</span>
             <span v-else-if="isSpaceExact(annot)" class="annot-orig-sp" title="space">[SPACE]</span>
-            <span v-else class="annot-orig" :title="getExact(annot)">[[ getExact(annot) ]]</span>
+            <span v-else class="annot-orig" :title="getExact(annot)" v-html="renderVisible(getExact(annot))"></span>
             <span v-if="showAnnotContext && getSuffix(annot)" class="annot-ctx annot-ctx-suf" :title="getSuffix(annot)">[[ getSuffix(annot).slice(0,6) ]]</span>
             <span class="annot-arrow">→</span>
             <span v-if="isAtrNoise(annot)" class="annot-atr-chip">[ATR NOISE]</span>
@@ -821,7 +866,7 @@ body { overflow: hidden; }
               <span class="text-muted fst-italic" style="font-family:'JunicodeVF',serif">[[ getPrefix(a) ]]</span><!--
               --><span v-if="isInsertion(a)" class="annot-ins-chip" title="insertion">[+]</span>
               <span v-else-if="isSpaceExact(a)" class="annot-orig-sp" title="space">[SPACE]</span>
-              <span v-else class="fw-semibold" style="font-family:'JunicodeVF',serif">[[ getExact(a) ]]</span><!--
+              <span v-else class="fw-semibold" style="font-family:'JunicodeVF',serif" v-html="renderVisible(getExact(a))"></span><!--
               --><span class="text-muted fst-italic" style="font-family:'JunicodeVF',serif">[[ getSuffix(a) ]]</span>
               <span class="mx-1">&rarr;</span>
               <span v-if="isAtrNoise(a)" class="annot-atr-chip">[ATR NOISE]</span>
@@ -907,7 +952,7 @@ body { overflow: hidden; }
             <template v-for="(seg, si) in focusAnnData.left" :key="si">
               <span v-if="seg.type === 'a'" class="fm-token fm-nbr-token" :style="{opacity: seg.opacity}"
                     @click="focusJump(seg.annIdx)">
-                <span class="fm-tok-abbr">[[ seg.abbr ]]</span>
+                <span class="fm-tok-abbr" v-html="renderVisible(seg.abbr)"></span>
                 <span class="fm-tok-norm">[[ seg.norm ]]</span>
               </span>
               <span v-else-if="seg.display" class="fm-token fm-plain-token" :style="{opacity: seg.opacity}">
@@ -919,22 +964,34 @@ body { overflow: hidden; }
 
           <!-- active token -->
           <div class="fm-active-wrap" v-if="focusCurrent">
-            <span class="fm-token">
-              <span class="fm-tok-abbr fm-active-abbr">[[ getExact(focusCurrent) ]]</span>
-              <span v-if="isAtrNoise(focusCurrent)" class="fm-type-chip fm-type-noise">ATR Noise</span>
-              <span v-else-if="isNonResolvAbbr(focusCurrent)" class="fm-type-chip fm-type-nonresolv">
-                [[ getNonResolvReason(focusCurrent) ]]
+            <div style="display:flex; align-items:center; gap:6px;">
+              <!-- left boundary nudge -->
+              <div style="display:flex; flex-direction:column; gap:3px;">
+                <button class="fm-boundary-btn" @click.stop="adjustAnnotationBoundary('start', -1, focusCurrent.id)" title="Expand left boundary">‹</button>
+                <button class="fm-boundary-btn" @click.stop="adjustAnnotationBoundary('start', +1, focusCurrent.id)" title="Shrink left boundary">›</button>
+              </div>
+              <span class="fm-token">
+                <span class="fm-tok-abbr fm-active-abbr" v-html="renderVisible(getExact(focusCurrent))"></span>
+                <span v-if="isAtrNoise(focusCurrent)" class="fm-type-chip fm-type-noise">ATR Noise</span>
+                <span v-else-if="isNonResolvAbbr(focusCurrent)" class="fm-type-chip fm-type-nonresolv">
+                  [[ getNonResolvReason(focusCurrent) ]]
+                </span>
+                <input v-else ref="focusModeInput" :class="['fm-norm-input', focusValidated ? 'fm-validated' : '']"
+                       v-model="focusEditValue"
+                       :style="{ width: Math.max(5, focusEditValue.length + 2) + 'ch' }"
+                       placeholder="Normalized form"
+                       title="Leave empty to treat as a deletion [e.g. space deletion]"
+                       @keydown.tab.prevent="focusNavigate($event.shiftKey ? -1 : 1)"
+                       @keydown.enter.exact.prevent="focusValidateAndAdvance"
+                       @keydown.esc.prevent="exitFocusMode"
+                       @blur="saveFocusEdit">
               </span>
-              <input v-else ref="focusModeInput" :class="['fm-norm-input', focusValidated ? 'fm-validated' : '']"
-                     v-model="focusEditValue"
-                     :style="{ width: Math.max(5, focusEditValue.length + 2) + 'ch' }"
-                     placeholder="Normalized form"
-                     title="Leave empty to treat as a deletion [e.g. space deletion]"
-                     @keydown.tab.prevent="focusNavigate($event.shiftKey ? -1 : 1)"
-                     @keydown.enter.exact.prevent="focusValidateAndAdvance"
-                     @keydown.esc.prevent="exitFocusMode"
-                     @blur="saveFocusEdit">
-            </span>
+              <!-- right boundary nudge -->
+              <div style="display:flex; flex-direction:column; gap:3px;">
+                <button class="fm-boundary-btn" @click.stop="adjustAnnotationBoundary('end', -1, focusCurrent.id)" title="Shrink right boundary">‹</button>
+                <button class="fm-boundary-btn" @click.stop="adjustAnnotationBoundary('end', +1, focusCurrent.id)" title="Expand right boundary">›</button>
+              </div>
+            </div>
             <div style="display:flex; align-items:center; justify-content:center; gap:8px;">
               <button class="fm-del-btn" @click.stop="focusDelete" tabindex="-1">
                 <svg width="10" height="10" viewBox="0 0 14 14" fill="none">
@@ -974,7 +1031,7 @@ body { overflow: hidden; }
             <template v-for="(seg, si) in focusAnnData.right" :key="si">
               <span v-if="seg.type === 'a'" class="fm-token fm-nbr-token" :style="{opacity: seg.opacity}"
                     @click="focusJump(seg.annIdx)">
-                <span class="fm-tok-abbr">[[ seg.abbr ]]</span>
+                <span class="fm-tok-abbr" v-html="renderVisible(seg.abbr)"></span>
                 <span class="fm-tok-norm">[[ seg.norm ]]</span>
               </span>
               <span v-else-if="seg.display" class="fm-token fm-plain-token" :style="{opacity: seg.opacity}">
