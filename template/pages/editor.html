@@ -349,6 +349,7 @@ body { overflow: hidden; }
 #page-source.insert-cursor { cursor: text; }
 #page-source.refine-cursor { cursor: col-resize; }
 
+
 /* ── Annotation filter toggle ── */
 .annot-filter-btn { font-size: .7rem; padding: 1px 6px; }
 
@@ -667,6 +668,12 @@ body { overflow: hidden; }
                   @click="toggleInsertMode"
                   title="Insert: click a position in the source to create a zero-width insertion">
             + Insert
+          </button>
+          <button class="btn btn-sm btn-outline-secondary"
+                  :disabled="!selectedAnnotationId"
+                  @click="addSpaceBeforeSelected"
+                  title="Insert a space before the selected annotation">
+            ⎵ Space before
           </button>
         </div>
         <div v-if="refineMode && selectedAnnotationId" class="panel-toolbar-row">
@@ -1104,6 +1111,7 @@ body { overflow: hidden; }
     </div>
 
   </div><!-- /.fm-overlay -->
+
 
 </div><!-- /#editor-root -->
 

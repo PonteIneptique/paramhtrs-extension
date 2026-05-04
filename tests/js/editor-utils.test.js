@@ -249,6 +249,17 @@ describe('buildSourceHtml', () => {
     const html = buildSourceHtml('hello', [], null);
     expect(html).toBe('hello');
   });
+
+  test('insertion at same start as another annotation renders before it', () => {
+    // "foo" at [0,3] resolved to something; insertion at pos 0 adds a space before
+    const sub = makeAnnot({ id: 'sub', start: 0, end: 3, exact: 'foo', value: 'bar' });
+    const ins = makeInsertion({ id: 'ins', pos: 0, value: ' ' });
+    // Pass in wrong order to confirm the function sorts correctly
+    const html = buildSourceHtml('foorest', [sub, ins], null);
+    const insPos = html.indexOf('data-annotation="ins"');
+    const subPos = html.indexOf('data-annotation="sub"');
+    expect(insPos).toBeLessThan(subPos);
+  });
 });
 
 // ── computeNormalizedPositions ────────────────────────────────────────────────

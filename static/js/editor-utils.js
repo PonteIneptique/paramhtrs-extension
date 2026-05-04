@@ -44,9 +44,15 @@ export function applyAnnotations(text, annotations) {
 
 // ── Source panel HTML ─────────────────────────────────────────────────────────
 export function buildSourceHtml(fullText, annotsSorted, selectedAnnotationId) {
-  const text   = fullText;
-  const annots = annotsSorted;
-  const selId  = selectedAnnotationId;
+  const text  = fullText;
+  const selId = selectedAnnotationId;
+  // Insertions (zero-width) at the same start as a regular annotation must be
+  // rendered first so the ∅ marker visually precedes the annotated span.
+  const annots = [...annotsSorted].sort((a, b) => {
+    const ds = getStart(a) - getStart(b);
+    if (ds !== 0) return ds;
+    return (getStart(a) === getEnd(a) ? 0 : 1) - (getStart(b) === getEnd(b) ? 0 : 1);
+  });
   let html   = '';
   let cursor = 0;
 

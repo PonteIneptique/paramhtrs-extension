@@ -410,6 +410,28 @@ export function createEditorApp(config) {
         this._scrollPanelsToAnnotation(annot.id);
       },
 
+      addSpaceBeforeSelected() {
+        const id = this.selectedAnnotationId;
+        if (!id) return;
+        const annot = this.allAnnotationsSorted.find(a => a.id === id);
+        if (!annot) return;
+        const pos = getStart(annot);
+        const t   = this.fullText;
+        const newId = crypto.randomUUID();
+        const ins = {
+          id: newId, type: 'Annotation', resp_id: CURRENT_USER_ID,
+          body: [{ type: 'TextualBody', value: ' ', purpose: 'insertion' }],
+          target: { annotation: newId, selector: [
+            { type: 'TextPositionSelector', start: pos, end: pos },
+            { type: 'TextQuoteSelector', exact: '',
+              prefix: t.slice(Math.max(0, pos - 10), pos),
+              suffix: t.slice(pos, pos + 10) },
+          ]},
+        };
+        this.annotations = [...this.annotations, ins];
+        this.saveAnnotation(ins);
+      },
+
       // ── Annotation value edit ─────────────────────────────────────────────────
       onAnnotBlur(annot, evt) {
         if (!annot.body?.[0]) return;
