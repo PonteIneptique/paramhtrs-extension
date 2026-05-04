@@ -218,6 +218,23 @@ def api_project_documents(project_id):
 # TEI export of full document
 # -------------------------
 
+@bp_document.route("/documents/<int:document_id>/stats")
+@requires_access(Document, 'document_id')
+def document_stats(document: Document):
+    from .stats_report import compute_stats, build_chart_svg, load_font_face, today_str
+    stats = compute_stats(document.pages)
+    html = render_template('stats_report.html',
+        title=document.name,
+        stats=stats,
+        chart_svg=build_chart_svg(stats),
+        font_face=load_font_face(),
+        generated=today_str(),
+        scope='document',
+    )
+    return Response(html, mimetype='text/html',
+                    headers={'Content-Disposition': f'attachment; filename="stats-{document.name}.html"'})
+
+
 @bp_document.route("/documents/<int:document_id>/export")
 @requires_access(Document, 'document_id')
 def document_export_tei(document: Document):

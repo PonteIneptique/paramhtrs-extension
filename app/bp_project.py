@@ -126,6 +126,31 @@ def project_users(project_id):
     )
 
 
+@bp_project.route("/projects/<int:project_id>/stats")
+@requires_access(Project, 'project_id')
+def project_stats(project: Project):
+    from .stats_report import compute_stats, build_chart_svg, load_font_face, today_str
+    from .models import Page, Document
+    from sqlalchemy.orm import joinedload
+    pages = (Page.query
+             .join(Page.document)
+             .filter(Document.project_id == project.id)
+             .options(joinedload(Page.annotation_rows), joinedload(Page.lines))
+             .order_by(Document.name, Page.order)
+             .all())
+    stats = compute_stats(pages)
+    html = render_template('stats_report.html',
+        title=project.name,
+        stats=stats,
+        chart_svg=build_chart_svg(stats),
+        font_face=load_font_face(),
+        generated=today_str(),
+        scope='project',
+    )
+    return Response(html, mimetype='text/html',
+                    headers={'Content-Disposition': f'attachment; filename="stats-{project.name}.html"'})
+
+
 @bp_project.route("/projects/<int:project_id>/download")
 @requires_access(Project, 'project_id')
 def project_download_zip(project: Project):

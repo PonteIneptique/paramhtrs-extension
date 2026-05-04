@@ -152,6 +152,23 @@ def page_delete(page: Page):
 # TEI export of a single page
 # -------------------------
 
+@bp_page.route("/pages/<int:page_id>/stats")
+@requires_access(Page, 'page_id')
+def page_stats(page: Page):
+    from .stats_report import compute_stats, build_chart_svg, load_font_face, today_str
+    stats = compute_stats([page])
+    html = render_template('stats_report.html',
+        title=page.label,
+        stats=stats,
+        chart_svg=build_chart_svg(stats),
+        font_face=load_font_face(),
+        generated=today_str(),
+        scope='page',
+    )
+    return Response(html, mimetype='text/html',
+                    headers={'Content-Disposition': f'attachment; filename="stats-{page.label}.html"'})
+
+
 @bp_page.route("/pages/<int:page_id>/export")
 @requires_access(Page, 'page_id')
 def page_export_tei(page: Page):

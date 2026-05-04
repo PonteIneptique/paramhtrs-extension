@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Statistics — {{ title }}</title>
+<style>
+{{ font_face }}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,sans-serif;font-size:13px;line-height:1.5;padding:28px 36px;background:#fff;color:#1a1a1a}
+h1{font-size:1.15em;font-weight:700;margin-bottom:3px}
+.meta{font-size:.78em;color:#aaa;margin-bottom:22px}
+h2{font-size:.78em;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#999;
+   margin:28px 0 10px;border-bottom:1px solid #efefef;padding-bottom:5px}
+.cards{display:flex;gap:10px;flex-wrap:wrap}
+.card{background:#f8f9fa;border:1px solid #e8e8e8;border-radius:6px;padding:10px 16px;min-width:130px}
+.card-val{font-size:1.7em;font-weight:700;color:#111;line-height:1.1}
+.card-lbl{font-size:.74em;color:#888;margin-top:2px}
+.card-sub{font-size:.7em;color:#bbb;margin-top:1px}
+table{width:100%;border-collapse:collapse;font-size:.82em;margin-top:2px}
+th{text-align:left;padding:5px 10px;font-size:.75em;font-weight:600;text-transform:uppercase;
+   letter-spacing:.05em;color:#aaa;border-bottom:2px solid #ececec}
+td{padding:4px 10px;border-bottom:1px solid #f4f4f4;vertical-align:top}
+td.tok{font-family:'Junicode',Georgia,serif;font-size:1.05em}
+tr:hover td{background:#fafafa}
+.stat-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.stat-box{background:#f0f4ff;border-radius:5px;padding:7px 14px;text-align:center}
+.stat-box b{display:block;font-size:1.3em;color:#2563eb;line-height:1.1}
+.stat-box span{font-size:.73em;color:#888}
+.empty{color:#ccc;font-style:italic;font-size:.85em;margin:.5em 0}
+.note{font-size:.74em;color:#bbb;margin-bottom:10px}
+</style>
+</head>
+<body>
+<h1>Statistics — {{ title }}</h1>
+<p class="meta">Generated {{ generated }}{% if scope != 'page' %} &middot; {{ scope | capitalize }} level{% endif %}</p>
+
+<h2>Overview</h2>
+<div class="cards">
+  <div class="card">
+    <div class="card-val">{{ stats.tok_count }}</div>
+    <div class="card-lbl">Tokens (normalized)</div>
+  </div>
+  <div class="card">
+    <div class="card-val">{{ stats.subs }}</div>
+    <div class="card-lbl">Abbreviation resolutions</div>
+    {% if stats.tok_count %}<div class="card-sub">{{ "%.1f"|format(stats.subs / stats.tok_count * 100) }}% of tokens</div>{% endif %}
+  </div>
+  <div class="card">
+    <div class="card-val">{{ stats.val_subs }}</div>
+    <div class="card-lbl">Validated</div>
+    {% if stats.subs %}<div class="card-sub">{{ "%.1f"|format(stats.val_subs / stats.subs * 100) }}% of resolutions</div>{% endif %}
+  </div>
+  <div class="card">
+    <div class="card-val">{{ stats.inss }}</div>
+    <div class="card-lbl">Insertions</div>
+  </div>
+  <div class="card">
+    <div class="card-val">{{ stats.noises }}</div>
+    <div class="card-lbl">ATR Noise</div>
+  </div>
+  <div class="card">
+    <div class="card-val">{{ stats.nonres }}</div>
+    <div class="card-lbl">Non-resolv. abbr.</div>
+  </div>
+  <div class="card">
+    <div class="card-val">{{ stats.spaces }}</div>
+    <div class="card-lbl">Space changes</div>
+  </div>
+</div>
+
+{% if scope != 'page' and stats.page_stats %}
+<h2>Per-page breakdown</h2>
+<table>
+  <thead><tr><th>Page</th><th>Tokens</th><th>Resolutions</th><th>Validated</th><th>%&nbsp;validated</th></tr></thead>
+  <tbody>
+  {% for p in stats.page_stats %}
+    <tr>
+      <td>{{ p.label }}</td>
+      <td>{{ p.tokens }}</td>
+      <td>{{ p.subs }}</td>
+      <td>{{ p.validated }}</td>
+      <td>{% if p.subs %}{{ "%.1f"|format(p.validated / p.subs * 100) }}%{% else %}—{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<h2>Most frequent abbreviated forms</h2>
+{% if stats.top_src %}
+<table>
+  <thead><tr><th>Abbreviated form</th><th>Count</th><th>% of resol.</th><th>% of tokens</th><th>Normalizations</th></tr></thead>
+  <tbody>
+  {% for form, info in stats.top_src %}
+    <tr>
+      <td class="tok">{{ form }}</td>
+      <td>{{ info.n }}</td>
+      <td class="num">{% if stats.subs %}{{ "%.1f"|format(info.n / stats.subs * 100) }}%{% else %}—{% endif %}</td>
+      <td class="num">{% if stats.tok_count %}{{ "%.1f"|format(info.n / stats.tok_count * 100) }}%{% else %}—{% endif %}</td>
+      <td>{{ info.dsts | join(', ') }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">No data.</p>
+{% endif %}
+
+<h2>Most frequent normalized forms</h2>
+{% if stats.top_dst %}
+<table>
+  <thead><tr><th>Normalized form</th><th>Count</th><th>% of resol.</th><th>% of tokens</th><th>Distinct sources</th><th>Sources</th></tr></thead>
+  <tbody>
+  {% for form, info in stats.top_dst %}
+    <tr>
+      <td class="tok">{{ form }}</td>
+      <td>{{ info.n }}</td>
+      <td class="num">{% if stats.subs %}{{ "%.1f"|format(info.n / stats.subs * 100) }}%{% else %}—{% endif %}</td>
+      <td class="num">{% if stats.tok_count %}{{ "%.1f"|format(info.n / stats.tok_count * 100) }}%{% else %}—{% endif %}</td>
+      <td>{{ info.srcs | length }}</td>
+      <td>{{ info.srcs | join(', ') }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">No data.</p>
+{% endif %}
+
+<h2>Levenshtein distance profile</h2>
+<p class="note">Insertions and space-only modifications excluded. {{ stats.nd }} samples.</p>
+{% if stats.nd %}
+<div class="stat-row">
+  <div class="stat-box"><b>{{ "%.2f"|format(stats.dmean) }}</b><span>mean</span></div>
+  <div class="stat-box"><b>{{ "%.2f"|format(stats.dmedian) }}</b><span>median</span></div>
+  <div class="stat-box"><b>{{ "%.2f"|format(stats.dstd) }}</b><span>std dev</span></div>
+  <div class="stat-box"><b>{{ stats.dmin }}</b><span>min</span></div>
+  <div class="stat-box"><b>{{ stats.dmax }}</b><span>max</span></div>
+  <div class="stat-box"><b>{{ "%.2f"|format(stats.diqr) }}</b><span>IQR</span></div>
+</div>
+{% endif %}
+{{ chart_svg | safe }}
+</body>
+</html>

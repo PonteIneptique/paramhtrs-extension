@@ -618,6 +618,12 @@ body { overflow: hidden; }
       <i class="fa-solid fa-download"></i> Synoptic
     </button>
 
+    <a href="{{ url_for('bp_page.page_stats', page_id=page.id) }}"
+       class="btn btn-sm btn-outline-info" style="font-size:.75rem;padding:1px 6px"
+       title="Download statistics report (HTML)">
+      <i class="fa-solid fa-chart-bar"></i> Stats
+    </a>
+
     <!-- Page status -->
     <div class="btn-group btn-group-sm">
       <button class="btn btn-sm btn-secondary disabled" disabled>Status:</button>
