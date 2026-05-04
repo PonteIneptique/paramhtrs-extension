@@ -613,6 +613,11 @@ body { overflow: hidden; }
       <i class="fa-solid fa-download"></i> TEI
     </a>
 
+    <button class="btn btn-sm btn-outline-info" style="font-size:.75rem;padding:1px 6px"
+            @click="downloadSynoptic" title="Download synoptic view (HTML)">
+      <i class="fa-solid fa-download"></i> Synoptic
+    </button>
+
     <!-- Page status -->
     <div class="btn-group btn-group-sm">
       <button class="btn btn-sm btn-secondary disabled" disabled>Status:</button>
@@ -1185,6 +1190,7 @@ window.__EDITOR_CONFIG__ = {
   fullText:      {{ full_text|tojson }},
   annotations:   {{ annotations|tojson }},
   pageId:        {{ page.id }},
+  pageLabel:     {{ page.label|tojson }},
   pageStatus:    {{ page.status|tojson }},
   currentUserId: {{ current_user.id }},
   urls: {

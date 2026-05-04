@@ -29,6 +29,7 @@ export function createEditorApp(config) {
         fullText:            config.fullText,
         annotations:         config.annotations,
         pageId:              config.pageId,
+        pageLabel:           config.pageLabel,
         pageStatus:          config.pageStatus,
         hoveredAnnotationId: null,
         hoverEnabled:        true,
@@ -791,6 +792,94 @@ export function createEditorApp(config) {
           this.saveError = true;
         }
       },
+      async downloadSynoptic() {
+        const sorted  = this.allAnnotationsSorted;
+        const normPos = computeNormalizedPositions(this.annotations);
+        const srcHtml  = buildSourceHtml(this.fullText, sorted, null);
+        const normHtml = buildNormalizedPageHtml(this.normalizedPageText, sorted, null, normPos);
+        const title    = escapeHtml(this.pageLabel || 'Synoptic View');
+
+        let fontFace = '';
+        try {
+          const resp  = await fetch('/static/fonts/JunicodeVF-Roman.woff2');
+          const buf   = await resp.arrayBuffer();
+          const bytes = new Uint8Array(buf);
+          let bin = '';
+          for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+          const b64 = btoa(bin);
+          fontFace = `@font-face{font-family:'Junicode';src:url('data:font/woff2;base64,${b64}')format('woff2');font-weight:100 900;}`;
+        } catch (_) { /* font unavailable — fall back to Georgia */ }
+
+        const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>${title}</title>
+<style>
+${fontFace}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Junicode', Georgia, serif; font-size: 14px; line-height: 1.75; padding: 28px 32px; background: #fff; color: #1a1a1a; }
+h1 { font-size: 1.05em; font-weight: 600; margin-bottom: 18px; color: #333; border-bottom: 1px solid #e0e0e0; padding-bottom: 8px; font-family: system-ui, sans-serif; }
+.col-head { font-size: .72em; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: #999; margin-bottom: 6px; font-family: system-ui, sans-serif; }
+.synoptic { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.text-col { background: #fafafa; border: 1px solid #e0e0e0; border-radius: 4px; padding: 14px 16px; white-space: pre-wrap; word-break: break-word; }
+mark { background: rgba(254,215,90,.4); border-bottom: 1.5px solid #c8970f; border-radius: 2px; padding: 0 1px; color: inherit; transition: background .1s, border-color .1s; }
+mark.r6o-validated, mark.norm-validated { background: rgba(25,135,84,.13); border-bottom-color: #198754; }
+mark.r6o-validated.r6o-insertion { background: rgba(25,135,84,.1); border-bottom: 1.5px dashed #198754; }
+mark.r6o-insertion { background: rgba(13,110,253,.11); border-bottom: 1.5px dashed #0d6efd; }
+mark.r6o-atr-noise, mark.norm-atr-noise { background: rgba(108,117,125,.12); border-bottom: 1.5px dotted #6c757d; }
+mark.r6o-nonresolv-abbr, mark.norm-nonresolv-abbr { background: rgba(255,193,7,.18); border-bottom: 1.5px dotted #a07800; }
+mark.hovered { background: rgba(59,130,246,.28) !important; border-bottom: 1.5px solid #2563eb !important; }
+.legend { margin-top: 18px; display: flex; gap: 14px; flex-wrap: wrap; font-size: .75em; color: #555; align-items: center; font-family: system-ui, sans-serif; }
+.legend-item { display: flex; align-items: center; gap: 5px; }
+.swatch { display: inline-block; width: 26px; height: 9px; border-radius: 2px; border-bottom-width: 2px; border-bottom-style: solid; }
+.sw-pend { background: rgba(254,215,90,.4); border-bottom-color: #c8970f; }
+.sw-val  { background: rgba(25,135,84,.13);  border-bottom-color: #198754; }
+.sw-ins  { background: rgba(13,110,253,.11); border-bottom-color: #0d6efd; border-bottom-style: dashed; }
+.sw-noi  { background: rgba(108,117,125,.12); border-bottom-color: #6c757d; border-bottom-style: dotted; }
+.sw-non  { background: rgba(255,193,7,.18);  border-bottom-color: #a07800; border-bottom-style: dotted; }
+</style>
+</head>
+<body>
+<h1>${title}</h1>
+<div class="synoptic">
+  <div><div class="col-head">Source</div><div class="text-col">${srcHtml}</div></div>
+  <div><div class="col-head">Normalized</div><div class="text-col">${normHtml}</div></div>
+</div>
+<div class="legend">
+  <strong style="font-size:.8em;color:#444">Legend:</strong>
+  <span class="legend-item"><span class="swatch sw-pend"></span> Unvalidated</span>
+  <span class="legend-item"><span class="swatch sw-val"></span> Validated</span>
+  <span class="legend-item"><span class="swatch sw-ins"></span> Insertion</span>
+  <span class="legend-item"><span class="swatch sw-noi"></span> ATR Noise</span>
+  <span class="legend-item"><span class="swatch sw-non"></span> Non-resolv. abbr.</span>
+</div>
+<script>
+document.querySelectorAll('.text-col').forEach(col => {
+  col.addEventListener('mouseover', e => {
+    const m = e.target.closest('mark[data-annotation]');
+    if (!m) return;
+    const id = CSS.escape(m.dataset.annotation);
+    document.querySelectorAll('mark[data-annotation="' + id + '"]').forEach(n => n.classList.add('hovered'));
+  });
+  col.addEventListener('mouseout', e => {
+    const m = e.target.closest('mark[data-annotation]');
+    if (!m) return;
+    const id = CSS.escape(m.dataset.annotation);
+    document.querySelectorAll('mark[data-annotation="' + id + '"]').forEach(n => n.classList.remove('hovered'));
+  });
+});
+</script>
+</body>
+</html>`;
+
+        const blob = new Blob([html], { type: 'text/html' });
+        const url  = URL.createObjectURL(blob);
+        const a    = Object.assign(document.createElement('a'), { href: url, download: `${this.pageLabel || 'synoptic'}.html` });
+        a.click();
+        URL.revokeObjectURL(url);
+      },
+
       async setPageStatus(status) {
         this.pageStatus = status;
         await fetch(urls.pageStatus, {
