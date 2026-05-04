@@ -93,12 +93,14 @@ body { overflow: hidden; }
   color: inherit;
 }
 #page-source mark.selected {
-  background: rgba(255, 150, 0, 0.55);
-  border-bottom-color: #d97706;
+  background: rgba(59, 130, 246, 0.25);
+  border-bottom-color: #2563eb;
+  font-weight: bold;
 }
 #page-source mark.hovered {
   background: rgba(255, 190, 30, 0.50);
   border-bottom-color: #c97900;
+  font-weight: bold;
 }
 #page-source mark.r6o-validated {
   background: rgba(25, 135, 84, 0.20);
@@ -161,7 +163,7 @@ body { overflow: hidden; }
   border-radius: 4px;
   transition: background .15s;
 }
-.annot-row:hover, .annot-row.hovered { background: #fff3cd; }
+.annot-row:hover, .annot-row.hovered { background: #fff3cd; font-weight: bold; }
 .annot-orig {
   font-family: 'JunicodeVF', serif;
   font-weight: 600;
@@ -249,19 +251,29 @@ body { overflow: hidden; }
   cursor: pointer;
   color: inherit;
 }
-.normalized-text mark.norm-annot.norm-highlight,
+.normalized-text mark.norm-annot.norm-highlight {
+  background: rgba(59, 130, 246, 0.22);
+  border-bottom: 2px solid #2563eb;
+  font-weight: bold;
+}
 .normalized-text mark.norm-annot.hovered {
   background: rgba(255, 150, 0, 0.45);
   border-bottom: 2px solid #d97706;
+  font-weight: bold;
 }
 .normalized-text mark.norm-annot.norm-validated {
   background: rgba(25, 135, 84, 0.15);
   border-bottom-color: #198754;
 }
-.normalized-text mark.norm-annot.norm-validated.norm-highlight,
+.normalized-text mark.norm-annot.norm-validated.norm-highlight {
+  background: rgba(59, 130, 246, 0.22);
+  border-bottom-color: #2563eb;
+  font-weight: bold;
+}
 .normalized-text mark.norm-annot.norm-validated.hovered {
   background: rgba(25, 135, 84, 0.30);
   border-bottom-color: #198754;
+  font-weight: bold;
 }
 .normalized-text mark.norm-atr-noise {
   text-decoration: line-through;
@@ -329,7 +341,7 @@ body { overflow: hidden; }
 }
 
 /* ── Selected / validated rows ── */
-.annot-row.selected { background: #cfe2ff !important; }
+.annot-row.selected { background: #cfe2ff !important; font-weight: bold; }
 .annot-row.validated { opacity: .7; }
 
 /* ── Insert / refine mode cursor hints ── */
@@ -555,6 +567,13 @@ body { overflow: hidden; }
       <button class="btn btn-sm btn-outline-secondary" style="font-size:.75rem;padding:1px 6px"
               @click="fontSize = +(Math.min(2.5, fontSize + 0.1)).toFixed(1)" title="Increase font size">A+</button>
     </div>
+
+    <button class="btn btn-sm" style="font-size:.75rem;padding:1px 6px"
+            :class="hoverEnabled ? 'btn-secondary' : 'btn-outline-secondary'"
+            @click="hoverEnabled = !hoverEnabled"
+            :title="hoverEnabled ? 'Cross-panel hover on (click to disable)' : 'Cross-panel hover off (click to enable)'">
+      ⇄ Hover
+    </button>
 
     <div class="btn-group btn-group-sm">
       {% if prev_page %}

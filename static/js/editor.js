@@ -31,6 +31,7 @@ export function createEditorApp(config) {
         pageId:              config.pageId,
         pageStatus:          config.pageStatus,
         hoveredAnnotationId: null,
+        hoverEnabled:        true,
         selectedAnnotationId: null,
         pendingAnnot:        null,
         insertMode:          false,
@@ -291,7 +292,7 @@ export function createEditorApp(config) {
         });
 
         el.addEventListener('mouseover', (evt) => {
-          if (this.selectedAnnotationId) return;
+          if (!this.hoverEnabled || this.selectedAnnotationId) return;
           const span = evt.target.closest('[data-annotation]');
           if (!span) return;
           const id = span.dataset.annotation;
@@ -315,7 +316,7 @@ export function createEditorApp(config) {
       // ── Normalized panel listeners ────────────────────────────────────────────
       _registerNormalizedListeners(el) {
         el.addEventListener('mouseover', (evt) => {
-          if (this.selectedAnnotationId) return;
+          if (!this.hoverEnabled || this.selectedAnnotationId) return;
           const span = evt.target.closest('[data-annotation]');
           if (!span) return;
           const id = span.dataset.annotation;
@@ -378,7 +379,7 @@ export function createEditorApp(config) {
         this.selectAnnotation(annot);
       },
       onRowMouseenter(id) {
-        if (this.selectedAnnotationId) return;
+        if (!this.hoverEnabled || this.selectedAnnotationId) return;
         const src  = this.$refs.pageSource;
         const norm = this.$refs.normalizedText;
         src.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
