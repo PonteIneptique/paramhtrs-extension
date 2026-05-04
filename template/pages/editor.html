@@ -310,6 +310,7 @@ body { overflow: hidden; }
   align-items: center;
   gap: 4px;
   padding: 4px 0;
+  width: 100%;
 }
 .panel-toolbar-row + .panel-toolbar-row {
   border-top: 1px solid #f0f0f0;
@@ -692,9 +693,9 @@ body { overflow: hidden; }
 
     <!-- Col 2: Annotations -->
     <div class="panel panel-annots" :style="panelAnnotsStyle">
-      <div class="panel-header d-flex align-items-center">
-        <span>Annotations</span>
-        <div class="d-flex align-items-center ms-auto gap-1">
+      <div class="panel-header">Annotations</div>
+      <div class="panel-toolbar">
+        <div class="panel-toolbar-row">
           <button class="btn annot-filter-btn"
                   :class="showAnnotContext ? 'btn-secondary' : 'btn-outline-secondary'"
                   @click="showAnnotContext = !showAnnotContext"
@@ -708,7 +709,7 @@ body { overflow: hidden; }
             <span v-if="annotSort === 'alpha'">A→Z</span>
             <span v-else>#</span>
           </button>
-          <div class="btn-group" style="gap:2px">
+          <div class="btn-group ms-auto" style="gap:2px">
             <button class="btn annot-filter-btn"
                     :class="annotFilter==='pending' ? 'btn-secondary' : 'btn-outline-secondary'"
                     @click="annotFilter='pending'">
@@ -745,7 +746,7 @@ body { overflow: hidden; }
             <span v-else-if="isInsertion(annot)" class="annot-ins-chip">[[ getBodyValue(annot) ]]</span>
             <input v-else type="text" class="annot-target"
               :value="getBodyValue(annot)"
-              @focus="selectedAnnotationId = annot.id"
+              @focus="onAnnotInputFocus(annot)"
               @blur="onAnnotBlur(annot, $event)"
               @keydown.enter.prevent="$event.target.blur()"
               @keydown.tab.prevent="tabToNext(annot)">
@@ -827,7 +828,7 @@ body { overflow: hidden; }
             <span v-else-if="isInsertion(annot)" class="annot-ins-chip">[[ getBodyValue(annot) ]]</span>
             <input v-else type="text" class="annot-target"
               :value="getBodyValue(annot)"
-              @focus="selectedAnnotationId = annot.id"
+              @focus="onAnnotInputFocus(annot)"
               @blur="onAnnotBlur(annot, $event)"
               @keydown.enter.prevent="$event.target.blur()">
           </label>

@@ -356,7 +356,8 @@ export function createEditorApp(config) {
       _findAnnotRow(id)   { return document.querySelector(`.panel-annots [data-annot-id="${id}"]`); },
       _annotPanelHeaderHeight() {
         const h = document.querySelector('.panel-annots .panel-header');
-        return h ? h.offsetHeight : 0;
+        const t = document.querySelector('.panel-annots .panel-toolbar');
+        return (h ? h.offsetHeight : 0) + (t ? t.offsetHeight : 0);
       },
       _scrollAnnotRowIntoView(id) {
         setTimeout(() => {
@@ -372,6 +373,15 @@ export function createEditorApp(config) {
           p.scrollTop = row.offsetTop - p.offsetTop - this._annotPanelHeaderHeight();
           row.querySelector('.annot-target')?.focus();
         }, 0);
+      },
+      _scrollPanelsToAnnotation(id) {
+        this.$nextTick(() => requestAnimationFrame(() => {
+          const eid = CSS.escape(id);
+          for (const ref of [this.$refs.pageSource, this.$refs.normalizedText]) {
+            const mark = ref?.querySelector(`[data-annotation="${eid}"]`);
+            mark?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+          }
+        }));
       },
       onRowMousedown(annot, event) {
         if (event.target.closest('button') || event.target.closest('.annot-target')) return;
@@ -392,6 +402,11 @@ export function createEditorApp(config) {
         this.$refs.pageSource.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
         this.$refs.normalizedText.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
         this.hoveredAnnotationId = null;
+      },
+
+      onAnnotInputFocus(annot) {
+        this.selectedAnnotationId = annot.id;
+        this._scrollPanelsToAnnotation(annot.id);
       },
 
       // ── Annotation value edit ─────────────────────────────────────────────────
@@ -553,6 +568,7 @@ export function createEditorApp(config) {
           this.$refs.normalizedText.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
           this.hoveredAnnotationId = null;
           this._focusAnnotInput(annot);
+          this._scrollPanelsToAnnotation(annot.id);
         }
       },
 
