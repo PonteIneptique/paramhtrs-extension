@@ -727,6 +727,11 @@ body { overflow: hidden; }
             <span v-if="annotSort === 'alpha'">A→Z</span>
             <span v-else>#</span>
           </button>
+          <button class="btn annot-filter-btn btn-outline-secondary"
+                  @click="openMassCleanup"
+                  title="Mass cleanup of pending annotations">
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
+          </button>
           <div class="btn-group ms-auto" style="gap:2px">
             <button class="btn annot-filter-btn"
                     :class="annotFilter==='pending' ? 'btn-secondary' : 'btn-outline-secondary'"
@@ -920,6 +925,108 @@ body { overflow: hidden; }
           <button v-if="bulkMode === 'delete'" type="button" class="btn btn-danger btn-sm" @click="confirmBulkDeletion">Delete selected</button>
           <button v-else-if="bulkMode === 'annotate'" type="button" class="btn btn-primary btn-sm" @click="confirmBulkAnnotation">Annotate selected</button>
           <button v-else type="button" class="btn btn-success btn-sm" @click="confirmBulkValidation">Validate selected</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mass cleanup modal -->
+  <div class="modal fade" id="massCleanupModal" tabindex="-1" aria-hidden="true" data-bs-keyboard="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Mass cleanup — pending annotations</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+
+          <!-- Category toggles -->
+          <div class="d-flex flex-wrap gap-2 mb-3">
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="checkbox" id="mc-space-punct" v-model="massCleanupChecked.spacePunct">
+              <label class="form-check-label small" for="mc-space-punct">
+                Space before punctuation <span class="badge bg-secondary">[[ massCleanupSpacePunctCount ]]</span>
+              </label>
+            </div>
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="checkbox" id="mc-space-space" v-model="massCleanupChecked.spaceSpace">
+              <label class="form-check-label small" for="mc-space-space">
+                Space before space <span class="badge bg-secondary">[[ massCleanupSpaceSpaceCount ]]</span>
+              </label>
+            </div>
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="checkbox" id="mc-punct" v-model="massCleanupChecked.punctuation">
+              <label class="form-check-label small" for="mc-punct">
+                Punctuation ins./changes <span class="badge bg-secondary">[[ massCleanupPunctuationCount ]]</span>
+              </label>
+            </div>
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="checkbox" id="mc-surnorm" v-model="massCleanupChecked.surnorm">
+              <label class="form-check-label small" for="mc-surnorm">
+                Surnormalizations <span class="badge bg-secondary">[[ massCleanupSurnormCount ]]</span>
+              </label>
+            </div>
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="checkbox" id="mc-regex" v-model="massCleanupChecked.regex">
+              <label class="form-check-label small" for="mc-regex">Regex</label>
+            </div>
+          </div>
+          <div v-if="massCleanupChecked.regex" class="mb-3">
+            <input type="text" class="form-control form-control-sm font-monospace"
+                   v-model="massCleanupRegex" placeholder="e.g. ^q$|que$">
+            <div v-if="massCleanupRegexError" class="text-danger small mt-1">[[ massCleanupRegexError ]]</div>
+          </div>
+
+          <!-- Select all / deselect all -->
+          <div v-if="massCleanupCandidates.length" class="d-flex gap-2 mb-2">
+            <button class="btn btn-outline-secondary btn-sm py-0" @click="massCleanupSelectAll">Select all</button>
+            <button class="btn btn-outline-secondary btn-sm py-0" @click="massCleanupDeselectAll">Deselect all</button>
+          </div>
+
+          <!-- Per-instance list -->
+          <div v-if="massCleanupCandidates.length" style="max-height:320px; overflow-y:auto; border:1px solid #dee2e6; border-radius:6px;">
+            <div v-for="a in massCleanupCandidates" :key="a.id"
+                 style="display:flex; align-items:center; gap:8px; padding:4px 12px; border-bottom:1px solid #f0f0f0; font-family:'JunicodeVF',serif; font-size:.9rem;">
+              <input type="checkbox" style="flex-shrink:0; width:1em; height:1em; cursor:pointer;"
+                     :id="'mc-inst-'+a.id" v-model="massCleanupSelected[a.id]">
+              <!-- Space insertion: show context with visible dots for spaces, inserted space underlined in green -->
+              <span v-if="isSpaceInsertion(a)"
+                    style="font-family:'JunicodeVF',serif; font-size:.9rem; cursor:pointer;"
+                    @click="massCleanupSelected[a.id] = !massCleanupSelected[a.id]">
+                <span class="text-muted" v-html="renderVisible(getPrefix(a).slice(-12))"></span><!--
+                --><span style="display:inline-block; min-width:0.7em; border-bottom:2px solid #198754; color:#198754; font-size:1.15em;">&nbsp;</span><!--
+                --><span class="text-muted" v-html="renderVisible(getSuffix(a).slice(0,12))"></span><!--
+                --><span v-if="isSpaceBeforeSpace(a)" class="badge bg-warning text-dark ms-2" style="font-size:.7em;" title="Already followed by a space">·· double space</span><!--
+                --><span v-if="isSpaceBeforePunct(a)" class="badge bg-info text-dark ms-1" style="font-size:.7em;" title="Inserted before punctuation">before punct.</span>
+              </span>
+              <!-- All other annotations -->
+              <label v-else
+                     style="display:inline-flex; align-items:center; gap:4px; flex-wrap:wrap; cursor:pointer; margin:0;"
+                     :for="'mc-inst-'+a.id">
+                <span class="text-muted fst-italic small">[[ getPrefix(a).slice(-8) ]]</span>
+                <span v-if="isInsertion(a)" class="annot-ins-chip">[+]</span>
+                <span v-else-if="isSpaceExact(a)" class="annot-orig-sp">[SPACE]</span>
+                <span v-else class="fw-semibold" v-html="renderVisible(getExact(a))"></span>
+                <span class="text-muted fst-italic small">[[ getSuffix(a).slice(0,8) ]]</span>
+                <span style="margin:0 4px; opacity:.5;">→</span>
+                <span v-if="!getBodyValue(a)" class="annot-del-chip">deleted</span>
+                <span v-else-if="isInsertion(a)" class="annot-ins-chip">[[ getBodyValue(a) ]]</span>
+                <strong v-else>[[ getBodyValue(a) ]]</strong>
+              </label>
+            </div>
+          </div>
+          <div v-else class="text-muted small fst-italic py-2">
+            No annotations match the selected categories.
+          </div>
+
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-danger btn-sm"
+                  :disabled="massCleanupSelectedCount === 0"
+                  @click="confirmMassCleanup">
+            Delete [[ massCleanupSelectedCount ]] annotation<span v-if="massCleanupSelectedCount !== 1">s</span>
+          </button>
         </div>
       </div>
     </div>

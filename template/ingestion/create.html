@@ -251,12 +251,16 @@
       </div>
     </div>
 
-    <div class="d-flex gap-2 mt-3">
-      <button v-if="inputMode !== 'json'" class="btn btn-primary" @click="goNormalize" :disabled="!canProceed || normalizing">
+    <div class="d-flex gap-2 mt-3 flex-wrap">
+      <button v-if="inputMode !== 'json'" class="btn btn-primary" @click="goNormalize" :disabled="!canProceed || normalizing || saving">
         <span v-if="normalizing"><span class="spinner-border spinner-border-sm"></span> Normalizing…</span>
         <span v-else>Normalize →</span>
       </button>
-      <button v-else class="btn btn-primary" @click="goImportJson" :disabled="!canProceed || saving">
+      <button v-if="inputMode !== 'json'" class="btn btn-outline-secondary" @click="goImportDirect" :disabled="!canProceed || normalizing || saving">
+        <span v-if="saving"><span class="spinner-border spinner-border-sm"></span> Saving…</span>
+        <span v-else>Import without normalization →</span>
+      </button>
+      <button v-if="inputMode === 'json'" class="btn btn-primary" @click="goImportJson" :disabled="!canProceed || saving">
         <span v-if="saving"><span class="spinner-border spinner-border-sm"></span> Saving…</span>
         <span v-else>Import →</span>
       </button>
@@ -543,6 +547,37 @@ createApp({
         const lines = this.jsonLines.map(l => ({ orig: l.abbr, alto_id: null }));
         const chunks = this.jsonLines.map(l => ({ orig: l.abbr, reg: l.expan }));
         await this._savePage(lines, '', chunks, '\n');
+      } catch(e) {
+        this.error = e.message || 'An error occurred';
+      } finally {
+        this.saving = false;
+      }
+    },
+
+    // ── Import without normalization ──────────────────────────────────
+    async goImportDirect() {
+      this.error = null;
+      this.saving = true;
+      try {
+        {% if not document %}
+        if (!this.selectedDocumentId) {
+          const r = await fetch(`${ROOT}/documents/new`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              project_id: this.selectedProjectId,
+              name: this.newDoc.name,
+              language: this.newDoc.language,
+              qid: this.newDoc.qid || null,
+            })
+          });
+          const data = await r.json();
+          if (!r.ok || data.status !== 'ok') throw new Error(data.error || 'Could not create document');
+          this.selectedDocumentId = data.id;
+        }
+        {% endif %}
+        const lines = this.effectiveLines.map(l => ({ orig: l.text, alto_id: l.alto_id || null }));
+        await this._savePage(lines, '', null, '\n');
       } catch(e) {
         this.error = e.message || 'An error occurred';
       } finally {

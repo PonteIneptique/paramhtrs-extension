@@ -8,6 +8,8 @@ import {
   findSimilarByExact,
   resolveAnnotationBounds,
   findUnannotatedOccurrences,
+  isSpaceInsertion, isSpaceBeforePunct, isSpaceBeforeSpace,
+  isPunctuationAnnotation, isSurnormalization,
 } from './editor-utils.js';
 
 // Module-level pending annotation (raw W3C object, not reactive)
@@ -54,6 +56,9 @@ export function createEditorApp(config) {
         focusAnnotIndex:     0,
         focusEditValue:      '',
         focusValidated:      false,
+        massCleanupChecked:  { spacePunct: true, spaceSpace: true, punctuation: true, surnorm: true, regex: false },
+        massCleanupRegex:    '',
+        massCleanupSelected: {},
       };
     },
 
@@ -125,6 +130,35 @@ export function createEditorApp(config) {
           segs[0].parts[0].text = segs[0].parts[0].text.replace(/^\s+/, '');
         return segs;
       },
+      massCleanupRegexError() {
+        if (!this.massCleanupChecked.regex || !this.massCleanupRegex.trim()) return null;
+        try { new RegExp(this.massCleanupRegex.trim(), 'u'); return null; }
+        catch (e) { return e.message; }
+      },
+      massCleanupCandidates() {
+        const pending = this.pendingAnnotationsSorted;
+        const { spacePunct, spaceSpace, punctuation, surnorm, regex } = this.massCleanupChecked;
+        let re = null;
+        if (regex && this.massCleanupRegex.trim() && !this.massCleanupRegexError) {
+          re = new RegExp(this.massCleanupRegex.trim(), 'u');
+        }
+        return pending.filter(a => {
+          if (spacePunct  && isSpaceBeforePunct(a))      return true;
+          if (spaceSpace  && isSpaceBeforeSpace(a))      return true;
+          if (punctuation && isPunctuationAnnotation(a)) return true;
+          if (surnorm     && isSurnormalization(a))      return true;
+          if (re && (re.test(getExact(a)) || re.test(getBodyValue(a)))) return true;
+          return false;
+        });
+      },
+      massCleanupSpacePunctCount()  { return this.pendingAnnotationsSorted.filter(isSpaceBeforePunct).length; },
+      massCleanupSpaceSpaceCount()  { return this.pendingAnnotationsSorted.filter(isSpaceBeforeSpace).length; },
+      massCleanupPunctuationCount() { return this.pendingAnnotationsSorted.filter(isPunctuationAnnotation).length; },
+      massCleanupSurnormCount()     { return this.pendingAnnotationsSorted.filter(isSurnormalization).length; },
+      massCleanupSelectedCount() {
+        return this.massCleanupCandidates.filter(a => this.massCleanupSelected[a.id]).length;
+      },
+
       focusAnnData() {
         if (!this.focusCurrent) return { left:[], right:[] };
         const text = this.fullText;
@@ -164,6 +198,11 @@ export function createEditorApp(config) {
       fontSize(val) {
         document.getElementById('editor-root').style.setProperty('--editor-font', val + 'rem');
       },
+      massCleanupCandidates(newList) {
+        for (const a of newList) {
+          if (!(a.id in this.massCleanupSelected)) this.massCleanupSelected[a.id] = true;
+        }
+      },
     },
 
     mounted() {
@@ -188,6 +227,7 @@ export function createEditorApp(config) {
     methods: {
       getExact, getPrefix, getSuffix, getBodyValue,
       isInsertion, isAtrNoise, isNonResolvAbbr, getNonResolvReason, isSpaceExact,
+      isSpaceInsertion, isSpaceBeforePunct, isSpaceBeforeSpace,
       isInsertionExact(stub) { return stub?.isIns === true; },
 
       // ── DOM event listeners on #page-source (registered ONCE at mount) ────────
@@ -580,6 +620,34 @@ export function createEditorApp(config) {
       clearPending() {
         this.annotations = this.annotations.filter(a => a.validated_by);
         this.selectedAnnotationId = null;
+        this.saveAnnotations();
+      },
+
+      // ── Mass cleanup ──────────────────────────────────────────────────────────
+      openMassCleanup() {
+        this.massCleanupSelected = Object.fromEntries(
+          this.massCleanupCandidates.map(a => [a.id, true])
+        );
+        new bootstrap.Modal(document.getElementById('massCleanupModal')).show();
+      },
+      massCleanupSelectAll() {
+        this.massCleanupSelected = Object.fromEntries(
+          this.massCleanupCandidates.map(a => [a.id, true])
+        );
+      },
+      massCleanupDeselectAll() {
+        this.massCleanupSelected = Object.fromEntries(
+          this.massCleanupCandidates.map(a => [a.id, false])
+        );
+      },
+      confirmMassCleanup() {
+        const toDelete = new Set(
+          this.massCleanupCandidates.filter(a => this.massCleanupSelected[a.id]).map(a => a.id)
+        );
+        if (!toDelete.size) return;
+        this.annotations = this.annotations.filter(a => !toDelete.has(a.id));
+        if (toDelete.has(this.selectedAnnotationId)) this.selectedAnnotationId = null;
+        bootstrap.Modal.getInstance(document.getElementById('massCleanupModal'))?.hide();
         this.saveAnnotations();
       },
 

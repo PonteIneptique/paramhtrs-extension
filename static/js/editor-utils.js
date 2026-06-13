@@ -132,6 +132,65 @@ export function buildNormalizedPageHtml(normalizedText, annotsSorted, selectedAn
   return html;
 }
 
+// ── Mass-cleanup predicates ───────────────────────────────────────────────────
+
+// Space insertion: insertion whose body value is empty or whitespace only
+export function isSpaceInsertion(annot) {
+  return isInsertion(annot) && !getBodyValue(annot).trim();
+}
+
+const PUNCT_START_RE = /^[\p{P}\p{S}]/u;
+
+// Space inserted immediately before a punctuation character
+export function isSpaceBeforePunct(annot) {
+  if (!isSpaceInsertion(annot)) return false;
+  const suffix = getSuffix(annot);
+  return !!suffix && PUNCT_START_RE.test(suffix[0]);
+}
+
+// Space inserted immediately before another space (would create a double space)
+export function isSpaceBeforeSpace(annot) {
+  if (!isSpaceInsertion(annot)) return false;
+  const suffix = getSuffix(annot);
+  return !!suffix && suffix[0] === ' ';
+}
+
+// Punctuation annotation:
+//   - insertion whose value consists only of Unicode punctuation/symbols (no whitespace)
+//   - OR substitution where BOTH exact AND value consist only of punctuation
+// Space insertions are handled by isSpaceInsertion and are excluded here.
+const PUNCT_RE = /^[\p{P}\p{S}]+$/u;
+export function isPunctuationAnnotation(annot) {
+  if (isAtrNoise(annot) || isNonResolvAbbr(annot)) return false;
+  if (isSpaceInsertion(annot)) return false;
+  const val = getBodyValue(annot);
+  const ext = getExact(annot);
+  if (isInsertion(annot)) return !!val && PUNCT_RE.test(val);
+  if (!ext || !val) return false;
+  // punct→punct change, or token (pure letters) mapped to punctuation only
+  return PUNCT_RE.test(val) && (PUNCT_RE.test(ext) || ALPHA_ONLY_RE.test(ext));
+}
+
+// Surnormalization: both exact and value consist entirely of [a-zA-Z] characters
+// (no accents, no punctuation, no spaces) — the source was already in clean Latin
+// script, making the annotation an over-normalization (e.g. "lui" → "li",
+// "quelle" → "quel"). Ramist modifications (u/i ↔ v/j) are explicitly excluded.
+const ALPHA_ONLY_RE = /^[a-zA-Z]+$/;
+export function isSurnormalization(annot) {
+  if (isInsertion(annot) || isAtrNoise(annot) || isNonResolvAbbr(annot)) return false;
+  const exact = getExact(annot);
+  const value = getBodyValue(annot);
+  if (!exact || !value) return false;
+  if (!ALPHA_ONLY_RE.test(exact) || !ALPHA_ONLY_RE.test(value)) return false;
+  // Capitalisation of the first letter only (e.g. "dieu" → "Dieu") is valid
+  if (exact.slice(1) === value.slice(1) && exact[0].toLowerCase() === value[0].toLowerCase()) return false;
+  const eL = exact.toLowerCase(), vL = value.toLowerCase();
+  const ramist_uv = (eL.includes('u') && vL.includes('v')) || (eL.includes('v') && vL.includes('u'));
+  const ramist_ij = (eL.includes('i') && vL.includes('j')) || (eL.includes('j') && vL.includes('i'));
+  if (ramist_uv || ramist_ij) return false;
+  return true;
+}
+
 // ── Bulk validation: find similar unvalidated annotations ─────────────────────
 export function findSimilarAnnotations(annotations, targetAnnot) {
   const srcExact = getExact(targetAnnot);
