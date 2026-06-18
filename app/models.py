@@ -146,6 +146,7 @@ class Annotation(db.Model):
     body_value    = db.Column(db.Text,        nullable=True)
     body_purpose  = db.Column(db.String(50),  nullable=True)
     body_reason   = db.Column(db.String(50),  nullable=True)
+    body_semtag   = db.Column(db.String(50),  nullable=True)
     target_start  = db.Column(db.Integer,     nullable=False, default=0)
     target_end    = db.Column(db.Integer,     nullable=False, default=0)
     target_exact  = db.Column(db.Text,        nullable=True)
@@ -162,6 +163,8 @@ class Annotation(db.Model):
                       "purpose": self.body_purpose or "normalizing"}
         if self.body_reason:
             body_entry["reason"] = self.body_reason
+        if self.body_semtag:
+            body_entry["semtag"] = self.body_semtag
         d = {
             "id":   self.id,
             "type": "Annotation",
@@ -194,6 +197,7 @@ class Annotation(db.Model):
             body_value   = body.get("value"),
             body_purpose = body.get("purpose"),
             body_reason  = body.get("reason"),
+            body_semtag  = body.get("semtag"),
             target_start = pos.get("start", 0),
             target_end   = pos.get("end",   0),
             target_exact = quo.get("exact"),
@@ -215,6 +219,7 @@ class Annotation(db.Model):
             existing.body_value   = body.get("value")
             existing.body_purpose = body.get("purpose")
             existing.body_reason  = body.get("reason")
+            existing.body_semtag  = body.get("semtag")
             existing.target_start = pos.get("start", 0)
             existing.target_end   = pos.get("end",   0)
             existing.target_exact = quo.get("exact")
@@ -233,6 +238,8 @@ class Page(db.Model):
     label = db.Column(db.String(200), nullable=False)
     order = db.Column(db.Integer, nullable=False, default=0)
     status = db.Column(db.String(20), nullable=False, default="pending")
+    qid = db.Column(db.String(100), nullable=True)
+    original_filename = db.Column(db.String(500), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -283,6 +290,17 @@ class Page(db.Model):
     def normalized_text(self) -> str:
         from .annot_utils import apply_annotations_to_text
         return apply_annotations_to_text(self.full_text, self.annotations or [])
+
+    @property
+    def line_offsets(self) -> list:
+        """List of {start, alto_id} giving each line's start offset within full_text,
+        used to attach ALTO line ids to <lb/> tags in TEI export."""
+        offsets = []
+        offset = 0
+        for line in self.lines:
+            offsets.append({"start": offset, "alto_id": line.alto_id})
+            offset += len(line.original_text) + 1
+        return offsets
 
     def user_has_access(self, user: User) -> bool:
         document = Document.query.get(self.document_id)
@@ -412,6 +430,9 @@ def db_upgrade():
             ("users",       "institution",        "VARCHAR(200)"),
             ("documents",   "iiif_manifest_url",  "TEXT"),
             ("annotations", "body_reason",        "VARCHAR(50)"),
+            ("annotations", "body_semtag",        "VARCHAR(50)"),
+            ("pages",       "qid",                "VARCHAR(100)"),
+            ("pages",       "original_filename",  "VARCHAR(500)"),
         ]
         for table, col, col_def in new_columns:
             existing = [c["name"] for c in inspector.get_columns(table)]

@@ -31,6 +31,14 @@ def find_split_point(orig: str, reg: str) -> int:
 
     return len(reg)
 
+SEMTAG_TAGS = {
+    "persName":  "persName",
+    "orgName":   "orgName",
+    "placeName": "placeName",
+    "num":       "num",
+}
+
+
 def _get_selector(annot: dict, selector_type: str) -> dict:
     for sel in annot.get("target", {}).get("selector", []):
         if sel.get("type") == selector_type:
@@ -180,120 +188,14 @@ def page_metadata(page) -> dict:
     }
 
 
-def build_tei_from_annotations(original_text: str, annotations: list, users_by_id: dict = None, metadata: dict = None) -> str:
-    """Build a TEI XML document from annotations.
+def build_tei_header(meta: dict, users_by_id: dict = None, contributor_ids: set = None) -> str:
+    """Build a standalone <teiHeader> block from a metadata dict.
 
     metadata dict (all keys optional):
         title, document, project, language, qid,
         works: list[{"title": str, "genre": str|None}]
     """
-    sorted_annots = sorted(
-        annotations,
-        key=lambda a: _get_selector(a, "TextPositionSelector").get("start", 0)
-    )
-
-    body_parts = []
-    span_entries = []
-    word_count, cursor, tokens_on_line = 0, 0, 0
-    annot_resp_id = None  # set per-annotation before calling process_segment
-
-    def process_segment(text, orig_label=None, span_type=None, span_subtype=None):
-        nonlocal word_count, tokens_on_line, annot_resp_id
-        local_ids = []
-        has_internal_lb = orig_label and '\n' in orig_label
-
-        # Tokenize reg value (words, punctuation, or manual newlines)
-        tokens = list(re.finditer(r"(\w+)|([^\w\s]+)|(\n)", text))
-
-        prev_end = 0
-        for match in tokens:
-            # Preserve whitespace between tokens (spaces in source/value)
-            if match.start() > prev_end:
-                body_parts.append(escape(text[prev_end:match.start()]))
-            prev_end = match.end()
-
-            val = match.group(0)
-            if match.group(3):  # \n in regularization
-                body_parts.append('<lb/>\n        ')
-                tokens_on_line = 0
-                continue
-
-            word_count += 1
-            tokens_on_line += 1
-            w_id = f"w{word_count}"
-            tag = "pc" if match.group(2) else "w"
-            local_ids.append(f"#{w_id}")
-
-            if has_internal_lb:
-                # Surgical split
-                split_idx = find_split_point(orig_label, val)
-                part1, part2 = val[:split_idx], val[split_idx:]
-                lb_tag = '<lb break="no" precision="low"/>'
-                token_xml = f'<{tag} xml:id="{w_id}">{escape(part1)}{lb_tag}{escape(part2)}</{tag}>'
-                tokens_on_line = 0  # Force wrap after an internal lb
-            else:
-                token_xml = f'<{tag} xml:id="{w_id}">{escape(val)}</{tag}>'
-
-            body_parts.append(token_xml)
-
-            # Beautification wrapping
-            if tokens_on_line >= 10:
-                body_parts.append("\n        ")
-                tokens_on_line = 0
-
-        # Preserve any trailing whitespace in the segment
-        if prev_end < len(text):
-            body_parts.append(escape(text[prev_end:]))
-
-        if orig_label and local_ids:
-            resp_attr = ""
-            if users_by_id and annot_resp_id and annot_resp_id in users_by_id:
-                resp_attr = f' resp="#{escape(users_by_id[annot_resp_id])}"'
-            type_attr    = f' type="{escape(span_type)}"'    if span_type    else ''
-            subtype_attr = f' subtype="{escape(span_subtype)}"' if span_subtype else ''
-            span_entries.append(f'      <span target="{" ".join(local_ids)}"{resp_attr}{type_attr}{subtype_attr}>{escape(orig_label)}</span>')
-
-    # Main Loop
-    for annot in sorted_annots:
-        pos = _get_selector(annot, "TextPositionSelector")
-        start, end = pos.get("start", 0), pos.get("end", 0)
-
-        if start > cursor:
-            annot_resp_id = None
-            process_segment(original_text[cursor:start])
-
-        body = annot.get("body", [{}])[0]
-        if body.get("purpose") == "atr_noise":
-            raw_text = original_text[start:end]
-            resp_id = annot.get("resp_id")
-            resp_attr = ""
-            if users_by_id and resp_id and resp_id in users_by_id:
-                resp_attr = f' resp="#{escape(users_by_id[resp_id])}"'
-            body_parts.append(f'<unclear reason="illegible" cert="low"{resp_attr}>{escape(raw_text)}</unclear>')
-        elif body.get("purpose") == "non_resolv_abbr":
-            reason = body.get("reason", "other")
-            raw_text = original_text[start:end]
-            resp_id = annot.get("resp_id")
-            resp_attr = ""
-            if users_by_id and resp_id and resp_id in users_by_id:
-                resp_attr = f' resp="#{escape(users_by_id[resp_id])}"'
-            annot_resp_id = resp_id
-            pre_len = len(body_parts)
-            process_segment(raw_text, orig_label=raw_text, span_type="non_resolv_abbr", span_subtype=reason)
-            new_parts = body_parts[pre_len:]
-            del body_parts[pre_len:]
-            body_parts.append(f'<abbr type="{escape(reason)}"{resp_attr}>' + "".join(new_parts) + '</abbr>')
-        else:
-            annot_resp_id = annot.get("resp_id")
-            process_segment(body.get("value", ""), orig_label=original_text[start:end])
-        cursor = end
-
-    if cursor < len(original_text):
-        process_segment(original_text[cursor:])
-
-    full_body = "".join(body_parts)
-
-    meta = metadata or {}
+    meta = meta or {}
 
     # titleStmt
     title_parts = [meta.get("document", ""), meta.get("title", "")]
@@ -301,9 +203,7 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
 
     # respStmt entries
     resp_stmts = ""
-    if users_by_id:
-        contributor_ids = {a.get("resp_id") for a in sorted_annots if a.get("resp_id")}
-        contributor_ids |= {a.get("validated_by") for a in sorted_annots if a.get("validated_by")}
+    if users_by_id and contributor_ids:
         stmts = []
         for uid in sorted(contributor_ids):
             name = users_by_id.get(uid)
@@ -343,15 +243,172 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
 
     profile_block = f"\n  {profile_desc}" if profile_desc else ""
 
-    return f'''<TEI xmlns="http://www.tei-c.org/ns/1.0">
-  <teiHeader>
+    return f'''  <teiHeader>
     <fileDesc>
       <titleStmt><title>{title_str}</title>{resp_stmts}
       </titleStmt>
       <publicationStmt><p>Exported from Abbreviarium</p></publicationStmt>
 {source_desc}
     </fileDesc>{profile_block}
-  </teiHeader>
+  </teiHeader>'''
+
+
+def build_tei_from_annotations(original_text: str, annotations: list, users_by_id: dict = None, metadata: dict = None, lines: list = None) -> str:
+    """Build a TEI XML document from annotations.
+
+    metadata dict (all keys optional):
+        title, document, project, language, qid,
+        works: list[{"title": str, "genre": str|None}]
+
+    lines: optional list of {"start": int, "alto_id": str|None} giving each
+        original line's start offset within original_text (see Page.line_offsets).
+        When provided, each <lb/> is annotated with @n=<alto_id> of the line it starts.
+    """
+    sorted_annots = sorted(
+        annotations,
+        key=lambda a: _get_selector(a, "TextPositionSelector").get("start", 0)
+    )
+
+    line_alto_by_start = {l["start"]: l["alto_id"] for l in (lines or []) if l.get("alto_id")}
+
+    body_parts = []
+    span_entries = []
+    word_count, cursor, tokens_on_line = 0, 0, 0
+    annot_resp_id = None  # set per-annotation before calling process_segment
+
+    if lines and lines[0].get("alto_id"):
+        body_parts.append(f'<lb n="{escape(lines[0]["alto_id"])}"/>\n        ')
+
+    def process_segment(text, orig_label=None, span_type=None, span_subtype=None, abs_start=0):
+        nonlocal word_count, tokens_on_line, annot_resp_id
+        local_ids = []
+        has_internal_lb = orig_label and '\n' in orig_label
+
+        # Tokenize reg value (words, punctuation, or manual newlines)
+        tokens = list(re.finditer(r"(\w+)|([^\w\s]+)|(\n)", text))
+
+        prev_end = 0
+        for match in tokens:
+            # Preserve whitespace between tokens (spaces in source/value)
+            if match.start() > prev_end:
+                body_parts.append(escape(text[prev_end:match.start()]))
+            prev_end = match.end()
+
+            val = match.group(0)
+            if match.group(3):  # \n in regularization
+                next_line_start = abs_start + match.end()
+                alto_id = line_alto_by_start.get(next_line_start)
+                n_attr = f' n="{escape(alto_id)}"' if alto_id else ''
+                body_parts.append(f'<lb{n_attr}/>\n        ')
+                tokens_on_line = 0
+                continue
+
+            word_count += 1
+            tokens_on_line += 1
+            w_id = f"w{word_count}"
+            tag = "pc" if match.group(2) else "w"
+            local_ids.append(f"#{w_id}")
+
+            if has_internal_lb:
+                # Surgical split
+                split_idx = find_split_point(orig_label, val)
+                part1, part2 = val[:split_idx], val[split_idx:]
+                lb_tag = '<lb break="no" precision="low"/>'
+                token_xml = f'<{tag} xml:id="{w_id}">{escape(part1)}{lb_tag}{escape(part2)}</{tag}>'
+                tokens_on_line = 0  # Force wrap after an internal lb
+            else:
+                token_xml = f'<{tag} xml:id="{w_id}">{escape(val)}</{tag}>'
+
+            body_parts.append(token_xml)
+
+            # Beautification wrapping
+            if tokens_on_line >= 10:
+                body_parts.append("\n        ")
+                tokens_on_line = 0
+
+        # Preserve any trailing whitespace in the segment
+        if prev_end < len(text):
+            body_parts.append(escape(text[prev_end:]))
+
+        if orig_label and local_ids:
+            resp_attr = ""
+            if users_by_id and annot_resp_id and annot_resp_id in users_by_id:
+                resp_attr = f' resp="#{escape(users_by_id[annot_resp_id])}"'
+            type_attr    = f' type="{escape(span_type)}"'    if span_type    else ''
+            subtype_attr = f' subtype="{escape(span_subtype)}"' if span_subtype else ''
+            if '\n' in orig_label:
+                # Render embedded line breaks (word split across original lines) as <lb/>
+                # instead of a raw newline character, mirroring the main token rendering above.
+                label_lines = orig_label.split('\n')
+                rendered_parts, pos = [], abs_start
+                for i, part in enumerate(label_lines):
+                    rendered_parts.append(escape(part))
+                    pos += len(part)
+                    if i < len(label_lines) - 1:
+                        alto_id = line_alto_by_start.get(pos + 1)
+                        n_attr = f' n="{escape(alto_id)}"' if alto_id else ''
+                        rendered_parts.append(f'<lb break="no" precision="low"{n_attr}/>')
+                        pos += 1
+                orig_label_xml = "".join(rendered_parts)
+            else:
+                orig_label_xml = escape(orig_label)
+            span_entries.append(f'      <span target="{" ".join(local_ids)}"{resp_attr}{type_attr}{subtype_attr}>{orig_label_xml}</span>')
+
+    # Main Loop
+    for annot in sorted_annots:
+        pos = _get_selector(annot, "TextPositionSelector")
+        start, end = pos.get("start", 0), pos.get("end", 0)
+
+        if start > cursor:
+            annot_resp_id = None
+            process_segment(original_text[cursor:start], abs_start=cursor)
+
+        body = annot.get("body", [{}])[0]
+        if body.get("purpose") == "atr_noise":
+            raw_text = original_text[start:end]
+            resp_id = annot.get("resp_id")
+            resp_attr = ""
+            if users_by_id and resp_id and resp_id in users_by_id:
+                resp_attr = f' resp="#{escape(users_by_id[resp_id])}"'
+            body_parts.append(f'<unclear reason="illegible" cert="low"{resp_attr}>{escape(raw_text)}</unclear>')
+        elif body.get("purpose") == "non_resolv_abbr":
+            reason = body.get("reason", "other")
+            raw_text = original_text[start:end]
+            resp_id = annot.get("resp_id")
+            resp_attr = ""
+            if users_by_id and resp_id and resp_id in users_by_id:
+                resp_attr = f' resp="#{escape(users_by_id[resp_id])}"'
+            annot_resp_id = resp_id
+            pre_len = len(body_parts)
+            process_segment(raw_text, orig_label=raw_text, span_type="non_resolv_abbr", span_subtype=reason, abs_start=start)
+            new_parts = body_parts[pre_len:]
+            del body_parts[pre_len:]
+            body_parts.append(f'<abbr type="{escape(reason)}"{resp_attr}>' + "".join(new_parts) + '</abbr>')
+        else:
+            annot_resp_id = annot.get("resp_id")
+            semtag = body.get("semtag")
+            if semtag in SEMTAG_TAGS:
+                pre_len = len(body_parts)
+                process_segment(body.get("value", ""), orig_label=original_text[start:end], abs_start=start)
+                new_parts = body_parts[pre_len:]
+                del body_parts[pre_len:]
+                tag = SEMTAG_TAGS[semtag]
+                body_parts.append(f'<{tag}>' + "".join(new_parts) + f'</{tag}>')
+            else:
+                process_segment(body.get("value", ""), orig_label=original_text[start:end], abs_start=start)
+        cursor = end
+
+    if cursor < len(original_text):
+        process_segment(original_text[cursor:], abs_start=cursor)
+
+    full_body = "".join(body_parts)
+
+    contributor_ids = {a.get("resp_id") for a in sorted_annots if a.get("resp_id")}
+    contributor_ids |= {a.get("validated_by") for a in sorted_annots if a.get("validated_by")}
+    header = build_tei_header(metadata, users_by_id=users_by_id, contributor_ids=contributor_ids)
+
+    return f'''<TEI xmlns="http://www.tei-c.org/ns/1.0">
+{header}
   <text>
     <body>
       <p>

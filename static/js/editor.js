@@ -2,6 +2,7 @@ import { createApp } from 'vue';
 import {
   getSelector, getStart, getEnd, getExact, getPrefix, getSuffix, getBodyValue,
   isInsertion, isAtrNoise, isNonResolvAbbr, getNonResolvReason, isSpaceExact,
+  getSemtag, SEMTAG_LABELS,
   escapeHtml, applyAnnotations,
   buildSourceHtml, computeNormalizedPositions, buildNormalizedPageHtml,
   findSimilarAnnotations,
@@ -43,6 +44,10 @@ export function createEditorApp(config) {
         annotSort:           'position',
         pendingUnclearOpen:  false,
         focusUnclearOpen:    false,
+        annotTagOpenId:      null,
+        annotTypeOpenId:     null,
+        focusTagOpen:        false,
+        focusTypeOpen:       false,
         focusMenuPos:        { top: 0, left: 0 },
         fontSize:            1,
         sourceWidth:         33,
@@ -99,7 +104,7 @@ export function createEditorApp(config) {
       },
 
       focusAnnotations() {
-        return this.pendingAnnotationsSorted.filter(a => !isInsertion(a));
+        return this.pendingAnnotationsSorted;
       },
       focusCurrent() {
         if (!this.focusAnnotations.length) return null;
@@ -216,6 +221,10 @@ export function createEditorApp(config) {
           this.pendingUnclearOpen = false;
           this.focusUnclearOpen   = false;
         }
+        if (!e.target.closest('.tag-wrap'))  this.annotTagOpenId  = null;
+        if (!e.target.closest('.type-wrap')) this.annotTypeOpenId = null;
+        if (!e.target.closest('.fm-tag-wrap'))  this.focusTagOpen  = false;
+        if (!e.target.closest('.fm-type-wrap')) this.focusTypeOpen = false;
       };
       document.addEventListener('click', this._closeDropdowns);
     },
@@ -229,6 +238,16 @@ export function createEditorApp(config) {
       isInsertion, isAtrNoise, isNonResolvAbbr, getNonResolvReason, isSpaceExact,
       isSpaceInsertion, isSpaceBeforePunct, isSpaceBeforeSpace,
       isInsertionExact(stub) { return stub?.isIns === true; },
+      getSemtag, semtagLabels: SEMTAG_LABELS,
+
+      // ── Tag an annotation as person/org/place/numeral ──────────────────────────
+      setSemtag(annot, tag) {
+        const newBody = { ...annot.body[0] };
+        if (tag) newBody.semtag = tag; else delete newBody.semtag;
+        const updated = { ...annot, resp_id: CURRENT_USER_ID, body: [newBody] };
+        this.annotations = this.annotations.map(a => a.id === annot.id ? updated : a);
+        this.saveAnnotation(updated);
+      },
 
       // ── DOM event listeners on #page-source (registered ONCE at mount) ────────
       _registerSourceListeners(el) {
@@ -593,6 +612,50 @@ export function createEditorApp(config) {
         const cur = this.focusCurrent; if (!cur) return;
         const exact = getExact(cur);
         this._focusMarkAs({ value: exact, purpose: 'non_resolv_abbr', reason });
+      },
+      focusSetSemtag(tag) {
+        const cur = this.focusCurrent; if (!cur) return;
+        this.setSemtag(cur, tag);
+        this.focusTagOpen = false;
+      },
+      focusChangeType(newPurpose) {
+        const cur = this.focusCurrent; if (!cur) return;
+        this.changeAnnotationType(cur, newPurpose);
+        this.focusTypeOpen = false;
+        this.$nextTick(() => {
+          const n = this.focusAnnotations.length;
+          if (!n) { this.exitFocusMode(); return; }
+          this.focusAnnotIndex = Math.min(this.focusAnnotIndex, n - 1);
+          this.focusEditValue  = getBodyValue(this.focusCurrent) ?? '';
+          this.refocusFocusInput();
+        });
+      },
+
+      // ── Change an existing annotation's type ────────────────────────────────────
+      changeAnnotationType(annot, newPurpose) {
+        const exact = getExact(annot);
+        const currentValue = getBodyValue(annot) || exact;
+        let newBody;
+        switch (newPurpose) {
+          case 'deletion':
+            newBody = { type: 'TextualBody', value: '', purpose: 'deletion' };
+            break;
+          case 'insertion':
+            newBody = { type: 'TextualBody', value: currentValue, purpose: 'insertion' };
+            break;
+          case 'atr_noise':
+            newBody = { type: 'TextualBody', value: exact, purpose: 'atr_noise' };
+            break;
+          case 'non_resolv_abbr':
+            newBody = { type: 'TextualBody', value: exact, purpose: 'non_resolv_abbr', reason: annot.body?.[0]?.reason || 'other' };
+            break;
+          default:
+            newBody = { type: 'TextualBody', value: currentValue, purpose: 'normalizing' };
+        }
+        if (annot.body?.[0]?.semtag) newBody.semtag = annot.body[0].semtag;
+        const updated = { ...annot, resp_id: CURRENT_USER_ID, body: [newBody] };
+        this.annotations = this.annotations.map(a => a.id === annot.id ? updated : a);
+        this.saveAnnotation(updated);
       },
 
       // ── Remove annotation ─────────────────────────────────────────────────────
@@ -1098,9 +1161,38 @@ async function pageRemoveWork(workId) {
   }
 }
 
+// ── Move page to another document ─────────────────────────────────────────────
+async function populatePageMoveTargets() {
+  const select = document.getElementById('page-move-target');
+  if (!select) return;
+  const resp = await fetch(window.__EDITOR_CONFIG__.urls.projectDocuments);
+  const docs = await resp.json();
+  const others = docs.filter(d => d.id !== window.__EDITOR_CONFIG__.documentId);
+  select.innerHTML = others.length
+    ? others.map(d => `<option value="${d.id}">${d.name}</option>`).join('')
+    : '<option value="">No other documents in this project</option>';
+}
+
+async function pageMoveTo() {
+  const select = document.getElementById('page-move-target');
+  const documentId = select?.value;
+  if (!documentId) return;
+  if (!confirm('Move this page to the selected document?')) return;
+  const resp = await fetch(window.__EDITOR_CONFIG__.urls.movePage, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({document_id: Number(documentId)}),
+  });
+  if (!resp.ok) { alert('Failed to move page'); return; }
+  window.location.href = `/documents/${documentId}`;
+}
+
+document.getElementById('pageMetaModal')?.addEventListener('show.bs.modal', populatePageMoveTargets);
+
 // Expose for onclick= handlers in HTML template
 window.pageAddWork    = pageAddWork;
 window.pageRemoveWork = pageRemoveWork;
+window.pageMoveTo     = pageMoveTo;
 
 // Auto-mount in browser
 if (typeof window !== 'undefined' && window.__EDITOR_CONFIG__) {

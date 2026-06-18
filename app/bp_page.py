@@ -127,9 +127,40 @@ def api_page_status(page: Page):
 @requires_access(Page, 'page_id')
 def page_update(page: Page):
     page.label = request.form.get("label", page.label).strip() or page.label
+    if "status" in request.form:
+        page.status = request.form.get("status", page.status)
+    if "qid" in request.form:
+        page.qid = request.form.get("qid") or None
+    if "original_filename" in request.form:
+        page.original_filename = request.form.get("original_filename") or None
     db.session.commit()
     flash("Page updated", "success")
-    return redirect(url_for("bp_page.page_editor", page_id=page.id))
+    return redirect(request.form.get("next") or url_for("bp_page.page_editor", page_id=page.id))
+
+
+# -------------------------
+# Move page to another document (extract)
+# -------------------------
+
+@bp_page.route("/pages/<int:page_id>/move", methods=["POST"])
+@requires_access(Page, 'page_id')
+def page_move(page: Page):
+    data = request.json or {}
+    new_document_id = data.get("document_id")
+    if not new_document_id:
+        abort(400)
+    new_document_id = int(new_document_id)
+    new_document = Document.query.get_or_404(new_document_id)
+    if not new_document.user_has_access(current_user):
+        abort(403)
+    if new_document_id == page.document_id:
+        return jsonify({"status": "ok"})
+
+    max_order = db.session.query(func.max(Page.order)).filter_by(document_id=new_document_id).scalar()
+    page.document_id = new_document_id
+    page.order = (max_order or 0) + 1
+    db.session.commit()
+    return jsonify({"status": "ok", "document_id": new_document_id})
 
 
 # -------------------------
@@ -173,7 +204,7 @@ def page_stats(page: Page):
 @requires_access(Page, 'page_id')
 def page_export_tei(page: Page):
     users_by_id = {u.id: u.nickname or u.username for u in User.query.all()}
-    tei = build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id, metadata=page_metadata(page))
+    tei = build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id, metadata=page_metadata(page), lines=page.line_offsets)
     return Response(
         tei,
         mimetype="text/xml",

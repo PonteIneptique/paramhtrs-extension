@@ -163,7 +163,7 @@ def project_download_zip(project: Project):
             safe_doc = document.name.replace("/", "_").replace("\\", "_")
             for page in document.pages:
                 safe_label = page.label.replace("/", "_").replace("\\", "_")
-                tei = build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id, metadata=page_metadata(page))
+                tei = build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id, metadata=page_metadata(page), lines=page.line_offsets)
                 zf.writestr(f"{safe_doc}/{safe_label}.xml", tei)
                 zf.writestr(f"{safe_doc}/{safe_label}.json", json.dumps(page.annotations or [], ensure_ascii=False, indent=2))
                 zf.writestr(f"{safe_doc}/{safe_label}_source.txt", page.full_text)

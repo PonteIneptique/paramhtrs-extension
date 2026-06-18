@@ -7,7 +7,7 @@ from flask import Blueprint, render_template, request, jsonify, redirect, url_fo
 from flask_login import login_required, current_user
 from .models import db, Document, DocumentUser, DocumentWork, Work, Project, Page, Line, User
 from .bp_auth import requires_access
-from .annot_utils import build_tei_from_annotations, page_metadata
+from .annot_utils import build_tei_from_annotations, build_tei_header, page_metadata
 
 bp_document = Blueprint(
     "bp_document", __name__,
@@ -215,6 +215,23 @@ def api_project_documents(project_id):
 
 
 # -------------------------
+# Reorder pages within a document
+# -------------------------
+
+@bp_document.route("/api/documents/<int:document_id>/pages/reorder", methods=["POST"])
+@requires_access(Document, 'document_id')
+def api_document_reorder_pages(document: Document):
+    order = (request.json or {}).get("order") or []
+    pages_by_id = {p.id: p for p in Page.query.filter_by(document_id=document.id).all()}
+    if set(order) != set(pages_by_id.keys()):
+        abort(400)
+    for idx, page_id in enumerate(order):
+        pages_by_id[page_id].order = idx
+    db.session.commit()
+    return jsonify({"status": "ok"})
+
+
+# -------------------------
 # TEI export of full document
 # -------------------------
 
@@ -239,15 +256,27 @@ def document_stats(document: Document):
 @requires_access(Document, 'document_id')
 def document_export_tei(document: Document):
     users_by_id = {u.id: u.nickname or u.username for u in User.query.all()}
-    parts = [f'<body n="{document.name}">']
-    for page in document.pages:
-        page_tei = build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id, metadata=page_metadata(page))
-        parts.append(f'<ab n="{page.label}">')
-        parts.append(page_tei)
-        parts.append('</ab>')
-    parts.append('</body>')
-    tei_body = "\n".join(parts)
-    return Response(tei_body, mimetype="text/xml",
+
+    corpus_meta = {
+        "document": document.name,
+        "language": document.language,
+        "qid": document.qid,
+        "works": [{"title": w.title, "genre": w.genre} for w in document.works],
+    }
+    corpus_header = build_tei_header(corpus_meta, users_by_id=users_by_id)
+
+    page_teis = [
+        build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id, metadata=page_metadata(page), lines=page.line_offsets)
+        for page in document.pages
+    ]
+
+    tei_corpus = (
+        '<teiCorpus xmlns="http://www.tei-c.org/ns/1.0">\n'
+        f'{corpus_header}\n'
+        + "\n".join(page_teis)
+        + '\n</teiCorpus>'
+    )
+    return Response(tei_corpus, mimetype="text/xml",
                     headers={"Content-Disposition": f'attachment; filename="{document.name}.xml"'})
 
 
@@ -263,7 +292,7 @@ def document_download_zip(document: Document):
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for page in document.pages:
             safe_label = page.label.replace("/", "_").replace("\\", "_")
-            tei = build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id, metadata=page_metadata(page))
+            tei = build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id, metadata=page_metadata(page), lines=page.line_offsets)
             zf.writestr(f"{safe_label}.xml", tei)
             zf.writestr(f"{safe_label}.json", json.dumps(page.annotations or [], ensure_ascii=False, indent=2))
             zf.writestr(f"{safe_label}_source.txt", page.full_text)

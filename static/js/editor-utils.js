@@ -16,6 +16,14 @@ export function isInsertion(annot) {
 export function isAtrNoise(annot)      { return annot?.body?.[0]?.purpose === 'atr_noise'; }
 export function isNonResolvAbbr(annot) { return annot?.body?.[0]?.purpose === 'non_resolv_abbr'; }
 export function getNonResolvReason(annot) { return annot?.body?.[0]?.reason ?? 'other'; }
+export function getSemtag(annot) { return annot?.body?.[0]?.semtag ?? null; }
+
+export const SEMTAG_LABELS = {
+  persName:  'Person',
+  orgName:   'Organisation',
+  placeName: 'Place',
+  num:       'Numeral',
+};
 export function isSpaceExact(annot) {
   return !isInsertion(annot) && !isAtrNoise(annot) && !isNonResolvAbbr(annot) && getExact(annot).trim() === '';
 }

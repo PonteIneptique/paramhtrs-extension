@@ -774,6 +774,31 @@ body { overflow: hidden; }
               @keydown.enter.prevent="$event.target.blur()"
               @keydown.tab.prevent="tabToNext(annot)">
           </label>
+          <span v-if="getSemtag(annot)" class="badge bg-info text-dark me-1" style="font-size:.65em;">[[ semtagLabels[getSemtag(annot)] ]]</span>
+          <div class="unclear-wrap tag-wrap">
+            <button class="unclear-btn" @mousedown.prevent.stop="annotTagOpenId = annotTagOpenId === annot.id ? null : annot.id" title="Tag as person/org/place/numeral">
+              Tag <span style="font-size:.8em; opacity:.7;">▾</span>
+            </button>
+            <div v-if="annotTagOpenId === annot.id" class="unclear-menu">
+              <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'persName'); annotTagOpenId = null">Person</button>
+              <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'orgName'); annotTagOpenId = null">Organisation</button>
+              <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'placeName'); annotTagOpenId = null">Place</button>
+              <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'num'); annotTagOpenId = null">Numeral</button>
+              <button v-if="getSemtag(annot)" class="unclear-item" @mousedown.prevent="setSemtag(annot, null); annotTagOpenId = null">Clear tag</button>
+            </div>
+          </div>
+          <div class="unclear-wrap type-wrap">
+            <button class="unclear-btn" @mousedown.prevent.stop="annotTypeOpenId = annotTypeOpenId === annot.id ? null : annot.id" title="Change annotation type">
+              Type <span style="font-size:.8em; opacity:.7;">▾</span>
+            </button>
+            <div v-if="annotTypeOpenId === annot.id" class="unclear-menu">
+              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'normalizing'); annotTypeOpenId = null">Normalizing</button>
+              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'insertion'); annotTypeOpenId = null">Insertion</button>
+              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'deletion'); annotTypeOpenId = null">Deletion</button>
+              <button class="unclear-item is-noise" @mousedown.prevent="changeAnnotationType(annot, 'atr_noise'); annotTypeOpenId = null">ATR noise</button>
+              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'non_resolv_abbr'); annotTypeOpenId = null">Non-resolvable abbr.</button>
+            </div>
+          </div>
           <button class="btn btn-sm btn-outline-success py-0 px-1 validate-btn" title="Validate (Ctrl+Enter)"
                   @click.stop="validateAnnotation(annot)">✓<span class="validate-hint"> (Ctrl+Enter)</span></button>
           <button class="annot-del" @click.stop="removeAnnotation(annot)" title="Remove">✕</button>
@@ -855,6 +880,31 @@ body { overflow: hidden; }
               @blur="onAnnotBlur(annot, $event)"
               @keydown.enter.prevent="$event.target.blur()">
           </label>
+          <span v-if="getSemtag(annot)" class="badge bg-info text-dark me-1" style="font-size:.65em;">[[ semtagLabels[getSemtag(annot)] ]]</span>
+          <div class="unclear-wrap tag-wrap">
+            <button class="unclear-btn" @mousedown.prevent.stop="annotTagOpenId = annotTagOpenId === annot.id ? null : annot.id" title="Tag as person/org/place/numeral">
+              Tag <span style="font-size:.8em; opacity:.7;">▾</span>
+            </button>
+            <div v-if="annotTagOpenId === annot.id" class="unclear-menu">
+              <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'persName'); annotTagOpenId = null">Person</button>
+              <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'orgName'); annotTagOpenId = null">Organisation</button>
+              <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'placeName'); annotTagOpenId = null">Place</button>
+              <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'num'); annotTagOpenId = null">Numeral</button>
+              <button v-if="getSemtag(annot)" class="unclear-item" @mousedown.prevent="setSemtag(annot, null); annotTagOpenId = null">Clear tag</button>
+            </div>
+          </div>
+          <div class="unclear-wrap type-wrap">
+            <button class="unclear-btn" @mousedown.prevent.stop="annotTypeOpenId = annotTypeOpenId === annot.id ? null : annot.id" title="Change annotation type">
+              Type <span style="font-size:.8em; opacity:.7;">▾</span>
+            </button>
+            <div v-if="annotTypeOpenId === annot.id" class="unclear-menu">
+              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'normalizing'); annotTypeOpenId = null">Normalizing</button>
+              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'insertion'); annotTypeOpenId = null">Insertion</button>
+              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'deletion'); annotTypeOpenId = null">Deletion</button>
+              <button class="unclear-item is-noise" @mousedown.prevent="changeAnnotationType(annot, 'atr_noise'); annotTypeOpenId = null">ATR noise</button>
+              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'non_resolv_abbr'); annotTypeOpenId = null">Non-resolvable abbr.</button>
+            </div>
+          </div>
           <button class="btn btn-sm btn-outline-secondary py-0 px-1" title="Un-validate"
                   @click.stop="unvalidateAnnotation(annot)">↩</button>
           <button class="annot-del" @click.stop="removeAnnotation(annot)" title="Remove">✕</button>
@@ -1111,28 +1161,33 @@ body { overflow: hidden; }
           <div class="fm-active-wrap" v-if="focusCurrent">
             <div style="display:flex; align-items:center; gap:6px;">
               <!-- left boundary nudge -->
-              <div style="display:flex; flex-direction:column; gap:3px;">
+              <div v-if="!isInsertion(focusCurrent)" style="display:flex; flex-direction:column; gap:3px;">
                 <button class="fm-boundary-btn" @click.stop="adjustAnnotationBoundary('start', -1, focusCurrent.id)" title="Expand left boundary">‹</button>
                 <button class="fm-boundary-btn" @click.stop="adjustAnnotationBoundary('start', +1, focusCurrent.id)" title="Shrink left boundary">›</button>
               </div>
               <span class="fm-token">
-                <span class="fm-tok-abbr fm-active-abbr" v-html="renderVisible(getExact(focusCurrent))"></span>
+                <span v-if="isInsertion(focusCurrent)" class="fm-tok-abbr fm-active-abbr annot-ins-chip" title="insertion">∅</span>
+                <span v-else class="fm-tok-abbr fm-active-abbr" v-html="renderVisible(getExact(focusCurrent))"></span>
                 <span v-if="isAtrNoise(focusCurrent)" class="fm-type-chip fm-type-noise">ATR Noise</span>
                 <span v-else-if="isNonResolvAbbr(focusCurrent)" class="fm-type-chip fm-type-nonresolv">
                   [[ getNonResolvReason(focusCurrent) ]]
                 </span>
-                <input v-else ref="focusModeInput" :class="['fm-norm-input', focusValidated ? 'fm-validated' : '']"
-                       v-model="focusEditValue"
-                       :style="{ width: Math.max(5, focusEditValue.length + 2) + 'ch' }"
-                       placeholder="Normalized form"
-                       title="Leave empty to treat as a deletion [e.g. space deletion]"
-                       @keydown.tab.prevent="focusNavigate($event.shiftKey ? -1 : 1)"
-                       @keydown.enter.exact.prevent="focusValidateAndAdvance"
-                       @keydown.esc.prevent="exitFocusMode"
-                       @blur="saveFocusEdit">
+                <template v-else>
+                  <span v-if="isInsertion(focusCurrent)" class="fm-type-chip" style="opacity:.75;">insertion</span>
+                  <span v-else-if="!focusEditValue" class="fm-type-chip" style="opacity:.75;">deleted</span>
+                  <input ref="focusModeInput" :class="['fm-norm-input', focusValidated ? 'fm-validated' : '']"
+                         v-model="focusEditValue"
+                         :style="{ width: Math.max(5, focusEditValue.length + 2) + 'ch' }"
+                         placeholder="Normalized form"
+                         title="Leave empty to treat as a deletion [e.g. space deletion]"
+                         @keydown.tab.prevent="focusNavigate($event.shiftKey ? -1 : 1)"
+                         @keydown.enter.exact.prevent="focusValidateAndAdvance"
+                         @keydown.esc.prevent="exitFocusMode"
+                         @blur="saveFocusEdit">
+                </template>
               </span>
               <!-- right boundary nudge -->
-              <div style="display:flex; flex-direction:column; gap:3px;">
+              <div v-if="!isInsertion(focusCurrent)" style="display:flex; flex-direction:column; gap:3px;">
                 <button class="fm-boundary-btn" @click.stop="adjustAnnotationBoundary('end', -1, focusCurrent.id)" title="Shrink right boundary">‹</button>
                 <button class="fm-boundary-btn" @click.stop="adjustAnnotationBoundary('end', +1, focusCurrent.id)" title="Expand right boundary">›</button>
               </div>
@@ -1166,6 +1221,32 @@ body { overflow: hidden; }
                   <button class="fm-unclear-item" @click.stop="focusMarkNonResolvAbbr('other')">
                     Other ambiguous abbreviation
                   </button>
+                </div>
+              </Teleport>
+              <button class="fm-unclear-btn" @click.stop="e => { const r = e.currentTarget.getBoundingClientRect(); focusMenuPos = { top: r.top - 4, left: r.left + r.width/2 }; focusTagOpen = !focusTagOpen; }" tabindex="-1">
+                Tag <span style="font-size:.75em; opacity:.85;">▾</span>
+              </button>
+              <Teleport to="body">
+                <div v-if="focusTagOpen" class="fm-unclear-menu-fixed"
+                     :style="{ top: focusMenuPos.top + 'px', left: focusMenuPos.left + 'px', transform: 'translate(-50%, -100%)' }">
+                  <button class="fm-unclear-item" @click.stop="focusSetSemtag('persName')">Person</button>
+                  <button class="fm-unclear-item" @click.stop="focusSetSemtag('orgName')">Organisation</button>
+                  <button class="fm-unclear-item" @click.stop="focusSetSemtag('placeName')">Place</button>
+                  <button class="fm-unclear-item" @click.stop="focusSetSemtag('num')">Numeral</button>
+                  <button v-if="getSemtag(focusCurrent)" class="fm-unclear-item" @click.stop="focusSetSemtag(null)">Clear tag</button>
+                </div>
+              </Teleport>
+              <button class="fm-unclear-btn" @click.stop="e => { const r = e.currentTarget.getBoundingClientRect(); focusMenuPos = { top: r.top - 4, left: r.left + r.width/2 }; focusTypeOpen = !focusTypeOpen; }" tabindex="-1">
+                Type <span style="font-size:.75em; opacity:.85;">▾</span>
+              </button>
+              <Teleport to="body">
+                <div v-if="focusTypeOpen" class="fm-unclear-menu-fixed"
+                     :style="{ top: focusMenuPos.top + 'px', left: focusMenuPos.left + 'px', transform: 'translate(-50%, -100%)' }">
+                  <button class="fm-unclear-item" @click.stop="focusChangeType('normalizing')">Normalizing</button>
+                  <button class="fm-unclear-item" @click.stop="focusChangeType('insertion')">Insertion</button>
+                  <button class="fm-unclear-item" @click.stop="focusChangeType('deletion')">Deletion</button>
+                  <button class="fm-unclear-item is-noise" @click.stop="focusChangeType('atr_noise')">ATR noise</button>
+                  <button class="fm-unclear-item" @click.stop="focusChangeType('non_resolv_abbr')">Non-resolvable abbr.</button>
                 </div>
               </Teleport>
             </div>
@@ -1234,12 +1315,24 @@ body { overflow: hidden; }
       </div>
       <div class="modal-body">
 
-        <!-- Label -->
-        <h6 class="text-uppercase text-muted small fw-semibold mb-2">Label</h6>
-        <form method="post" action="{{ url_for('bp_page.page_update', page_id=page.id) }}"
-              class="d-flex gap-2 mb-4">
-          <input type="text" class="form-control" name="label" value="{{ page.label }}" required>
-          <button type="submit" class="btn btn-primary" style="white-space:nowrap;">Save label</button>
+        <!-- Label / QID / filename -->
+        <h6 class="text-uppercase text-muted small fw-semibold mb-2">Page metadata</h6>
+        <form method="post" action="{{ url_for('bp_page.page_update', page_id=page.id) }}" class="mb-4">
+          <div class="mb-2">
+            <label class="form-label form-label-sm mb-1 small">Label</label>
+            <input type="text" class="form-control" name="label" value="{{ page.label }}" required>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-6">
+              <label class="form-label form-label-sm mb-1 small">QID</label>
+              <input type="text" class="form-control" name="qid" value="{{ page.qid or '' }}" placeholder="e.g. Q12345">
+            </div>
+            <div class="col-6">
+              <label class="form-label form-label-sm mb-1 small">Original filename</label>
+              <input type="text" class="form-control" name="original_filename" value="{{ page.original_filename or '' }}" placeholder="e.g. page_0001.xml">
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary btn-sm">Save metadata</button>
         </form>
 
         <!-- Works -->
@@ -1269,6 +1362,20 @@ body { overflow: hidden; }
             </div>
             <button class="btn btn-sm btn-primary" onclick="pageAddWork()">Add</button>
           </div>
+        </div>
+
+        <!-- Move -->
+        <hr class="mt-4">
+        <h6 class="text-uppercase text-muted small fw-semibold mb-2">Move to another document</h6>
+        <div class="d-flex gap-2 align-items-end flex-wrap mb-2">
+          <div class="flex-grow-1" style="min-width:200px;">
+            <select class="form-select form-select-sm" id="page-move-target">
+              <option value="">Loading documents…</option>
+            </select>
+          </div>
+          <button class="btn btn-sm btn-outline-primary" onclick="pageMoveTo()">
+            <i class="fa-solid fa-arrow-right-arrow-left me-1"></i>Move
+          </button>
         </div>
 
         <!-- Danger zone -->
@@ -1314,6 +1421,8 @@ window.__EDITOR_CONFIG__ = {
   pageLabel:     {{ page.label|tojson }},
   pageStatus:    {{ page.status|tojson }},
   currentUserId: {{ current_user.id }},
+  documentId:    {{ document.id }},
+  projectId:     {{ document.project_id }},
   urls: {
     saveAnnotations:  {{ url_for('bp_norm.api_page_save_annotations',  page_id=page.id)|tojson }},
     saveAnnotation:   {{ url_for('bp_norm.api_page_save_annotation',   page_id=page.id, annotation_id='__ANN_ID__')|tojson }},
@@ -1322,6 +1431,8 @@ window.__EDITOR_CONFIG__ = {
     addWork:          {{ url_for('bp_page.api_page_add_work',          page_id=page.id)|tojson }},
     removeWork:       {{ url_for('bp_page.api_page_remove_work',       page_id=page.id, work_id=0)|tojson }}.replace('/0', '/__WORK_ID__'),
     deleteLine:       {{ url_for('bp_norm.line_delete',                line_id=0)|tojson }}.replace('/0/', '/__LINE_ID__/'),
+    movePage:         {{ url_for('bp_page.page_move',                  page_id=page.id)|tojson }},
+    projectDocuments: {{ url_for('bp_document.api_project_documents',  project_id=document.project_id)|tojson }},
   },
 };
 </script>
