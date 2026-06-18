@@ -134,6 +134,15 @@ body { overflow: hidden; }
   border-bottom: 2px dashed #7952b3;
   color: #3d1c86;
 }
+#page-source mark.r6o-markup {
+  background: transparent;
+  border-bottom: 2px solid #0d6efd;
+  color: inherit;
+}
+#page-source mark.r6o-markup.selected,
+#page-source mark.r6o-markup.hovered {
+  background: rgba(13, 110, 253, 0.15);
+}
 .line-mgmt-row {
   display: flex;
   align-items: center;
@@ -217,6 +226,17 @@ body { overflow: hidden; }
   flex-shrink: 0;
   cursor: default;
 }
+.annot-markup-chip {
+  font-size: .7rem;
+  font-weight: bold;
+  background: #0d6efd;
+  color: #fff;
+  border-radius: 3px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: default;
+}
 .annot-arrow { color: #adb5bd; flex-shrink: 0; padding: 0 2px; }
 .annot-target {
   font-family: 'JunicodeVF', serif;
@@ -285,6 +305,10 @@ body { overflow: hidden; }
 .normalized-text mark.norm-nonresolv-abbr {
   background: rgba(121, 82, 179, 0.12);
   border-bottom: 1px dashed #7952b3;
+}
+.normalized-text mark.norm-markup {
+  background: transparent;
+  border-bottom: 2px solid #0d6efd;
 }
 
 /* ── Status badge ── */
@@ -512,6 +536,13 @@ body { overflow: hidden; }
 }
 .unclear-item:hover { background: #f8f9fa; }
 .unclear-item.is-noise { color: #dc3545; }
+/* Teleported fixed menu (avoids clipping inside scrollable .panel-annots) */
+.unclear-menu-fixed {
+  position: fixed;
+  background: #fff; border: 1px solid #dee2e6; border-radius: 5px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.12);
+  min-width: 220px; z-index: 9999; overflow: hidden;
+}
 /* Focus-mode unclear button */
 .fm-unclear-btn {
   background: #7952b3; border: 1px solid #6741a5;
@@ -767,6 +798,7 @@ body { overflow: hidden; }
             <span v-else-if="!getBodyValue(annot)" class="annot-del-chip">deleted</span>
             <span v-else-if="isInsertion(annot) && !getBodyValue(annot).trim()" class="annot-orig-sp">[SPACE]</span>
             <span v-else-if="isInsertion(annot)" class="annot-ins-chip">[[ getBodyValue(annot) ]]</span>
+            <span v-else-if="isMarkup(annot)" class="annot-markup-chip">[MARK-UP]</span>
             <input v-else type="text" class="annot-target"
               :value="getBodyValue(annot)"
               @focus="onAnnotInputFocus(annot)"
@@ -776,28 +808,35 @@ body { overflow: hidden; }
           </label>
           <span v-if="getSemtag(annot)" class="badge bg-info text-dark me-1" style="font-size:.65em;">[[ semtagLabels[getSemtag(annot)] ]]</span>
           <div class="unclear-wrap tag-wrap">
-            <button class="unclear-btn" @mousedown.prevent.stop="annotTagOpenId = annotTagOpenId === annot.id ? null : annot.id" title="Tag as person/org/place/numeral">
+            <button class="unclear-btn" @mousedown.prevent.stop="e => { const r = e.currentTarget.getBoundingClientRect(); annotMenuPos = { top: r.bottom + 3, left: r.right }; annotTagOpenId = annotTagOpenId === annot.id ? null : annot.id; }" title="Tag as person/org/place/numeral">
               Tag <span style="font-size:.8em; opacity:.7;">▾</span>
             </button>
-            <div v-if="annotTagOpenId === annot.id" class="unclear-menu">
+            <Teleport to="body">
+            <div v-if="annotTagOpenId === annot.id" class="unclear-menu-fixed"
+                 :style="{ top: annotMenuPos.top + 'px', left: annotMenuPos.left + 'px', transform: 'translateX(-100%)' }">
               <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'persName'); annotTagOpenId = null">Person</button>
               <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'orgName'); annotTagOpenId = null">Organisation</button>
               <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'placeName'); annotTagOpenId = null">Place</button>
               <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'num'); annotTagOpenId = null">Numeral</button>
               <button v-if="getSemtag(annot)" class="unclear-item" @mousedown.prevent="setSemtag(annot, null); annotTagOpenId = null">Clear tag</button>
             </div>
+            </Teleport>
           </div>
           <div class="unclear-wrap type-wrap">
-            <button class="unclear-btn" @mousedown.prevent.stop="annotTypeOpenId = annotTypeOpenId === annot.id ? null : annot.id" title="Change annotation type">
+            <button class="unclear-btn" @mousedown.prevent.stop="e => { const r = e.currentTarget.getBoundingClientRect(); annotMenuPos = { top: r.bottom + 3, left: r.right }; annotTypeOpenId = annotTypeOpenId === annot.id ? null : annot.id; }" title="Change annotation type">
               Type <span style="font-size:.8em; opacity:.7;">▾</span>
             </button>
-            <div v-if="annotTypeOpenId === annot.id" class="unclear-menu">
+            <Teleport to="body">
+            <div v-if="annotTypeOpenId === annot.id" class="unclear-menu-fixed"
+                 :style="{ top: annotMenuPos.top + 'px', left: annotMenuPos.left + 'px', transform: 'translateX(-100%)' }">
               <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'normalizing'); annotTypeOpenId = null">Normalizing</button>
               <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'insertion'); annotTypeOpenId = null">Insertion</button>
               <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'deletion'); annotTypeOpenId = null">Deletion</button>
               <button class="unclear-item is-noise" @mousedown.prevent="changeAnnotationType(annot, 'atr_noise'); annotTypeOpenId = null">ATR noise</button>
               <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'non_resolv_abbr'); annotTypeOpenId = null">Non-resolvable abbr.</button>
+              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'markup'); annotTypeOpenId = null">Mark-Up</button>
             </div>
+            </Teleport>
           </div>
           <button class="btn btn-sm btn-outline-success py-0 px-1 validate-btn" title="Validate (Ctrl+Enter)"
                   @click.stop="validateAnnotation(annot)">✓<span class="validate-hint"> (Ctrl+Enter)</span></button>
@@ -844,6 +883,15 @@ body { overflow: hidden; }
               <button class="unclear-item" @mousedown.prevent="markNonResolvAbbr('other')">
                 Other ambiguous abbreviation
               </button>
+              <button v-if="!pendingMarkupOpen" class="unclear-item" @mousedown.prevent="pendingMarkupOpen = true">
+                Mark-Up (tag only, no change) <span style="font-size:.8em; opacity:.7;">▸</span>
+              </button>
+              <template v-else>
+                <button class="unclear-item" @mousedown.prevent="markMarkup('persName')">↳ Person</button>
+                <button class="unclear-item" @mousedown.prevent="markMarkup('orgName')">↳ Organisation</button>
+                <button class="unclear-item" @mousedown.prevent="markMarkup('placeName')">↳ Place</button>
+                <button class="unclear-item" @mousedown.prevent="markMarkup('num')">↳ Numeral</button>
+              </template>
             </div>
           </div>
         </div>
@@ -874,6 +922,7 @@ body { overflow: hidden; }
             <span v-else-if="!getBodyValue(annot)" class="annot-del-chip">deleted</span>
             <span v-else-if="isInsertion(annot) && !getBodyValue(annot).trim()" class="annot-orig-sp">[SPACE]</span>
             <span v-else-if="isInsertion(annot)" class="annot-ins-chip">[[ getBodyValue(annot) ]]</span>
+            <span v-else-if="isMarkup(annot)" class="annot-markup-chip">[MARK-UP]</span>
             <input v-else type="text" class="annot-target"
               :value="getBodyValue(annot)"
               @focus="onAnnotInputFocus(annot)"
@@ -882,28 +931,35 @@ body { overflow: hidden; }
           </label>
           <span v-if="getSemtag(annot)" class="badge bg-info text-dark me-1" style="font-size:.65em;">[[ semtagLabels[getSemtag(annot)] ]]</span>
           <div class="unclear-wrap tag-wrap">
-            <button class="unclear-btn" @mousedown.prevent.stop="annotTagOpenId = annotTagOpenId === annot.id ? null : annot.id" title="Tag as person/org/place/numeral">
+            <button class="unclear-btn" @mousedown.prevent.stop="e => { const r = e.currentTarget.getBoundingClientRect(); annotMenuPos = { top: r.bottom + 3, left: r.right }; annotTagOpenId = annotTagOpenId === annot.id ? null : annot.id; }" title="Tag as person/org/place/numeral">
               Tag <span style="font-size:.8em; opacity:.7;">▾</span>
             </button>
-            <div v-if="annotTagOpenId === annot.id" class="unclear-menu">
+            <Teleport to="body">
+            <div v-if="annotTagOpenId === annot.id" class="unclear-menu-fixed"
+                 :style="{ top: annotMenuPos.top + 'px', left: annotMenuPos.left + 'px', transform: 'translateX(-100%)' }">
               <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'persName'); annotTagOpenId = null">Person</button>
               <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'orgName'); annotTagOpenId = null">Organisation</button>
               <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'placeName'); annotTagOpenId = null">Place</button>
               <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'num'); annotTagOpenId = null">Numeral</button>
               <button v-if="getSemtag(annot)" class="unclear-item" @mousedown.prevent="setSemtag(annot, null); annotTagOpenId = null">Clear tag</button>
             </div>
+            </Teleport>
           </div>
           <div class="unclear-wrap type-wrap">
-            <button class="unclear-btn" @mousedown.prevent.stop="annotTypeOpenId = annotTypeOpenId === annot.id ? null : annot.id" title="Change annotation type">
+            <button class="unclear-btn" @mousedown.prevent.stop="e => { const r = e.currentTarget.getBoundingClientRect(); annotMenuPos = { top: r.bottom + 3, left: r.right }; annotTypeOpenId = annotTypeOpenId === annot.id ? null : annot.id; }" title="Change annotation type">
               Type <span style="font-size:.8em; opacity:.7;">▾</span>
             </button>
-            <div v-if="annotTypeOpenId === annot.id" class="unclear-menu">
+            <Teleport to="body">
+            <div v-if="annotTypeOpenId === annot.id" class="unclear-menu-fixed"
+                 :style="{ top: annotMenuPos.top + 'px', left: annotMenuPos.left + 'px', transform: 'translateX(-100%)' }">
               <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'normalizing'); annotTypeOpenId = null">Normalizing</button>
               <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'insertion'); annotTypeOpenId = null">Insertion</button>
               <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'deletion'); annotTypeOpenId = null">Deletion</button>
               <button class="unclear-item is-noise" @mousedown.prevent="changeAnnotationType(annot, 'atr_noise'); annotTypeOpenId = null">ATR noise</button>
               <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'non_resolv_abbr'); annotTypeOpenId = null">Non-resolvable abbr.</button>
+              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'markup'); annotTypeOpenId = null">Mark-Up</button>
             </div>
+            </Teleport>
           </div>
           <button class="btn btn-sm btn-outline-secondary py-0 px-1" title="Un-validate"
                   @click.stop="unvalidateAnnotation(annot)">↩</button>
@@ -1172,6 +1228,7 @@ body { overflow: hidden; }
                 <span v-else-if="isNonResolvAbbr(focusCurrent)" class="fm-type-chip fm-type-nonresolv">
                   [[ getNonResolvReason(focusCurrent) ]]
                 </span>
+                <span v-else-if="isMarkup(focusCurrent)" class="fm-type-chip annot-markup-chip">Mark-Up</span>
                 <template v-else>
                   <span v-if="isInsertion(focusCurrent)" class="fm-type-chip" style="opacity:.75;">insertion</span>
                   <span v-else-if="!focusEditValue" class="fm-type-chip" style="opacity:.75;">deleted</span>
@@ -1221,6 +1278,15 @@ body { overflow: hidden; }
                   <button class="fm-unclear-item" @click.stop="focusMarkNonResolvAbbr('other')">
                     Other ambiguous abbreviation
                   </button>
+                  <button v-if="!focusMarkupOpen" class="fm-unclear-item" @click.stop="focusMarkupOpen = true">
+                    Mark-Up (tag only, no change) <span style="font-size:.75em; opacity:.85;">▸</span>
+                  </button>
+                  <template v-else>
+                    <button class="fm-unclear-item" @click.stop="focusMarkMarkup('persName')">↳ Person</button>
+                    <button class="fm-unclear-item" @click.stop="focusMarkMarkup('orgName')">↳ Organisation</button>
+                    <button class="fm-unclear-item" @click.stop="focusMarkMarkup('placeName')">↳ Place</button>
+                    <button class="fm-unclear-item" @click.stop="focusMarkMarkup('num')">↳ Numeral</button>
+                  </template>
                 </div>
               </Teleport>
               <button class="fm-unclear-btn" @click.stop="e => { const r = e.currentTarget.getBoundingClientRect(); focusMenuPos = { top: r.top - 4, left: r.left + r.width/2 }; focusTagOpen = !focusTagOpen; }" tabindex="-1">
@@ -1247,6 +1313,7 @@ body { overflow: hidden; }
                   <button class="fm-unclear-item" @click.stop="focusChangeType('deletion')">Deletion</button>
                   <button class="fm-unclear-item is-noise" @click.stop="focusChangeType('atr_noise')">ATR noise</button>
                   <button class="fm-unclear-item" @click.stop="focusChangeType('non_resolv_abbr')">Non-resolvable abbr.</button>
+                  <button class="fm-unclear-item" @click.stop="focusChangeType('markup')">Mark-Up</button>
                 </div>
               </Teleport>
             </div>

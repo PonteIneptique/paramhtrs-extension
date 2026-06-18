@@ -1,7 +1,7 @@
 import { createApp } from 'vue';
 import {
   getSelector, getStart, getEnd, getExact, getPrefix, getSuffix, getBodyValue,
-  isInsertion, isAtrNoise, isNonResolvAbbr, getNonResolvReason, isSpaceExact,
+  isInsertion, isAtrNoise, isNonResolvAbbr, getNonResolvReason, isSpaceExact, isMarkup,
   getSemtag, SEMTAG_LABELS,
   escapeHtml, applyAnnotations,
   buildSourceHtml, computeNormalizedPositions, buildNormalizedPageHtml,
@@ -34,6 +34,7 @@ export function createEditorApp(config) {
         pageId:              config.pageId,
         pageLabel:           config.pageLabel,
         pageStatus:          config.pageStatus,
+        semtagLabels:        SEMTAG_LABELS,
         hoveredAnnotationId: null,
         hoverEnabled:        true,
         selectedAnnotationId: null,
@@ -43,12 +44,15 @@ export function createEditorApp(config) {
         annotFilter:         'pending',
         annotSort:           'position',
         pendingUnclearOpen:  false,
+        pendingMarkupOpen:   false,
         focusUnclearOpen:    false,
+        focusMarkupOpen:     false,
         annotTagOpenId:      null,
         annotTypeOpenId:     null,
         focusTagOpen:        false,
         focusTypeOpen:       false,
         focusMenuPos:        { top: 0, left: 0 },
+        annotMenuPos:        { top: 0, left: 0 },
         fontSize:            1,
         sourceWidth:         33,
         annotsWidth:         28,
@@ -219,7 +223,9 @@ export function createEditorApp(config) {
       this._closeDropdowns = (e) => {
         if (!e.target.closest('.unclear-wrap') && !e.target.closest('.fm-unclear-wrap')) {
           this.pendingUnclearOpen = false;
+          this.pendingMarkupOpen  = false;
           this.focusUnclearOpen   = false;
+          this.focusMarkupOpen    = false;
         }
         if (!e.target.closest('.tag-wrap'))  this.annotTagOpenId  = null;
         if (!e.target.closest('.type-wrap')) this.annotTypeOpenId = null;
@@ -235,10 +241,10 @@ export function createEditorApp(config) {
 
     methods: {
       getExact, getPrefix, getSuffix, getBodyValue,
-      isInsertion, isAtrNoise, isNonResolvAbbr, getNonResolvReason, isSpaceExact,
+      isInsertion, isAtrNoise, isNonResolvAbbr, getNonResolvReason, isSpaceExact, isMarkup,
       isSpaceInsertion, isSpaceBeforePunct, isSpaceBeforeSpace,
       isInsertionExact(stub) { return stub?.isIns === true; },
-      getSemtag, semtagLabels: SEMTAG_LABELS,
+      getSemtag,
 
       // ── Tag an annotation as person/org/place/numeral ──────────────────────────
       setSemtag(annot, tag) {
@@ -287,7 +293,10 @@ export function createEditorApp(config) {
             this.selectedAnnotationId = newSel;
             if (newSel) {
               const annot = this.allAnnotationsSorted.find(a => a.id === id);
-              if (annot) this._focusAnnotInput(annot);
+              if (annot) {
+                this.annotFilter = annot.validated_by ? 'validated' : 'pending';
+                this._focusAnnotInput(annot);
+              }
             }
           }
         });
@@ -407,7 +416,10 @@ export function createEditorApp(config) {
           this.selectedAnnotationId = newSel;
           if (newSel) {
             const annot = this.allAnnotationsSorted.find(a => a.id === id);
-            if (annot) this._focusAnnotInput(annot);
+            if (annot) {
+              this.annotFilter = annot.validated_by ? 'validated' : 'pending';
+              this._focusAnnotInput(annot);
+            }
           }
         });
       },
@@ -518,7 +530,7 @@ export function createEditorApp(config) {
         this._offerBulkAnnotation(annot);
       },
 
-      cancelPending() { pendingAnnotRaw = null; this.pendingAnnot = null; this.pendingUnclearOpen = false; },
+      cancelPending() { pendingAnnotRaw = null; this.pendingAnnot = null; this.pendingUnclearOpen = false; this.pendingMarkupOpen = false; },
 
       onPendingBlur(evt) {
         const row = evt.currentTarget.closest('.annot-pending');
@@ -532,6 +544,20 @@ export function createEditorApp(config) {
         const annot = pendingAnnotRaw; pendingAnnotRaw = null; this.pendingAnnot = null;
         const exact = getSelector(annot, 'TextQuoteSelector').exact ?? '';
         annot.body = [{ type: 'TextualBody', value: exact, purpose: 'atr_noise' }];
+        annot.resp_id = CURRENT_USER_ID;
+        this.annotations = [...this.annotations, annot];
+        this.saveAnnotation(annot);
+        this._offerBulkAnnotation(annot);
+      },
+
+      // ── Mark selection as Mark-Up (tag-only, no text change) ─────────────────
+      markMarkup(semtag) {
+        if (!pendingAnnotRaw) return;
+        const annot = pendingAnnotRaw; pendingAnnotRaw = null; this.pendingAnnot = null;
+        this.pendingUnclearOpen = false;
+        this.pendingMarkupOpen = false;
+        const exact = getSelector(annot, 'TextQuoteSelector').exact ?? '';
+        annot.body = [{ type: 'TextualBody', value: exact, purpose: 'markup', semtag }];
         annot.resp_id = CURRENT_USER_ID;
         this.annotations = [...this.annotations, annot];
         this.saveAnnotation(annot);
@@ -608,6 +634,12 @@ export function createEditorApp(config) {
         const exact = getExact(cur);
         this._focusMarkAs({ value: exact, purpose: 'atr_noise' });
       },
+      focusMarkMarkup(semtag) {
+        const cur = this.focusCurrent; if (!cur) return;
+        const exact = getExact(cur);
+        this.focusMarkupOpen = false;
+        this._focusMarkAs({ value: exact, purpose: 'markup', semtag });
+      },
       focusMarkNonResolvAbbr(reason) {
         const cur = this.focusCurrent; if (!cur) return;
         const exact = getExact(cur);
@@ -648,6 +680,9 @@ export function createEditorApp(config) {
             break;
           case 'non_resolv_abbr':
             newBody = { type: 'TextualBody', value: exact, purpose: 'non_resolv_abbr', reason: annot.body?.[0]?.reason || 'other' };
+            break;
+          case 'markup':
+            newBody = { type: 'TextualBody', value: exact, purpose: 'markup' };
             break;
           default:
             newBody = { type: 'TextualBody', value: currentValue, purpose: 'normalizing' };
@@ -718,6 +753,7 @@ export function createEditorApp(config) {
       selectAnnotation(annot) {
         this.selectedAnnotationId = this.selectedAnnotationId === annot.id ? null : annot.id;
         if (this.selectedAnnotationId) {
+          this.annotFilter = annot.validated_by ? 'validated' : 'pending';
           this.$refs.pageSource.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
           this.$refs.normalizedText.querySelector('[data-annotation].hovered')?.classList.remove('hovered');
           this.hoveredAnnotationId = null;
@@ -982,6 +1018,7 @@ mark.r6o-validated.r6o-insertion { background: rgba(25,135,84,.1); border-bottom
 mark.r6o-insertion { background: rgba(13,110,253,.11); border-bottom: 1.5px dashed #0d6efd; }
 mark.r6o-atr-noise, mark.norm-atr-noise { background: rgba(108,117,125,.12); border-bottom: 1.5px dotted #6c757d; }
 mark.r6o-nonresolv-abbr, mark.norm-nonresolv-abbr { background: rgba(255,193,7,.18); border-bottom: 1.5px dotted #a07800; }
+mark.r6o-markup, mark.norm-markup { background: transparent; border-bottom: 1.5px solid #0d6efd; }
 mark.hovered { background: rgba(59,130,246,.28) !important; border-bottom: 1.5px solid #2563eb !important; }
 .legend { margin-top: 18px; display: flex; gap: 14px; flex-wrap: wrap; font-size: .75em; color: #555; align-items: center; font-family: system-ui, sans-serif; }
 .legend-item { display: flex; align-items: center; gap: 5px; }
@@ -991,6 +1028,7 @@ mark.hovered { background: rgba(59,130,246,.28) !important; border-bottom: 1.5px
 .sw-ins  { background: rgba(13,110,253,.11); border-bottom-color: #0d6efd; border-bottom-style: dashed; }
 .sw-noi  { background: rgba(108,117,125,.12); border-bottom-color: #6c757d; border-bottom-style: dotted; }
 .sw-non  { background: rgba(255,193,7,.18);  border-bottom-color: #a07800; border-bottom-style: dotted; }
+.sw-mkp  { background: transparent; border-bottom-color: #0d6efd; }
 </style>
 </head>
 <body>
@@ -1006,6 +1044,7 @@ mark.hovered { background: rgba(59,130,246,.28) !important; border-bottom: 1.5px
   <span class="legend-item"><span class="swatch sw-ins"></span> Insertion</span>
   <span class="legend-item"><span class="swatch sw-noi"></span> ATR Noise</span>
   <span class="legend-item"><span class="swatch sw-non"></span> Non-resolv. abbr.</span>
+  <span class="legend-item"><span class="swatch sw-mkp"></span> Mark-Up</span>
 </div>
 <script>
 document.querySelectorAll('.text-col').forEach(col => {

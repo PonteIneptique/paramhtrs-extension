@@ -16,6 +16,7 @@ export function isInsertion(annot) {
 export function isAtrNoise(annot)      { return annot?.body?.[0]?.purpose === 'atr_noise'; }
 export function isNonResolvAbbr(annot) { return annot?.body?.[0]?.purpose === 'non_resolv_abbr'; }
 export function getNonResolvReason(annot) { return annot?.body?.[0]?.reason ?? 'other'; }
+export function isMarkup(annot) { return annot?.body?.[0]?.purpose === 'markup'; }
 export function getSemtag(annot) { return annot?.body?.[0]?.semtag ?? null; }
 
 export const SEMTAG_LABELS = {
@@ -76,6 +77,7 @@ export function buildSourceHtml(fullText, annotsSorted, selectedAnnotationId) {
       isInsertion(a)     ? 'r6o-insertion'      : '',
       isAtrNoise(a)      ? 'r6o-atr-noise'      : '',
       isNonResolvAbbr(a) ? 'r6o-nonresolv-abbr' : '',
+      isMarkup(a)        ? 'r6o-markup'         : '',
     ].filter(Boolean).join(' ');
 
     if (s === e) {
@@ -132,6 +134,7 @@ export function buildNormalizedPageHtml(normalizedText, annotsSorted, selectedAn
       a.validated_by     ? 'norm-validated'     : '',
       isAtrNoise(a)      ? 'norm-atr-noise'     : '',
       isNonResolvAbbr(a) ? 'norm-nonresolv-abbr': '',
+      isMarkup(a)        ? 'norm-markup'        : '',
     ].filter(Boolean).join(' ');
     html += `<mark class="${cls}" data-annotation="${escapeHtml(a.id)}">${escapeHtml(text.slice(pos.start, pos.end))}</mark>`;
     cursor = pos.end;
