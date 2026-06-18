@@ -60,6 +60,15 @@
         {% endif %}
       </div>
       <div class="d-flex align-items-center gap-2">
+        {% set subs, validated = document_validation[doc.id] %}
+        {% if subs %}
+        <span class="badge {% if validated == subs %}bg-success{% elif validated %}bg-warning text-dark{% else %}bg-danger{% endif %}"
+              title="{{ validated }}/{{ subs }} resolutions validated">
+          {{ "%.0f"|format(validated / subs * 100) }}%&nbsp;validated
+        </span>
+        {% else %}
+        <span class="badge bg-light text-dark" title="No abbreviation resolutions in this document">— validated</span>
+        {% endif %}
         <span class="badge bg-secondary">{{ doc.language }}</span>
         <span class="badge bg-light text-dark">{{ doc.pages | length }} page(s)</span>
       </div>

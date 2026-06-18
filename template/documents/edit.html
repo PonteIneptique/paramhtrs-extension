@@ -136,6 +136,15 @@
         {% if page.original_filename %}<span class="badge bg-light text-dark ms-1">{{ page.original_filename }}</span>{% endif %}
       </a>
       <div class="d-flex align-items-center gap-2">
+        {% set subs, validated = page_validation[page.id] %}
+        {% if subs %}
+        <span class="badge {% if validated == subs %}bg-success{% elif validated %}bg-warning text-dark{% else %}bg-danger{% endif %}"
+              title="{{ validated }}/{{ subs }} resolutions validated">
+          {{ "%.0f"|format(validated / subs * 100) }}%&nbsp;validated
+        </span>
+        {% else %}
+        <span class="badge bg-light text-dark" title="No abbreviation resolutions on this page">— validated</span>
+        {% endif %}
         <span class="badge
           {% if page.status == 'done' %}bg-success
           {% elif page.status == 'active' %}bg-warning text-dark

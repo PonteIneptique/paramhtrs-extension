@@ -55,16 +55,31 @@ def project_create():
 @bp_project.route("/projects/<int:project_id>", methods=["GET"])
 @requires_access(Project, 'project_id')
 def project_browse(project: Project):
+    from sqlalchemy.orm import joinedload
+    from .stats_report import page_validation_counts
+    from .models import Page
     search = request.args.get("search", "").strip()
     documents = Document.query.filter_by(project_id=project.id)
     if search:
         documents = documents.filter(Document.name.ilike(f"%{search}%"))
-    documents = documents.order_by(Document.name).all()
+    documents = (documents
+                 .options(joinedload(Document.pages).joinedload(Page.annotation_rows))
+                 .order_by(Document.name).all())
+
+    document_validation = {}
+    for document in documents:
+        subs = validated = 0
+        for page in document.pages:
+            p_subs, p_validated = page_validation_counts(page)
+            subs += p_subs
+            validated += p_validated
+        document_validation[document.id] = (subs, validated)
 
     return render_template(
         "projects/edit.html",
         project=project,
         documents=documents,
+        document_validation=document_validation,
         search=search,
         can_edit=(current_user.is_admin or project.creator_id == current_user.id)
     )

@@ -25,6 +25,17 @@ def _is_substitution(a) -> bool:
     return not _is_insertion(a) and not _is_atr_noise(a) and not _is_non_resolv(a) and not _is_space_exact(a)
 
 
+def page_validation_counts(page) -> tuple:
+    """Return (resolutions, validated) counts for a single page."""
+    subs = validated = 0
+    for a in page.annotation_rows:
+        if _is_substitution(a):
+            subs += 1
+            if a.validated_by:
+                validated += 1
+    return subs, validated
+
+
 # ── Levenshtein distance ──────────────────────────────────────────────────────
 
 def levenshtein(s: str, t: str) -> int:

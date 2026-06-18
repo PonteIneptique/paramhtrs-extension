@@ -90,7 +90,12 @@ def document_create():
 @bp_document.route("/documents/<int:document_id>")
 @requires_access(Document, 'document_id')
 def document_browse(document: Document):
-    pages = Page.query.filter_by(document_id=document.id).order_by(Page.order).all()
+    from sqlalchemy.orm import joinedload
+    from .stats_report import page_validation_counts
+    pages = (Page.query.filter_by(document_id=document.id)
+              .options(joinedload(Page.annotation_rows))
+              .order_by(Page.order).all())
+    page_validation = {page.id: page_validation_counts(page) for page in pages}
     can_edit = (
         current_user.is_admin
         or Project.query.get(document.project_id).creator_id == current_user.id
@@ -100,6 +105,7 @@ def document_browse(document: Document):
         "documents/edit.html",
         document=document,
         pages=pages,
+        page_validation=page_validation,
         can_edit=can_edit,
         languages=LANGUAGES,
     )
