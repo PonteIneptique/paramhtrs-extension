@@ -67,6 +67,7 @@ def project_browse(project: Project):
                  .order_by(Document.name).all())
 
     document_validation = {}
+    for_review_counts = {}
     for document in documents:
         subs = validated = 0
         for page in document.pages:
@@ -74,12 +75,14 @@ def project_browse(project: Project):
             subs += p_subs
             validated += p_validated
         document_validation[document.id] = (subs, validated)
+        for_review_counts[document.id] = sum(1 for page in document.pages if page.status == "for_review")
 
     return render_template(
         "projects/edit.html",
         project=project,
         documents=documents,
         document_validation=document_validation,
+        for_review_counts=for_review_counts,
         search=search,
         can_edit=(current_user.is_admin or project.creator_id == current_user.id)
     )

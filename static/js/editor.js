@@ -2,8 +2,8 @@ import { createApp } from 'vue';
 import {
   getSelector, getStart, getEnd, getExact, getPrefix, getSuffix, getBodyValue,
   isInsertion, isAtrNoise, isNonResolvAbbr, getNonResolvReason, isSpaceExact, isMarkup,
-  getSemtag, SEMTAG_LABELS,
-  escapeHtml, applyAnnotations,
+  getSemtag, SEMTAG_LABELS, isGapBefore, isGapAfter,
+  escapeHtml, renderVisible, applyAnnotations,
   buildSourceHtml, computeNormalizedPositions, buildNormalizedPageHtml,
   findSimilarAnnotations,
   findSimilarByExact,
@@ -36,7 +36,7 @@ export function createEditorApp(config) {
         pageStatus:          config.pageStatus,
         semtagLabels:        SEMTAG_LABELS,
         hoveredAnnotationId: null,
-        hoverEnabled:        true,
+        hoverEnabled:        localStorage.getItem('editorHoverEnabled') === '1',
         selectedAnnotationId: null,
         pendingAnnot:        null,
         insertMode:          false,
@@ -45,15 +45,15 @@ export function createEditorApp(config) {
         annotSort:           'position',
         pendingUnclearOpen:  false,
         pendingMarkupOpen:   false,
-        focusUnclearOpen:    false,
-        focusMarkupOpen:     false,
         annotTagOpenId:      null,
         annotTypeOpenId:     null,
+        annotGapOpenId:      null,
         focusTagOpen:        false,
         focusTypeOpen:       false,
+        focusGapOpen:        false,
         focusMenuPos:        { top: 0, left: 0 },
         annotMenuPos:        { top: 0, left: 0 },
-        fontSize:            1,
+        fontSize:            parseFloat(localStorage.getItem('editorFontSize')) || 1,
         sourceWidth:         33,
         annotsWidth:         28,
         saveError:           false,
@@ -89,6 +89,15 @@ export function createEditorApp(config) {
       },
       panelSourceStyle() { return { flex: `0 0 ${this.sourceWidth}%` }; },
       panelAnnotsStyle() { return { flex: `0 0 ${this.annotsWidth}%` }; },
+
+      pageStatusLabel() {
+        return {
+          pending: 'Pending',
+          active: 'In progress',
+          for_review: 'For review',
+          done: 'Done',
+        }[this.pageStatus] || this.pageStatus;
+      },
 
       sourceHtml() {
         return buildSourceHtml(this.fullText, this.allAnnotationsSorted, this.selectedAnnotationId);
@@ -130,7 +139,7 @@ export function createEditorApp(config) {
           const focusIdx   = focusAnns.indexOf(a);
           const isNavigable = focusIdx >= 0;
           segs.push({ type:'a', annId:a.id, isCurrent: a.id===cur.id, isNavigable,
-                      abbr: getExact(a), norm: getBodyValue(a),
+                      abbr: text.slice(s, e), norm: getBodyValue(a),
                       annIdx: isNavigable ? focusIdx : -1 });
           pos = e;
         }
@@ -168,6 +177,16 @@ export function createEditorApp(config) {
         return this.massCleanupCandidates.filter(a => this.massCleanupSelected[a.id]).length;
       },
 
+      // Live text immediately around an insertion point, used to show context
+      // above the input field since an insertion's own text is empty (∅).
+      focusInsertionContext() {
+        if (!this.focusCurrent || !isInsertion(this.focusCurrent)) return null;
+        const pos = getStart(this.focusCurrent);
+        return {
+          pre: this.fullText.slice(Math.max(0, pos - 20), pos),
+          suf: this.fullText.slice(pos, Math.min(this.fullText.length, pos + 20)),
+        };
+      },
       focusAnnData() {
         if (!this.focusCurrent) return { left:[], right:[] };
         const text = this.fullText;
@@ -185,7 +204,7 @@ export function createEditorApp(config) {
             if (d) segs.push({ type:'t', display: d });
           }
           segs.push({ type:'a', annId:a.id, isCurrent:a.id===cur.id,
-                      abbr:getExact(a), norm:getBodyValue(a), annIdx:anns.indexOf(a) });
+                      abbr: text.slice(s, e), norm:getBodyValue(a), annIdx:anns.indexOf(a) });
           pos = e;
         }
         if (pos < wE) {
@@ -206,6 +225,10 @@ export function createEditorApp(config) {
     watch: {
       fontSize(val) {
         document.getElementById('editor-root').style.setProperty('--editor-font', val + 'rem');
+        localStorage.setItem('editorFontSize', val);
+      },
+      hoverEnabled(val) {
+        localStorage.setItem('editorHoverEnabled', val ? '1' : '0');
       },
       massCleanupCandidates(newList) {
         for (const a of newList) {
@@ -221,16 +244,16 @@ export function createEditorApp(config) {
       this._registerNormalizedListeners(this.$refs.normalizedText);
       document.addEventListener('keydown', this._handleKeydown);
       this._closeDropdowns = (e) => {
-        if (!e.target.closest('.unclear-wrap') && !e.target.closest('.fm-unclear-wrap')) {
+        if (!e.target.closest('.unclear-wrap')) {
           this.pendingUnclearOpen = false;
           this.pendingMarkupOpen  = false;
-          this.focusUnclearOpen   = false;
-          this.focusMarkupOpen    = false;
         }
         if (!e.target.closest('.tag-wrap'))  this.annotTagOpenId  = null;
         if (!e.target.closest('.type-wrap')) this.annotTypeOpenId = null;
+        if (!e.target.closest('.gap-wrap'))  this.annotGapOpenId  = null;
         if (!e.target.closest('.fm-tag-wrap'))  this.focusTagOpen  = false;
         if (!e.target.closest('.fm-type-wrap')) this.focusTypeOpen = false;
+        if (!e.target.closest('.fm-gap-wrap'))  this.focusGapOpen  = false;
       };
       document.addEventListener('click', this._closeDropdowns);
     },
@@ -244,12 +267,39 @@ export function createEditorApp(config) {
       isInsertion, isAtrNoise, isNonResolvAbbr, getNonResolvReason, isSpaceExact, isMarkup,
       isSpaceInsertion, isSpaceBeforePunct, isSpaceBeforeSpace,
       isInsertionExact(stub) { return stub?.isIns === true; },
-      getSemtag,
+      getSemtag, isGapBefore, isGapAfter, renderVisible,
+
+      // The stored TextQuoteSelector.exact can be stale (e.g. annotations created
+      // while ingesting in "dots" mode store a plain space where the live page
+      // text actually has a line-internal newline). Re-slice from the live
+      // fullText so displayed whitespace always matches what's really there.
+      getExactLive(annot) {
+        return this.fullText.slice(getStart(annot), getEnd(annot));
+      },
 
       // ── Tag an annotation as person/org/place/numeral ──────────────────────────
       setSemtag(annot, tag) {
         const newBody = { ...annot.body[0] };
         if (tag) newBody.semtag = tag; else delete newBody.semtag;
+        const updated = { ...annot, resp_id: CURRENT_USER_ID, body: [newBody] };
+        this.annotations = this.annotations.map(a => a.id === annot.id ? updated : a);
+        this.saveAnnotation(updated);
+      },
+
+      // ── Set the ambiguity reason on a non-resolvable-abbreviation annotation ───
+      setReason(annot, reason) {
+        const newBody = { ...annot.body[0] };
+        if (reason) newBody.reason = reason; else delete newBody.reason;
+        const updated = { ...annot, resp_id: CURRENT_USER_ID, body: [newBody] };
+        this.annotations = this.annotations.map(a => a.id === annot.id ? updated : a);
+        this.saveAnnotation(updated);
+      },
+
+      // ── Mark an annotation's token as cut in two (gap before/after) ────────────
+      setGap(annot, which, value) {
+        const newBody = { ...annot.body[0] };
+        const key = which === 'before' ? 'gap_before' : 'gap_after';
+        if (value) newBody[key] = true; else delete newBody[key];
         const updated = { ...annot, resp_id: CURRENT_USER_ID, body: [newBody] };
         this.annotations = this.annotations.map(a => a.id === annot.id ? updated : a);
         this.saveAnnotation(updated);
@@ -614,41 +664,21 @@ export function createEditorApp(config) {
         bootstrap.Modal.getInstance(document.getElementById('bulkValidateModal'))?.hide();
       },
 
-      // ── Focus-mode: mark current annotation as ATR noise or non-resolv ────────
-      _focusMarkAs(bodyUpdates) {
-        const cur = this.focusCurrent; if (!cur) return;
-        this.focusUnclearOpen = false;
-        const updated = { ...cur, resp_id: CURRENT_USER_ID, body: [{ ...cur.body[0], ...bodyUpdates }] };
-        this.annotations = this.annotations.map(a => a.id === cur.id ? updated : a);
-        this.saveAnnotation(updated);
-        this.$nextTick(() => {
-          const n = this.focusAnnotations.length;
-          if (!n) { this.exitFocusMode(); return; }
-          this.focusAnnotIndex = Math.min(this.focusAnnotIndex, n - 1);
-          this.focusEditValue  = getBodyValue(this.focusCurrent) ?? '';
-          this.refocusFocusInput();
-        });
-      },
-      focusMarkAtrNoise() {
-        const cur = this.focusCurrent; if (!cur) return;
-        const exact = getExact(cur);
-        this._focusMarkAs({ value: exact, purpose: 'atr_noise' });
-      },
-      focusMarkMarkup(semtag) {
-        const cur = this.focusCurrent; if (!cur) return;
-        const exact = getExact(cur);
-        this.focusMarkupOpen = false;
-        this._focusMarkAs({ value: exact, purpose: 'markup', semtag });
-      },
-      focusMarkNonResolvAbbr(reason) {
-        const cur = this.focusCurrent; if (!cur) return;
-        const exact = getExact(cur);
-        this._focusMarkAs({ value: exact, purpose: 'non_resolv_abbr', reason });
-      },
       focusSetSemtag(tag) {
         const cur = this.focusCurrent; if (!cur) return;
         this.setSemtag(cur, tag);
         this.focusTagOpen = false;
+      },
+      focusSetReason(reason) {
+        const cur = this.focusCurrent; if (!cur) return;
+        this.setReason(cur, reason);
+        this.focusTagOpen = false;
+      },
+      focusSetGap(which) {
+        const cur = this.focusCurrent; if (!cur) return;
+        const isSet = which === 'before' ? isGapBefore(cur) : isGapAfter(cur);
+        this.setGap(cur, which, !isSet);
+        this.focusGapOpen = false;
       },
       focusChangeType(newPurpose) {
         const cur = this.focusCurrent; if (!cur) return;
@@ -660,6 +690,14 @@ export function createEditorApp(config) {
           this.focusAnnotIndex = Math.min(this.focusAnnotIndex, n - 1);
           this.focusEditValue  = getBodyValue(this.focusCurrent) ?? '';
           this.refocusFocusInput();
+          if (newPurpose === 'non_resolv_abbr' || newPurpose === 'markup') {
+            const btn = this.$refs.fmTagBtn;
+            if (btn) {
+              const r = btn.getBoundingClientRect();
+              this.focusMenuPos = { top: r.top - 4, left: r.left + r.width / 2 };
+              this.focusTagOpen = true;
+            }
+          }
         });
       },
 
@@ -688,6 +726,8 @@ export function createEditorApp(config) {
             newBody = { type: 'TextualBody', value: currentValue, purpose: 'normalizing' };
         }
         if (annot.body?.[0]?.semtag) newBody.semtag = annot.body[0].semtag;
+        if (annot.body?.[0]?.gap_before) newBody.gap_before = true;
+        if (annot.body?.[0]?.gap_after)  newBody.gap_after  = true;
         const updated = { ...annot, resp_id: CURRENT_USER_ID, body: [newBody] };
         this.annotations = this.annotations.map(a => a.id === annot.id ? updated : a);
         this.saveAnnotation(updated);
@@ -835,12 +875,6 @@ export function createEditorApp(config) {
         if (this.focusMode && this.focusCurrent?.id === id) {
           this.focusEditValue = getBodyValue(updated) ?? '';
         }
-      },
-
-      renderVisible(text) {
-        return escapeHtml(text ?? '')
-          .replace(/ /g, '<span class="tok-ws">·</span>')
-          .replace(/\n/g, '<span class="tok-ws">&#8629;</span>');
       },
 
       startResize(which, evt) {
@@ -1091,13 +1125,28 @@ document.querySelectorAll('.text-col').forEach(col => {
         this.focusMode = true;
         this.$nextTick(() => this.refocusFocusInput());
       },
+      closeFocusDropdowns() {
+        this.focusTagOpen  = false;
+        this.focusTypeOpen = false;
+        this.focusGapOpen  = false;
+      },
+      toggleFocusDropdown(name, e) {
+        const key = `focus${name}Open`;
+        const wasOpen = this[key];
+        const r = e.currentTarget.getBoundingClientRect();
+        this.closeFocusDropdowns();
+        if (!wasOpen) {
+          this.focusMenuPos = { top: r.top - 4, left: r.left + r.width / 2 };
+          this[key] = true;
+        }
+      },
       exitFocusMode() {
         this.saveFocusEdit();
         this.focusMode = false;
-        this.focusUnclearOpen = false;
+        this.closeFocusDropdowns();
       },
       focusNavigate(delta) {
-        this.focusUnclearOpen = false;
+        this.closeFocusDropdowns();
         this.saveFocusEdit();
         const n = this.focusAnnotations.length;
         if (!n) return;
@@ -1112,7 +1161,7 @@ document.querySelectorAll('.text-col').forEach(col => {
         this.$nextTick(() => this.refocusFocusInput());
       },
       focusValidateAndAdvance() {
-        this.focusUnclearOpen = false;
+        this.closeFocusDropdowns();
         const cur = this.focusCurrent; if (!cur) return;
         // Combine pending edit + validation into one PUT
         let updated = cur;
@@ -1133,7 +1182,7 @@ document.querySelectorAll('.text-col').forEach(col => {
         });
       },
       focusDelete() {
-        this.focusUnclearOpen = false;
+        this.closeFocusDropdowns();
         const cur = this.focusCurrent; if (!cur) return;
         this.removeAnnotation(cur);
         this.$nextTick(() => {

@@ -154,6 +154,8 @@ class Annotation(db.Model):
     target_suffix = db.Column(db.Text,        nullable=True)
     resp_id       = db.Column(db.Integer,     nullable=True)
     validated_by  = db.Column(db.Integer,     nullable=True)
+    body_gap_before = db.Column(db.Boolean,   nullable=False, default=False)
+    body_gap_after  = db.Column(db.Boolean,   nullable=False, default=False)
 
     page = db.relationship("Page", back_populates="annotation_rows")
 
@@ -165,6 +167,10 @@ class Annotation(db.Model):
             body_entry["reason"] = self.body_reason
         if self.body_semtag:
             body_entry["semtag"] = self.body_semtag
+        if self.body_gap_before:
+            body_entry["gap_before"] = True
+        if self.body_gap_after:
+            body_entry["gap_after"] = True
         d = {
             "id":   self.id,
             "type": "Annotation",
@@ -205,6 +211,8 @@ class Annotation(db.Model):
             target_suffix= quo.get("suffix"),
             resp_id      = data.get("resp_id"),
             validated_by = data.get("validated_by"),
+            body_gap_before = body.get("gap_before", False),
+            body_gap_after  = body.get("gap_after", False),
         )
 
     @classmethod
@@ -227,6 +235,8 @@ class Annotation(db.Model):
             existing.target_suffix= quo.get("suffix")
             existing.resp_id      = data.get("resp_id")
             existing.validated_by = data.get("validated_by")
+            existing.body_gap_before = body.get("gap_before", False)
+            existing.body_gap_after  = body.get("gap_after", False)
         else:
             db.session.add(cls.from_dict(page_id, data))
 
@@ -243,7 +253,7 @@ class Page(db.Model):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pending', 'active', 'done')",
+            "status IN ('pending', 'active', 'done', 'for_review')",
             name="check_page_status_valid"
         ),
     )

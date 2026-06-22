@@ -18,6 +18,8 @@ export function isNonResolvAbbr(annot) { return annot?.body?.[0]?.purpose === 'n
 export function getNonResolvReason(annot) { return annot?.body?.[0]?.reason ?? 'other'; }
 export function isMarkup(annot) { return annot?.body?.[0]?.purpose === 'markup'; }
 export function getSemtag(annot) { return annot?.body?.[0]?.semtag ?? null; }
+export function isGapBefore(annot) { return !!annot?.body?.[0]?.gap_before; }
+export function isGapAfter(annot)  { return !!annot?.body?.[0]?.gap_after; }
 
 export const SEMTAG_LABELS = {
   persName:  'Person',
@@ -32,6 +34,25 @@ export function isSpaceExact(annot) {
 // ── HTML escaping ─────────────────────────────────────────────────────────────
 export function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Escape text and render whitespace visibly: · for a literal space, ↵ for a
+// newline *within* a token/annotation (e.g. a word split across two ALTO
+// lines) — that internal break must stay a compact glyph, not become an
+// actual line wrap, so it reads as "this word continues" rather than as the
+// page's normal line break.
+export function renderVisible(text) {
+  return escapeHtml(text ?? '')
+    .replace(/ /g, '<span class="tok-ws">·</span>')
+    .replace(/\n/g, '<span class="tok-ws">&#8629;</span>');
+}
+
+// Like renderVisible, but for the Source panel: that panel already shows
+// plain spaces and relies on white-space:pre-wrap for real line breaks, so
+// text inside an annotation <mark> should render the same way as the
+// surrounding text — just escaped, no ·/↵ glyphs.
+export function renderVisibleSource(text) {
+  return escapeHtml(text ?? '');
 }
 
 // ── Text transformation ───────────────────────────────────────────────────────
@@ -83,7 +104,7 @@ export function buildSourceHtml(fullText, annotsSorted, selectedAnnotationId) {
     if (s === e) {
       html += `<mark class="${cls}" data-annotation="${escapeHtml(a.id)}"></mark>`;
     } else if (renderFrom < e) {
-      html += `<mark class="${cls}" data-annotation="${escapeHtml(a.id)}">${escapeHtml(text.slice(renderFrom, e))}</mark>`;
+      html += `<mark class="${cls}" data-annotation="${escapeHtml(a.id)}">${renderVisibleSource(text.slice(renderFrom, e))}</mark>`;
     }
     cursor = Math.max(cursor, e);
   }
@@ -136,7 +157,7 @@ export function buildNormalizedPageHtml(normalizedText, annotsSorted, selectedAn
       isNonResolvAbbr(a) ? 'norm-nonresolv-abbr': '',
       isMarkup(a)        ? 'norm-markup'        : '',
     ].filter(Boolean).join(' ');
-    html += `<mark class="${cls}" data-annotation="${escapeHtml(a.id)}">${escapeHtml(text.slice(pos.start, pos.end))}</mark>`;
+    html += `<mark class="${cls}" data-annotation="${escapeHtml(a.id)}">${renderVisible(text.slice(pos.start, pos.end))}</mark>`;
     cursor = pos.end;
   }
   if (cursor < text.length) html += escapeHtml(text.slice(cursor));

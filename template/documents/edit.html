@@ -147,6 +147,7 @@
         {% endif %}
         <span class="badge
           {% if page.status == 'done' %}bg-success
+          {% elif page.status == 'for_review' %}bg-info text-dark
           {% elif page.status == 'active' %}bg-warning text-dark
           {% else %}bg-secondary{% endif %}">{{ page.status }}</span>
         {% if can_edit %}
@@ -201,6 +202,7 @@
             <select class="form-select form-select-sm" name="status" id="pageEditStatus">
               <option value="pending">pending</option>
               <option value="active">active</option>
+              <option value="for_review">for_review</option>
               <option value="done">done</option>
             </select>
           </div>

@@ -149,3 +149,39 @@ def test_atr_noise_unchanged():
     a = _make_annot(text, 0, 3, "???", "atr_noise")
     result = _body(build_tei_from_annotations(text, [a]))
     assert '<unclear reason="illegible"' in result
+
+
+# ── Gap before/after (word cut in two) ─────────────────────────────────────────
+
+def test_gap_before_nested_inside_w():
+    text = "abbr full"
+    a = _make_annot(text, 0, 4, "abbr", "normalizing")
+    a["body"][0]["gap_before"] = True
+    result = _body(build_tei_from_annotations(text, [a]))
+    assert '<w xml:id="w1"><gap/>abbr</w>' in result
+
+
+def test_gap_after_nested_inside_w():
+    text = "abbr full"
+    a = _make_annot(text, 0, 4, "abbr", "normalizing")
+    a["body"][0]["gap_after"] = True
+    result = _body(build_tei_from_annotations(text, [a]))
+    assert '<w xml:id="w1">abbr<gap/></w>' in result
+
+
+def test_gap_before_and_after_nested_inside_unclear():
+    text = "???"
+    a = _make_annot(text, 0, 3, "???", "atr_noise")
+    a["body"][0]["gap_before"] = True
+    a["body"][0]["gap_after"] = True
+    result = _body(build_tei_from_annotations(text, [a]))
+    assert '<unclear reason="illegible" cert="low"><gap/>???<gap/></unclear>' in result
+
+
+def test_gap_nested_inside_semtag_wrapper():
+    text = "Joh de Paris"
+    a = _make_annot(text, 0, 3, "Joh", "markup")
+    a["body"][0]["semtag"] = "persName"
+    a["body"][0]["gap_before"] = True
+    result = _body(build_tei_from_annotations(text, [a]))
+    assert result.startswith('<persName><w xml:id="w1"><gap/>Joh</w></persName>')

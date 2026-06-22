@@ -381,7 +381,7 @@ body { overflow: hidden; }
 .annot-ctx {
   font-family: 'JunicodeVF', serif;
   font-size: .72rem;
-  color: #adb5bd;
+  color: #6c757d;
   white-space: nowrap;
   flex-shrink: 0;
   max-width: 60px;
@@ -390,6 +390,7 @@ body { overflow: hidden; }
 }
 .annot-ctx-pre { text-align: right; direction: rtl; }
 .annot-ctx-suf { direction: ltr; }
+.annot-ctx .tok-ws { opacity: 1; }
 
 /* ── Focus Mode overlay ── */
 .fm-overlay {
@@ -447,6 +448,11 @@ body { overflow: hidden; }
 .fm-side-left   { justify-content: flex-end; }
 .fm-side-right  { justify-content: flex-start; }
 .fm-active-wrap { flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; padding-bottom: 4px; }
+.fm-ins-ctx {
+  font-family: 'JunicodeVF', serif; font-size: 13px; font-style: italic;
+  color: oklch(50% 0.01 70); white-space: nowrap; margin-bottom: -4px;
+}
+.fm-ins-ctx-marker { font-weight: 700; color: oklch(44% 0.21 50); margin: 0 .2em; font-style: normal; }
 /* shared token layout */
 .fm-token { display: inline-flex; flex-direction: column; align-items: center;
             vertical-align: bottom; flex-shrink: 0; gap: 2px; }
@@ -552,6 +558,8 @@ body { overflow: hidden; }
   transition: background .15s;
 }
 .fm-unclear-btn:hover { background: #6741a5; }
+.fm-unclear-btn.is-active { background: oklch(70% 0.16 55); border-color: oklch(55% 0.16 55); }
+.fm-unclear-btn.is-active:hover { background: oklch(63% 0.16 55); }
 /* Teleported fixed menu */
 .fm-unclear-menu-fixed {
   position: fixed;
@@ -593,6 +601,23 @@ body { overflow: hidden; }
       </ol>
     </nav>
 
+    <div class="btn-group btn-group-sm">
+      {% if prev_page %}
+      <a href="{{ url_for('bp_page.page_editor', page_id=prev_page.id) }}" class="btn btn-outline-secondary" title="{{ prev_page.label }}">
+        &laquo; Prev
+      </a>
+      {% else %}
+      <button class="btn btn-outline-secondary" disabled>&laquo; Prev</button>
+      {% endif %}
+      {% if next_page %}
+      <a href="{{ url_for('bp_page.page_editor', page_id=next_page.id) }}" class="btn btn-outline-secondary" title="{{ next_page.label }}">
+        Next &raquo;
+      </a>
+      {% else %}
+      <button class="btn btn-outline-secondary" disabled>Next &raquo;</button>
+      {% endif %}
+    </div>
+
     <div class="d-flex align-items-center gap-1 ms-auto">
       <button class="btn btn-sm btn-outline-secondary" style="font-size:.75rem;padding:1px 6px"
               @click="fontSize = +(Math.max(0.7, fontSize - 0.1)).toFixed(1)" title="Decrease font size">A−</button>
@@ -608,66 +633,58 @@ body { overflow: hidden; }
       ⇄ Hover
     </button>
 
-    <div class="btn-group btn-group-sm">
-      {% if prev_page %}
-      <a href="{{ url_for('bp_page.page_editor', page_id=prev_page.id) }}" class="btn btn-outline-secondary">
-        &laquo; {{ prev_page.label }}
-      </a>
-      {% else %}
-      <button class="btn btn-outline-secondary" disabled>&laquo;</button>
-      {% endif %}
-      {% if next_page %}
-      <a href="{{ url_for('bp_page.page_editor', page_id=next_page.id) }}" class="btn btn-outline-secondary">
-        {{ next_page.label }} &raquo;
-      </a>
-      {% else %}
-      <button class="btn btn-outline-secondary" disabled>&raquo;</button>
-      {% endif %}
-    </div>
-
-    <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#pageMetaModal">
-      <i class="fa-solid fa-pen"></i>
+    <button class="btn btn-sm btn-outline-secondary" style="font-size:.75rem;padding:1px 6px" data-bs-toggle="modal" data-bs-target="#pageMetaModal">
+      <i class="fa-solid fa-pen"></i> Metadata
     </button>
 
-    <button class="btn btn-sm btn-outline-warning" title="Remove all unvalidated annotations"
-            @click="confirmClearPending" :disabled="!pendingAnnotationsSorted.length">
-      <i class="fa-solid fa-broom"></i>
-    </button>
-
-    <button class="btn btn-sm btn-outline-primary"
+    <button class="btn btn-sm btn-outline-primary" style="font-size:.75rem;padding:1px 6px"
             @click="enterFocusMode()"
             :disabled="!focusAnnotations.length"
             title="Focus mode — step through pending annotations">
       <i class="fa-solid fa-crosshairs"></i> Focus
     </button>
 
-    <a href="{{ url_for('bp_page.page_export_tei', page_id=page.id) }}" class="btn btn-sm btn-info">
-      <i class="fa-solid fa-download"></i> TEI
-    </a>
-
-    <button class="btn btn-sm btn-outline-info" style="font-size:.75rem;padding:1px 6px"
-            @click="downloadSynoptic" title="Download synoptic view (HTML)">
-      <i class="fa-solid fa-download"></i> Synoptic
-    </button>
-
-    <a href="{{ url_for('bp_page.page_stats', page_id=page.id) }}"
-       class="btn btn-sm btn-outline-info" style="font-size:.75rem;padding:1px 6px"
-       title="Download statistics report (HTML)">
-      <i class="fa-solid fa-chart-bar"></i> Stats
-    </a>
+    <div class="dropdown">
+      <button class="btn btn-sm btn-info dropdown-toggle" style="font-size:.75rem;padding:1px 6px" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+        <i class="fa-solid fa-download"></i> Export
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end">
+        <li>
+          <a class="dropdown-item" href="{{ url_for('bp_page.page_export_tei', page_id=page.id) }}">
+            <i class="fa-solid fa-file-export"></i> Download TEI
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item" href="#" @click.prevent="downloadSynoptic" title="Download synoptic view (HTML)">
+            <i class="fa-solid fa-table-columns"></i> Synoptic (HTML)
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item" href="{{ url_for('bp_page.page_stats', page_id=page.id) }}" title="Download statistics report (HTML)">
+            <i class="fa-solid fa-chart-bar"></i> Stats (HTML)
+          </a>
+        </li>
+      </ul>
+    </div>
 
     <!-- Page status -->
-    <div class="btn-group btn-group-sm">
-      <button class="btn btn-sm btn-secondary disabled" disabled>Status:</button>
-      <button type="button" class="btn btn-sm"
-        :class="pageStatus === 'pending' ? 'btn-danger' : 'btn-outline-secondary'"
-        @click="setPageStatus('pending')">Pending</button>
-      <button type="button" class="btn btn-sm"
-        :class="pageStatus === 'active' ? 'btn-warning' : 'btn-outline-secondary'"
-        @click="setPageStatus('active')">In progress</button>
-      <button type="button" class="btn btn-sm"
-        :class="pageStatus === 'done' ? 'btn-success' : 'btn-outline-secondary'"
-        @click="setPageStatus('done')">Done</button>
+    <div class="dropdown">
+      <button class="btn btn-sm dropdown-toggle" style="font-size:.75rem;padding:1px 6px"
+        :class="{
+          'btn-danger':  pageStatus === 'pending',
+          'btn-warning': pageStatus === 'active',
+          'btn-info':    pageStatus === 'for_review',
+          'btn-success': pageStatus === 'done'
+        }"
+        type="button" data-bs-toggle="dropdown" aria-expanded="false">
+        Status: [[ pageStatusLabel ]]
+      </button>
+      <ul class="dropdown-menu">
+        <li><a class="dropdown-item" href="#" @click.prevent="setPageStatus('pending')">Pending</a></li>
+        <li><a class="dropdown-item" href="#" @click.prevent="setPageStatus('active')">In progress</a></li>
+        <li><a class="dropdown-item" href="#" @click.prevent="setPageStatus('for_review')">For review</a></li>
+        <li><a class="dropdown-item" href="#" @click.prevent="setPageStatus('done')">Done</a></li>
+      </ul>
     </div>
   </div>
 
@@ -763,6 +780,10 @@ body { overflow: hidden; }
                   title="Mass cleanup of pending annotations">
             <i class="fa-solid fa-wand-magic-sparkles"></i>
           </button>
+          <button class="btn btn-sm btn-outline-warning" style="font-size:.7rem;padding:1px 6px" title="Remove all unvalidated annotations"
+                  @click="confirmClearPending" :disabled="!pendingAnnotationsSorted.length">
+            <i class="fa-solid fa-broom"></i>
+          </button>
           <div class="btn-group ms-auto" style="gap:2px">
             <button class="btn annot-filter-btn"
                     :class="annotFilter==='pending' ? 'btn-secondary' : 'btn-outline-secondary'"
@@ -787,11 +808,11 @@ body { overflow: hidden; }
              @mouseenter="onRowMouseenter(annot.id)"
              @mouseleave="onRowMouseleave()">
           <label class="annot-row-label" style="flex:1;display:flex;align-items:center;gap:4px;min-width:0;">
-            <span v-if="showAnnotContext && getPrefix(annot)" class="annot-ctx annot-ctx-pre" :title="getPrefix(annot)">[[ getPrefix(annot).slice(-6) ]]</span>
+            <span v-if="showAnnotContext && getPrefix(annot)" class="annot-ctx annot-ctx-pre" :title="getPrefix(annot)" v-html="renderVisible(getPrefix(annot).slice(-6))"></span>
             <span v-if="isInsertion(annot)" class="annot-ins-chip" title="insertion">[+]</span>
             <span v-else-if="isSpaceExact(annot)" class="annot-orig-sp" title="space">[SPACE]</span>
-            <span v-else class="annot-orig" :title="getExact(annot)" v-html="renderVisible(getExact(annot))"></span>
-            <span v-if="showAnnotContext && getSuffix(annot)" class="annot-ctx annot-ctx-suf" :title="getSuffix(annot)">[[ getSuffix(annot).slice(0,6) ]]</span>
+            <span v-else class="annot-orig" :title="getExactLive(annot)" v-html="renderVisible(getExactLive(annot))"></span>
+            <span v-if="showAnnotContext && getSuffix(annot)" class="annot-ctx annot-ctx-suf" :title="getSuffix(annot)" v-html="renderVisible(getSuffix(annot).slice(0,6))"></span>
             <span class="annot-arrow">→</span>
             <span v-if="isAtrNoise(annot)" class="annot-atr-chip">[ATR NOISE]</span>
             <span v-else-if="isNonResolvAbbr(annot)" class="annot-nonresolv-chip">[N/R: [[ getNonResolvReason(annot) ]]]</span>
@@ -807,6 +828,8 @@ body { overflow: hidden; }
               @keydown.tab.prevent="tabToNext(annot)">
           </label>
           <span v-if="getSemtag(annot)" class="badge bg-info text-dark me-1" style="font-size:.65em;">[[ semtagLabels[getSemtag(annot)] ]]</span>
+          <span v-if="isGapBefore(annot)" class="badge bg-dark text-white me-1" style="font-size:.65em;" title="Gap before this word">⊣gap</span>
+          <span v-if="isGapAfter(annot)" class="badge bg-dark text-white me-1" style="font-size:.65em;" title="Gap after this word">gap⊢</span>
           <div class="unclear-wrap tag-wrap">
             <button class="unclear-btn" @mousedown.prevent.stop="e => { const r = e.currentTarget.getBoundingClientRect(); annotMenuPos = { top: r.bottom + 3, left: r.right }; annotTagOpenId = annotTagOpenId === annot.id ? null : annot.id; }" title="Tag as person/org/place/numeral">
               Tag <span style="font-size:.8em; opacity:.7;">▾</span>
@@ -835,6 +858,18 @@ body { overflow: hidden; }
               <button class="unclear-item is-noise" @mousedown.prevent="changeAnnotationType(annot, 'atr_noise'); annotTypeOpenId = null">ATR noise</button>
               <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'non_resolv_abbr'); annotTypeOpenId = null">Non-resolvable abbr.</button>
               <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'markup'); annotTypeOpenId = null">Mark-Up</button>
+            </div>
+            </Teleport>
+          </div>
+          <div class="unclear-wrap gap-wrap">
+            <button class="unclear-btn" @mousedown.prevent.stop="e => { const r = e.currentTarget.getBoundingClientRect(); annotMenuPos = { top: r.bottom + 3, left: r.right }; annotGapOpenId = annotGapOpenId === annot.id ? null : annot.id; }" title="Mark as cut in two (gap before/after)">
+              Gap <span style="font-size:.8em; opacity:.7;">▾</span>
+            </button>
+            <Teleport to="body">
+            <div v-if="annotGapOpenId === annot.id" class="unclear-menu-fixed"
+                 :style="{ top: annotMenuPos.top + 'px', left: annotMenuPos.left + 'px', transform: 'translateX(-100%)' }">
+              <button class="unclear-item" @mousedown.prevent="setGap(annot, 'before', !isGapBefore(annot))">[[ isGapBefore(annot) ? '✓ ' : '' ]]Gap before</button>
+              <button class="unclear-item" @mousedown.prevent="setGap(annot, 'after', !isGapAfter(annot))">[[ isGapAfter(annot) ? '✓ ' : '' ]]Gap after</button>
             </div>
             </Teleport>
           </div>
@@ -911,11 +946,11 @@ body { overflow: hidden; }
              @mouseenter="onRowMouseenter(annot.id)"
              @mouseleave="onRowMouseleave()">
           <label class="annot-row-label" style="flex:1;display:flex;align-items:center;gap:4px;min-width:0;">
-            <span v-if="showAnnotContext && getPrefix(annot)" class="annot-ctx annot-ctx-pre" :title="getPrefix(annot)">[[ getPrefix(annot).slice(-6) ]]</span>
+            <span v-if="showAnnotContext && getPrefix(annot)" class="annot-ctx annot-ctx-pre" :title="getPrefix(annot)" v-html="renderVisible(getPrefix(annot).slice(-6))"></span>
             <span v-if="isInsertion(annot)" class="annot-ins-chip" title="insertion">[+]</span>
             <span v-else-if="isSpaceExact(annot)" class="annot-orig-sp" title="space">[SPACE]</span>
-            <span v-else class="annot-orig" :title="getExact(annot)" v-html="renderVisible(getExact(annot))"></span>
-            <span v-if="showAnnotContext && getSuffix(annot)" class="annot-ctx annot-ctx-suf" :title="getSuffix(annot)">[[ getSuffix(annot).slice(0,6) ]]</span>
+            <span v-else class="annot-orig" :title="getExactLive(annot)" v-html="renderVisible(getExactLive(annot))"></span>
+            <span v-if="showAnnotContext && getSuffix(annot)" class="annot-ctx annot-ctx-suf" :title="getSuffix(annot)" v-html="renderVisible(getSuffix(annot).slice(0,6))"></span>
             <span class="annot-arrow">→</span>
             <span v-if="isAtrNoise(annot)" class="annot-atr-chip">[ATR NOISE]</span>
             <span v-else-if="isNonResolvAbbr(annot)" class="annot-nonresolv-chip">[N/R: [[ getNonResolvReason(annot) ]]]</span>
@@ -930,6 +965,8 @@ body { overflow: hidden; }
               @keydown.enter.prevent="$event.target.blur()">
           </label>
           <span v-if="getSemtag(annot)" class="badge bg-info text-dark me-1" style="font-size:.65em;">[[ semtagLabels[getSemtag(annot)] ]]</span>
+          <span v-if="isGapBefore(annot)" class="badge bg-dark text-white me-1" style="font-size:.65em;" title="Gap before this word">⊣gap</span>
+          <span v-if="isGapAfter(annot)" class="badge bg-dark text-white me-1" style="font-size:.65em;" title="Gap after this word">gap⊢</span>
           <div class="unclear-wrap tag-wrap">
             <button class="unclear-btn" @mousedown.prevent.stop="e => { const r = e.currentTarget.getBoundingClientRect(); annotMenuPos = { top: r.bottom + 3, left: r.right }; annotTagOpenId = annotTagOpenId === annot.id ? null : annot.id; }" title="Tag as person/org/place/numeral">
               Tag <span style="font-size:.8em; opacity:.7;">▾</span>
@@ -958,6 +995,18 @@ body { overflow: hidden; }
               <button class="unclear-item is-noise" @mousedown.prevent="changeAnnotationType(annot, 'atr_noise'); annotTypeOpenId = null">ATR noise</button>
               <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'non_resolv_abbr'); annotTypeOpenId = null">Non-resolvable abbr.</button>
               <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'markup'); annotTypeOpenId = null">Mark-Up</button>
+            </div>
+            </Teleport>
+          </div>
+          <div class="unclear-wrap gap-wrap">
+            <button class="unclear-btn" @mousedown.prevent.stop="e => { const r = e.currentTarget.getBoundingClientRect(); annotMenuPos = { top: r.bottom + 3, left: r.right }; annotGapOpenId = annotGapOpenId === annot.id ? null : annot.id; }" title="Mark as cut in two (gap before/after)">
+              Gap <span style="font-size:.8em; opacity:.7;">▾</span>
+            </button>
+            <Teleport to="body">
+            <div v-if="annotGapOpenId === annot.id" class="unclear-menu-fixed"
+                 :style="{ top: annotMenuPos.top + 'px', left: annotMenuPos.left + 'px', transform: 'translateX(-100%)' }">
+              <button class="unclear-item" @mousedown.prevent="setGap(annot, 'before', !isGapBefore(annot))">[[ isGapBefore(annot) ? '✓ ' : '' ]]Gap before</button>
+              <button class="unclear-item" @mousedown.prevent="setGap(annot, 'after', !isGapAfter(annot))">[[ isGapAfter(annot) ? '✓ ' : '' ]]Gap after</button>
             </div>
             </Teleport>
           </div>
@@ -1015,7 +1064,7 @@ body { overflow: hidden; }
               <span class="text-muted fst-italic" style="font-family:'JunicodeVF',serif">[[ getPrefix(a) ]]</span><!--
               --><span v-if="isInsertion(a)" class="annot-ins-chip" title="insertion">[+]</span>
               <span v-else-if="isSpaceExact(a)" class="annot-orig-sp" title="space">[SPACE]</span>
-              <span v-else class="fw-semibold" style="font-family:'JunicodeVF',serif" v-html="renderVisible(getExact(a))"></span><!--
+              <span v-else class="fw-semibold" style="font-family:'JunicodeVF',serif" v-html="renderVisible(getExactLive(a))"></span><!--
               --><span class="text-muted fst-italic" style="font-family:'JunicodeVF',serif">[[ getSuffix(a) ]]</span>
               <span class="mx-1">&rarr;</span>
               <span v-if="isAtrNoise(a)" class="annot-atr-chip">[ATR NOISE]</span>
@@ -1112,7 +1161,7 @@ body { overflow: hidden; }
                 <span class="text-muted fst-italic small">[[ getPrefix(a).slice(-8) ]]</span>
                 <span v-if="isInsertion(a)" class="annot-ins-chip">[+]</span>
                 <span v-else-if="isSpaceExact(a)" class="annot-orig-sp">[SPACE]</span>
-                <span v-else class="fw-semibold" v-html="renderVisible(getExact(a))"></span>
+                <span v-else class="fw-semibold" v-html="renderVisible(getExactLive(a))"></span>
                 <span class="text-muted fst-italic small">[[ getSuffix(a).slice(0,8) ]]</span>
                 <span style="margin:0 4px; opacity:.5;">→</span>
                 <span v-if="!getBodyValue(a)" class="annot-del-chip">deleted</span>
@@ -1148,8 +1197,8 @@ body { overflow: hidden; }
       </span>
       <div style="flex:1"></div>
       <template v-if="focusCurrent">
-        <span style="font-family:'JunicodeVF',serif;font-size:14px;font-style:italic;color:oklch(40% 0.22 52)">
-          [[ getExact(focusCurrent) ]]
+        <span style="font-family:'JunicodeVF',serif;font-size:14px;font-style:italic;color:oklch(40% 0.22 52)"
+              v-html="renderVisible(getExactLive(focusCurrent))">
         </span>
         <span style="opacity:.3;font-size:11px">→</span>
         <span style="opacity:.78;font-family:'JunicodeVF',serif;font-size:14px">
@@ -1215,6 +1264,11 @@ body { overflow: hidden; }
 
           <!-- active token -->
           <div class="fm-active-wrap" v-if="focusCurrent">
+            <div v-if="focusInsertionContext" class="fm-ins-ctx">
+              <span v-html="renderVisible(focusInsertionContext.pre)"></span>
+              <span class="fm-ins-ctx-marker">∅</span>
+              <span v-html="renderVisible(focusInsertionContext.suf)"></span>
+            </div>
             <div style="display:flex; align-items:center; gap:6px;">
               <!-- left boundary nudge -->
               <div v-if="!isInsertion(focusCurrent)" style="display:flex; flex-direction:column; gap:3px;">
@@ -1223,7 +1277,7 @@ body { overflow: hidden; }
               </div>
               <span class="fm-token">
                 <span v-if="isInsertion(focusCurrent)" class="fm-tok-abbr fm-active-abbr annot-ins-chip" title="insertion">∅</span>
-                <span v-else class="fm-tok-abbr fm-active-abbr" v-html="renderVisible(getExact(focusCurrent))"></span>
+                <span v-else class="fm-tok-abbr fm-active-abbr" v-html="renderVisible(getExactLive(focusCurrent))"></span>
                 <span v-if="isAtrNoise(focusCurrent)" class="fm-type-chip fm-type-noise">ATR Noise</span>
                 <span v-else-if="isNonResolvAbbr(focusCurrent)" class="fm-type-chip fm-type-nonresolv">
                   [[ getNonResolvReason(focusCurrent) ]]
@@ -1257,63 +1311,49 @@ body { overflow: hidden; }
                 </svg>
                 Delete
               </button>
-              <button class="fm-unclear-btn" @click.stop="e => { const r = e.currentTarget.getBoundingClientRect(); focusMenuPos = { top: r.top - 4, left: r.left + r.width/2 }; focusUnclearOpen = !focusUnclearOpen; }" tabindex="-1">
-                ? Unclear <span style="font-size:.75em; opacity:.85;">▾</span>
-              </button>
-              <Teleport to="body">
-                <div v-if="focusUnclearOpen" class="fm-unclear-menu-fixed"
-                     :style="{ top: focusMenuPos.top + 'px', left: focusMenuPos.left + 'px', transform: 'translate(-50%, -100%)' }">
-                  <button class="fm-unclear-item is-noise" @click.stop="focusMarkAtrNoise()">
-                    Mark as ATR Noise
-                  </button>
-                  <button class="fm-unclear-item" @click.stop="focusMarkNonResolvAbbr('persName')">
-                    Ambiguous person name
-                  </button>
-                  <button class="fm-unclear-item" @click.stop="focusMarkNonResolvAbbr('orgName')">
-                    Ambiguous organisation name
-                  </button>
-                  <button class="fm-unclear-item" @click.stop="focusMarkNonResolvAbbr('placeName')">
-                    Ambiguous place name
-                  </button>
-                  <button class="fm-unclear-item" @click.stop="focusMarkNonResolvAbbr('other')">
-                    Other ambiguous abbreviation
-                  </button>
-                  <button v-if="!focusMarkupOpen" class="fm-unclear-item" @click.stop="focusMarkupOpen = true">
-                    Mark-Up (tag only, no change) <span style="font-size:.75em; opacity:.85;">▸</span>
-                  </button>
-                  <template v-else>
-                    <button class="fm-unclear-item" @click.stop="focusMarkMarkup('persName')">↳ Person</button>
-                    <button class="fm-unclear-item" @click.stop="focusMarkMarkup('orgName')">↳ Organisation</button>
-                    <button class="fm-unclear-item" @click.stop="focusMarkMarkup('placeName')">↳ Place</button>
-                    <button class="fm-unclear-item" @click.stop="focusMarkMarkup('num')">↳ Numeral</button>
-                  </template>
-                </div>
-              </Teleport>
-              <button class="fm-unclear-btn" @click.stop="e => { const r = e.currentTarget.getBoundingClientRect(); focusMenuPos = { top: r.top - 4, left: r.left + r.width/2 }; focusTagOpen = !focusTagOpen; }" tabindex="-1">
-                Tag <span style="font-size:.75em; opacity:.85;">▾</span>
-              </button>
-              <Teleport to="body">
-                <div v-if="focusTagOpen" class="fm-unclear-menu-fixed"
-                     :style="{ top: focusMenuPos.top + 'px', left: focusMenuPos.left + 'px', transform: 'translate(-50%, -100%)' }">
-                  <button class="fm-unclear-item" @click.stop="focusSetSemtag('persName')">Person</button>
-                  <button class="fm-unclear-item" @click.stop="focusSetSemtag('orgName')">Organisation</button>
-                  <button class="fm-unclear-item" @click.stop="focusSetSemtag('placeName')">Place</button>
-                  <button class="fm-unclear-item" @click.stop="focusSetSemtag('num')">Numeral</button>
-                  <button v-if="getSemtag(focusCurrent)" class="fm-unclear-item" @click.stop="focusSetSemtag(null)">Clear tag</button>
-                </div>
-              </Teleport>
-              <button class="fm-unclear-btn" @click.stop="e => { const r = e.currentTarget.getBoundingClientRect(); focusMenuPos = { top: r.top - 4, left: r.left + r.width/2 }; focusTypeOpen = !focusTypeOpen; }" tabindex="-1">
+              <button class="fm-unclear-btn fm-type-wrap" @click.stop="e => toggleFocusDropdown('Type', e)" tabindex="-1">
                 Type <span style="font-size:.75em; opacity:.85;">▾</span>
               </button>
               <Teleport to="body">
                 <div v-if="focusTypeOpen" class="fm-unclear-menu-fixed"
                      :style="{ top: focusMenuPos.top + 'px', left: focusMenuPos.left + 'px', transform: 'translate(-50%, -100%)' }">
-                  <button class="fm-unclear-item" @click.stop="focusChangeType('normalizing')">Normalizing</button>
+                  <button class="fm-unclear-item" @click.stop="focusChangeType('normalizing')">Normalization</button>
                   <button class="fm-unclear-item" @click.stop="focusChangeType('insertion')">Insertion</button>
                   <button class="fm-unclear-item" @click.stop="focusChangeType('deletion')">Deletion</button>
-                  <button class="fm-unclear-item is-noise" @click.stop="focusChangeType('atr_noise')">ATR noise</button>
-                  <button class="fm-unclear-item" @click.stop="focusChangeType('non_resolv_abbr')">Non-resolvable abbr.</button>
-                  <button class="fm-unclear-item" @click.stop="focusChangeType('markup')">Mark-Up</button>
+                  <button class="fm-unclear-item is-noise" @click.stop="focusChangeType('atr_noise')">ATR Noise</button>
+                  <button class="fm-unclear-item" @click.stop="focusChangeType('non_resolv_abbr')">Unresolvable Abbreviation</button>
+                  <button class="fm-unclear-item" @click.stop="focusChangeType('markup')">Markup</button>
+                </div>
+              </Teleport>
+              <button ref="fmTagBtn" class="fm-unclear-btn fm-tag-wrap" @click.stop="e => toggleFocusDropdown('Tag', e)" tabindex="-1">
+                Tag <span style="font-size:.75em; opacity:.85;">▾</span>
+              </button>
+              <Teleport to="body">
+                <div v-if="focusTagOpen" class="fm-unclear-menu-fixed"
+                     :style="{ top: focusMenuPos.top + 'px', left: focusMenuPos.left + 'px', transform: 'translate(-50%, -100%)' }">
+                  <template v-if="isNonResolvAbbr(focusCurrent)">
+                    <button class="fm-unclear-item" @click.stop="focusSetReason('persName')">[[ getNonResolvReason(focusCurrent) === 'persName' ? '✓ ' : '' ]]Person</button>
+                    <button class="fm-unclear-item" @click.stop="focusSetReason('orgName')">[[ getNonResolvReason(focusCurrent) === 'orgName' ? '✓ ' : '' ]]Organisation</button>
+                    <button class="fm-unclear-item" @click.stop="focusSetReason('placeName')">[[ getNonResolvReason(focusCurrent) === 'placeName' ? '✓ ' : '' ]]Place</button>
+                    <button class="fm-unclear-item" @click.stop="focusSetReason('other')">[[ getNonResolvReason(focusCurrent) === 'other' ? '✓ ' : '' ]]Other</button>
+                  </template>
+                  <template v-else>
+                    <button class="fm-unclear-item" @click.stop="focusSetSemtag('persName')">[[ getSemtag(focusCurrent) === 'persName' ? '✓ ' : '' ]]Person</button>
+                    <button class="fm-unclear-item" @click.stop="focusSetSemtag('orgName')">[[ getSemtag(focusCurrent) === 'orgName' ? '✓ ' : '' ]]Organisation</button>
+                    <button class="fm-unclear-item" @click.stop="focusSetSemtag('placeName')">[[ getSemtag(focusCurrent) === 'placeName' ? '✓ ' : '' ]]Place</button>
+                    <button class="fm-unclear-item" @click.stop="focusSetSemtag('num')">[[ getSemtag(focusCurrent) === 'num' ? '✓ ' : '' ]]Numeral</button>
+                    <button v-if="getSemtag(focusCurrent)" class="fm-unclear-item" @click.stop="focusSetSemtag(null)">Clear tag</button>
+                  </template>
+                </div>
+              </Teleport>
+              <button class="fm-unclear-btn fm-gap-wrap" :class="{ 'is-active': isGapBefore(focusCurrent) || isGapAfter(focusCurrent) }" @click.stop="e => toggleFocusDropdown('Gap', e)" tabindex="-1">
+                <span v-if="isGapBefore(focusCurrent)">◂</span> Gap <span v-if="isGapAfter(focusCurrent)">▸</span> <span style="font-size:.75em; opacity:.85;">▾</span>
+              </button>
+              <Teleport to="body">
+                <div v-if="focusGapOpen" class="fm-unclear-menu-fixed"
+                     :style="{ top: focusMenuPos.top + 'px', left: focusMenuPos.left + 'px', transform: 'translate(-50%, -100%)' }">
+                  <button class="fm-unclear-item" @click.stop="focusSetGap('before')">[[ isGapBefore(focusCurrent) ? '✓ ' : '' ]]Gap before</button>
+                  <button class="fm-unclear-item" @click.stop="focusSetGap('after')">[[ isGapAfter(focusCurrent) ? '✓ ' : '' ]]Gap after</button>
                 </div>
               </Teleport>
             </div>

@@ -279,16 +279,20 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
     if lines and lines[0].get("alto_id"):
         body_parts.append(f'<lb n="{escape(lines[0]["alto_id"])}"/>\n        ')
 
-    def process_segment(text, orig_label=None, span_type=None, span_subtype=None, abs_start=0):
+    def process_segment(text, orig_label=None, span_type=None, span_subtype=None, abs_start=0,
+                         gap_before=False, gap_after=False):
         nonlocal word_count, tokens_on_line, annot_resp_id
         local_ids = []
         has_internal_lb = orig_label and '\n' in orig_label
 
         # Tokenize reg value (words, punctuation, or manual newlines)
         tokens = list(re.finditer(r"(\w+)|([^\w\s]+)|(\n)", text))
+        content_indices = [i for i, m in enumerate(tokens) if not m.group(3)]
+        first_idx = content_indices[0] if content_indices else None
+        last_idx = content_indices[-1] if content_indices else None
 
         prev_end = 0
-        for match in tokens:
+        for i, match in enumerate(tokens):
             # Preserve whitespace between tokens (spaces in source/value)
             if match.start() > prev_end:
                 body_parts.append(escape(text[prev_end:match.start()]))
@@ -309,15 +313,18 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
             tag = "pc" if match.group(2) else "w"
             local_ids.append(f"#{w_id}")
 
+            gap_open = "<gap/>" if gap_before and i == first_idx else ""
+            gap_close = "<gap/>" if gap_after and i == last_idx else ""
+
             if has_internal_lb:
                 # Surgical split
                 split_idx = find_split_point(orig_label, val)
                 part1, part2 = val[:split_idx], val[split_idx:]
                 lb_tag = '<lb break="no" precision="low"/>'
-                token_xml = f'<{tag} xml:id="{w_id}">{escape(part1)}{lb_tag}{escape(part2)}</{tag}>'
+                token_xml = f'<{tag} xml:id="{w_id}">{gap_open}{escape(part1)}{lb_tag}{escape(part2)}{gap_close}</{tag}>'
                 tokens_on_line = 0  # Force wrap after an internal lb
             else:
-                token_xml = f'<{tag} xml:id="{w_id}">{escape(val)}</{tag}>'
+                token_xml = f'<{tag} xml:id="{w_id}">{gap_open}{escape(val)}{gap_close}</{tag}>'
 
             body_parts.append(token_xml)
 
@@ -364,13 +371,17 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
             process_segment(original_text[cursor:start], abs_start=cursor)
 
         body = annot.get("body", [{}])[0]
+        gap_before = bool(body.get("gap_before"))
+        gap_after = bool(body.get("gap_after"))
         if body.get("purpose") == "atr_noise":
             raw_text = original_text[start:end]
             resp_id = annot.get("resp_id")
             resp_attr = ""
             if users_by_id and resp_id and resp_id in users_by_id:
                 resp_attr = f' resp="#{escape(users_by_id[resp_id])}"'
-            body_parts.append(f'<unclear reason="illegible" cert="low"{resp_attr}>{escape(raw_text)}</unclear>')
+            gap_open = "<gap/>" if gap_before else ""
+            gap_close = "<gap/>" if gap_after else ""
+            body_parts.append(f'<unclear reason="illegible" cert="low"{resp_attr}>{gap_open}{escape(raw_text)}{gap_close}</unclear>')
         elif body.get("purpose") == "non_resolv_abbr":
             reason = body.get("reason", "other")
             raw_text = original_text[start:end]
@@ -380,7 +391,8 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
                 resp_attr = f' resp="#{escape(users_by_id[resp_id])}"'
             annot_resp_id = resp_id
             pre_len = len(body_parts)
-            process_segment(raw_text, orig_label=raw_text, span_type="non_resolv_abbr", span_subtype=reason, abs_start=start)
+            process_segment(raw_text, orig_label=raw_text, span_type="non_resolv_abbr", span_subtype=reason,
+                             abs_start=start, gap_before=gap_before, gap_after=gap_after)
             new_parts = body_parts[pre_len:]
             del body_parts[pre_len:]
             body_parts.append(f'<abbr type="{escape(reason)}"{resp_attr}>' + "".join(new_parts) + '</abbr>')
@@ -389,13 +401,15 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
             semtag = body.get("semtag")
             if semtag in SEMTAG_TAGS:
                 pre_len = len(body_parts)
-                process_segment(body.get("value", ""), orig_label=original_text[start:end], abs_start=start)
+                process_segment(body.get("value", ""), orig_label=original_text[start:end], abs_start=start,
+                                 gap_before=gap_before, gap_after=gap_after)
                 new_parts = body_parts[pre_len:]
                 del body_parts[pre_len:]
                 tag = SEMTAG_TAGS[semtag]
                 body_parts.append(f'<{tag}>' + "".join(new_parts) + f'</{tag}>')
             else:
-                process_segment(body.get("value", ""), orig_label=original_text[start:end], abs_start=start)
+                process_segment(body.get("value", ""), orig_label=original_text[start:end], abs_start=start,
+                                 gap_before=gap_before, gap_after=gap_after)
         cursor = end
 
     if cursor < len(original_text):

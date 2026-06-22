@@ -69,6 +69,12 @@
         {% else %}
         <span class="badge bg-light text-dark" title="No abbreviation resolutions in this document">— validated</span>
         {% endif %}
+        {% set fr = for_review_counts[doc.id] %}
+        {% if fr %}
+        <span class="badge bg-info text-dark" title="{{ fr }} page(s) marked for review">
+          <i class="fa-solid fa-magnifying-glass"></i> {{ fr }} for review
+        </span>
+        {% endif %}
         <span class="badge bg-secondary">{{ doc.language }}</span>
         <span class="badge bg-light text-dark">{{ doc.pages | length }} page(s)</span>
       </div>
