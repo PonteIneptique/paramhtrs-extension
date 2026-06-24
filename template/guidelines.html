@@ -2,50 +2,131 @@
 
 {% block content %}
 <body>
-    <h1>Text Normalization Guidelines</h1>
+    <h1>Pre-Editorial Normalization (PEN) Guidelines</h1>
 
-    <p>Some examples will be provided in pseudo-XML to clarify the alternative between original text (&lt;orig/&gt;) and corrected text (&lt;reg/&gt;).</p>
+    <p>The text produced by graphemic ATR is raw: it mixes manuscript-specific practices (abbreviations, inconsistent
+    spacing, decorative capitalization, mixed numeral systems, undistinguished <em>u/v</em> and <em>i/j</em>) with
+    recognition errors. The goal of normalization in this tool is to turn that raw output into a text that is usable
+    for scholarship and NLP, while staying as close as possible to what is actually recoverable from the page.</p>
 
-    <h2>1. Space and Character Normalization</h2>
-    <p>Normalize spaces between words and remove doubled consonants in specific language practices like Italian.</p>
+    <p>Each guideline below follows the same structure: <strong>Rule</strong> (the one-sentence decision),
+    <strong>Details</strong> (how to apply it in the editor), and <strong>TEI Equivalent</strong> (what it produces
+    in the exported XML).</p>
+
+    <h2>What to normalize</h2>
+
+    <h3>1. Ramist letters (u/v, i/j)</h3>
+    <p><strong>Rule:</strong> Resolve ramist <em>u</em>/<em>v</em> and <em>i</em>/<em>j</em> to their modern
+    consonantal or vocalic value.</p>
+    <p><strong>Details:</strong> Use a <strong>Normalization</strong> annotation on the full word. The mass-cleanup
+    tool's "surnormalization" check deliberately ignores these substitutions, since they are not over-corrections.</p>
+    <p><strong>TEI Equivalent:</strong> The normalized form appears inline in <code>&lt;w&gt;</code>; the original
+    form is kept in a <code>&lt;span target="#wN"&gt;</code> inside <code>&lt;standOff&gt;</code>.</p>
+    <div class="example">
+        &lt;choice&gt;&lt;orig&gt;uitam&lt;/orig&gt;&lt;reg&gt;vitam&lt;/reg&gt;&lt;/choice&gt;
+    </div>
+
+    <h3>2. Spacing and page/column splits</h3>
+    <p><strong>Rule:</strong> Only spaces get inserted or deleted as a deliberate normalization choice — never
+    letters.</p>
+    <p><strong>Details:</strong> <strong>Insertion</strong> applies to a missing word space, or to merging a
+    line-break hyphen into the next line. <strong>Deletion</strong> is not a normalization choice you make
+    deliberately on spaces or letters; where it appears it is almost always an alignment artifact, except to remove
+    a space before punctuation (see 6.) or when marking <strong>ATR Noise</strong> (see 9.). If a token is genuinely
+    split across a page or column break, use the <strong>Gap</strong> toggle instead of merging text across pages.</p>
+    <p><strong>TEI Equivalent:</strong> Insertions appear inline with no standoff record. A Gap renders as a nested
+    <code>&lt;gap/&gt;</code> inside the token at the page/column boundary.</p>
     <div class="example">
         &lt;choice&gt;&lt;orig&gt;arriva&lt;/orig&gt;&lt;reg&gt;a riva&lt;/reg&gt;&lt;/choice&gt;
     </div>
 
-    <h2>2. Normalization of Letters</h2>
-    <p>Convert u/v and i/j according to modern spelling conventions.</p>
+    <h3>3. Recognition-error correction</h3>
+    <p><strong>Rule:</strong> Fix HTR letter errors at the token level — never edit individual letters.</p>
+    <p><strong>Details:</strong> If a letter was dropped, added, or misread (e.g. an <em>rn</em>/<em>m</em>
+    confusion), that is bad HTR output, not a spelling phenomenon — re-annotate the whole token as
+    <strong>Normalization</strong>, not by inserting/deleting individual characters within it.</p>
+    <p><strong>TEI Equivalent:</strong> Produces a <code>&lt;span&gt;</code> as in (1).</p>
 
-    <h2>3. Abbreviation Resolution</h2>
-    <p>Expand abbreviations where possible. If uncertain (because of a lack of context, specifically for names), retain a modern abbreviation.</p>
-    <div class="example">
-        &lt;choice&gt;&lt;orig&gt;.S. .B.&lt;/orig&gt;&lt;reg&gt;Sanctus B.&lt;/reg&gt;&lt;/choice&gt;
-    </div>
-
-    <h2>4. Hyphen and Line Break Handling</h2>
-    <p>Remove hyphens at the end of lines and click merge on the next line.</p>
-
-    <h2>5. Accent Normalization</h2>
-    <p>Introduce accents where applicable to the language.</p>
-
-    <h2>6. Apostrophe Addition</h2>
-    <p>For languages that use apostrophes, restore them where necessary.</p>
-    <div class="example">
-        &lt;choice&gt;&lt;orig&gt;larive&lt;/orig&gt;&lt;reg&gt;l'arivé&lt;/reg&gt;&lt;/choice&gt;
-    </div>
-
-    <h2>7. Missing Letter Restoration</h2>
-    <p>Add inferred missing letters, such as initials, if they can be easily deduced.</p>
-
-    <h2>8. Punctuation Spacing</h2>
-    <p>Ensure the normalisation of spacing around punctuation marks: remove any space before them and restore a space after if necessary.</p>
-
-    <h2>9. Regional Variations</h2>
-    <p>Consider regional variations when resolving abbreviations or spelling inconsistencies.</p>
+    <h3>4. Abbreviation resolution</h3>
+    <p><strong>Rule:</strong> Expand abbreviations to fit the word's meaning, morphosyntax, and the text's own
+    orthographic system.</p>
+    <p><strong>Details:</strong> Prefer whatever spelling variant is already attested elsewhere on the page over an
+    arbitrary "standard" form. Use a <strong>Normalization</strong> annotation.</p>
+    <p><strong>TEI Equivalent:</strong> Same as (1) — a <code>&lt;span&gt;</code> recording the abbreviated form.</p>
     <div class="example">
         &lt;choice&gt;&lt;orig&gt;q̃e&lt;/orig&gt;&lt;reg&gt;que&lt;/reg&gt;&lt;/choice&gt;
     </div>
 
-    <h2>10. HTR Inference Correction</h2>
-    <p>Correct the text only if it is easily correctable and improves readability.</p>
+    <h3>5. Capitalization</h3>
+    <p><strong>Rule:</strong> Normalize capitalization at sentence starts and for proper names to modern conventions.</p>
+    <p><strong>Details:</strong> Apply this regardless of any decorative capitalization used in the source. Use
+    <strong>Normalization</strong>.</p>
+    <p><strong>TEI Equivalent:</strong> Same as (1).</p>
+
+    <h3>6. Apostrophes and accents</h3>
+    <p><strong>Rule:</strong> Restore apostrophes and accents required by the target language.</p>
+    <p><strong>Details:</strong> Add them even when they are absent from the source. Use <strong>Normalization</strong>.</p>
+    <p><strong>TEI Equivalent:</strong> Same as (1).</p>
+    <div class="example">
+        &lt;choice&gt;&lt;orig&gt;larive&lt;/orig&gt;&lt;reg&gt;l'arivé&lt;/reg&gt;&lt;/choice&gt;
+    </div>
+
+    <h3>7. Punctuation spacing</h3>
+    <p><strong>Rule:</strong> Normalize the spacing around punctuation, never the punctuation itself.</p>
+    <p><strong>Details:</strong> Remove the space before punctuation and add one after if needed. The punctuation
+    mark is always preserved as written. Removing a space before punctuation is the one case where
+    <strong>Deletion</strong> is a deliberate, guideline-driven choice (see 2.).</p>
+    <p><strong>TEI Equivalent:</strong> The punctuation mark renders as <code>&lt;pc&gt;</code>; a deleted space
+    leaves no standoff record, it is simply absent from the output.</p>
+
+    <h2>What to preserve (do not normalize)</h2>
+
+    <h3>8. Etymological / historical spelling variants</h3>
+    <p><strong>Rule:</strong> Don't normalize genuine historical spelling variants.</p>
+    <p><strong>Details:</strong> An <em>f</em> standing for an etymological <em>ph</em> is preserved as-is — only
+    allographs considered the same letter in period (like ramist u/v) get normalized, see (1).</p>
+    <p><strong>TEI Equivalent:</strong> No annotation: the text is left untouched and produces no span.</p>
+
+    <h3>9. Numerals</h3>
+    <p><strong>Rule:</strong> Leave numerals exactly as written; tag them, don't rewrite them.</p>
+    <p><strong>Details:</strong> No conversion between Roman, Arabic, or fractional systems, and no correction of
+    cardinal/ordinal form or minims. It is recommended to mark up any numeral with a <strong>Markup</strong>
+    annotation + semtag <strong>Numeral (num)</strong>, even when it isn't part of a larger named entity.</p>
+    <p><strong>TEI Equivalent:</strong> Wrapped inline in <code>&lt;num&gt;</code>, with the text itself unchanged.</p>
+
+    <h3>10. Severe or unrecoverable ATR noise</h3>
+    <p><strong>Rule:</strong> Don't fix text that is too degraded to read confidently.</p>
+    <p><strong>Details:</strong> Attempting to "fix" an unrecoverable span risks hallucinating content that isn't on
+    the page. Mark it <strong>ATR Noise</strong> instead.</p>
+    <p><strong>TEI Equivalent:</strong> Rendered inline as
+    <code>&lt;unclear reason="illegible" cert="low"&gt;</code>.</p>
+
+    <h2>Handling uncertainty</h2>
+
+    <h3>11. Ambiguous abbreviations (names)</h3>
+    <p><strong>Rule:</strong> Don't expand a name abbreviation you can't justify from context.</p>
+    <p><strong>Details:</strong> <code>G. dixit</code> in a medical text can confidently be expanded to
+    <code>Galenus dixit</code>; but <code>S. Parisiensis</code> in a charter may give no clue whether S. stands for
+    Stephanus, Severinus, or someone else. In that case keep the initial as written and mark it
+    <strong>Unresolvable Abbreviation</strong> with the reason <strong>persName</strong>, <strong>orgName</strong>,
+    <strong>placeName</strong>, or <strong>other</strong>.</p>
+    <p><strong>TEI Equivalent:</strong> Rendered inline as <code>&lt;abbr type="{reason}"&gt;</code>, with a matching
+    <code>subtype</code> on the word's standoff span.</p>
+    <div class="example">
+        &lt;choice&gt;&lt;orig&gt;.S. .B.&lt;/orig&gt;&lt;reg&gt;Sanctus B.&lt;/reg&gt;&lt;/choice&gt;
+    </div>
+
+    <h2>Entity tagging</h2>
+    <p><strong>Rule:</strong> Tag persons, organisations, places, and numerals independently of any text change.</p>
+    <p><strong>Details:</strong> Use <strong>Markup</strong> with the appropriate semtag (<strong>Person</strong>/
+    <em>persName</em>, <strong>Organisation</strong>/<em>orgName</em>, <strong>Place</strong>/<em>placeName</em>,
+    <strong>Numeral</strong>/<em>num</em>); semtags can also be attached to a Normalization/Insertion annotation when
+    the entity itself needed correction (e.g. an expanded name). It matters, on the long term, to keep a
+    confidently-resolved <strong>persName</strong> (full name given, or tagged Markup once spelled out) distinct from
+    one left as an <strong>Unresolvable Abbreviation</strong> for lack of context — that distinction is what will let
+    us study, over time, which abbreviation patterns are reliably resolvable and which genuinely require external
+    evidence.</p>
+    <p><strong>TEI Equivalent:</strong> Wraps the relevant tokens inline in <code>&lt;persName&gt;</code>,
+    <code>&lt;orgName&gt;</code>, <code>&lt;placeName&gt;</code>, or <code>&lt;num&gt;</code>.</p>
 
 {% endblock %}

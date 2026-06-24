@@ -852,12 +852,12 @@ body { overflow: hidden; }
             <Teleport to="body">
             <div v-if="annotTypeOpenId === annot.id" class="unclear-menu-fixed"
                  :style="{ top: annotMenuPos.top + 'px', left: annotMenuPos.left + 'px', transform: 'translateX(-100%)' }">
-              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'normalizing'); annotTypeOpenId = null">Normalizing</button>
+              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'normalizing'); annotTypeOpenId = null">Normalization</button>
               <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'insertion'); annotTypeOpenId = null">Insertion</button>
               <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'deletion'); annotTypeOpenId = null">Deletion</button>
-              <button class="unclear-item is-noise" @mousedown.prevent="changeAnnotationType(annot, 'atr_noise'); annotTypeOpenId = null">ATR noise</button>
-              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'non_resolv_abbr'); annotTypeOpenId = null">Non-resolvable abbr.</button>
-              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'markup'); annotTypeOpenId = null">Mark-Up</button>
+              <button class="unclear-item is-noise" @mousedown.prevent="changeAnnotationType(annot, 'atr_noise'); annotTypeOpenId = null">ATR Noise</button>
+              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'non_resolv_abbr'); annotTypeOpenId = null">Unresolvable Abbreviation</button>
+              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'markup'); annotTypeOpenId = null">Markup</button>
             </div>
             </Teleport>
           </div>
@@ -919,7 +919,7 @@ body { overflow: hidden; }
                 Other ambiguous abbreviation
               </button>
               <button v-if="!pendingMarkupOpen" class="unclear-item" @mousedown.prevent="pendingMarkupOpen = true">
-                Mark-Up (tag only, no change) <span style="font-size:.8em; opacity:.7;">▸</span>
+                Markup (tag only, no change) <span style="font-size:.8em; opacity:.7;">▸</span>
               </button>
               <template v-else>
                 <button class="unclear-item" @mousedown.prevent="markMarkup('persName')">↳ Person</button>
@@ -989,12 +989,12 @@ body { overflow: hidden; }
             <Teleport to="body">
             <div v-if="annotTypeOpenId === annot.id" class="unclear-menu-fixed"
                  :style="{ top: annotMenuPos.top + 'px', left: annotMenuPos.left + 'px', transform: 'translateX(-100%)' }">
-              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'normalizing'); annotTypeOpenId = null">Normalizing</button>
+              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'normalizing'); annotTypeOpenId = null">Normalization</button>
               <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'insertion'); annotTypeOpenId = null">Insertion</button>
               <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'deletion'); annotTypeOpenId = null">Deletion</button>
-              <button class="unclear-item is-noise" @mousedown.prevent="changeAnnotationType(annot, 'atr_noise'); annotTypeOpenId = null">ATR noise</button>
-              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'non_resolv_abbr'); annotTypeOpenId = null">Non-resolvable abbr.</button>
-              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'markup'); annotTypeOpenId = null">Mark-Up</button>
+              <button class="unclear-item is-noise" @mousedown.prevent="changeAnnotationType(annot, 'atr_noise'); annotTypeOpenId = null">ATR Noise</button>
+              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'non_resolv_abbr'); annotTypeOpenId = null">Unresolvable Abbreviation</button>
+              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'markup'); annotTypeOpenId = null">Markup</button>
             </div>
             </Teleport>
           </div>
