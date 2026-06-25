@@ -54,61 +54,73 @@ def api_normalize():
     data = request.json
     split_mode = data.get("split_mode", "lines")
     min_words = int(data.get("min_words", 100))
-    raw_text = data.get("inputtext", "")
-
-    orig_lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
-    if not orig_lines:
-        return Response(_sse_done(""), mimetype="text/event-stream",
-                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     from flask import current_app
     max_chunk_bytes = current_app.config['MAX_CHUNK_BYTES']
     delimiters = list(data.get("delimiters", "¶;."))
 
-    if split_mode == "lines":
-        # One model call per line; full_reg is newline-joined normalized lines.
-        raw_chunks = _enforce_max_bytes(orig_lines, max_chunk_bytes)
-        separator = "\n"
+    # `parts` (list of line-arrays, one per source file/part) keeps chunking
+    # scoped within each part so punctuation-mode batches never merge lines
+    # from different parts. Falls back to a single implicit part built from
+    # `inputtext` for single-source callers.
+    raw_parts = data.get("parts")
+    if raw_parts is None:
+        raw_text = data.get("inputtext", "")
+        raw_parts = [raw_text.splitlines()]
 
-        def generate():
-            total = len(raw_chunks)
-            pairs = []
-            for i, chunk in enumerate(raw_chunks):
-                reg = normalize_line(chunk, model, tokenizer)
-                pairs.append({"orig": chunk, "reg": reg})
-                yield _sse_event("progress", {"current": i + 1, "total": total,
-                                              "result": {"orig": chunk, "reg": reg}})
-            yield _sse_event("done", {
-                "full_reg": separator.join(p["reg"] for p in pairs),
-                "chunks": pairs,
-                "separator": separator,
-            })
+    parts_lines = [[l.strip() for l in part if l.strip()] for part in raw_parts]
+    if not any(parts_lines):
+        return Response(_sse_done(""), mimetype="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-    else:
-        if split_mode == "punctuation":
-            full_text = " ".join(orig_lines)
-            batch_chunks = _split_on_punct(full_text, delimiters, min_words)
+    # Build the list of (part_index, chunk) batches, splitting independently
+    # within each part so chunk boundaries never cross a part boundary.
+    batches = []
+    for part_index, orig_lines in enumerate(parts_lines):
+        if not orig_lines:
+            continue
+        if split_mode == "lines":
+            part_chunks = orig_lines
+            separator = "\n"
+        elif split_mode == "punctuation":
+            part_chunks = _split_on_punct(" ".join(orig_lines), delimiters, min_words)
             separator = " "
         else:
-            batch_chunks = orig_lines
+            part_chunks = orig_lines
             separator = "\n"
+        part_chunks = _enforce_max_bytes(part_chunks, max_chunk_bytes)
+        for chunk in part_chunks:
+            batches.append({"part_index": part_index, "chunk": chunk, "separator": separator})
 
-        batch_chunks = _enforce_max_bytes(batch_chunks, max_chunk_bytes)
+    def generate():
+        total = len(batches)
+        pairs = []
+        for i, batch in enumerate(batches):
+            reg = normalize_line(batch["chunk"], model, tokenizer)
+            pair = {"orig": batch["chunk"], "reg": reg, "part_index": batch["part_index"]}
+            pairs.append(pair)
+            yield _sse_event("progress", {"current": i + 1, "total": total, "result": pair})
 
-        # One model call per batch; full_reg is joined normalized chunks.
-        def generate():
-            total = len(batch_chunks)
-            pairs = []
-            for i, chunk in enumerate(batch_chunks):
-                reg = normalize_line(chunk, model, tokenizer)
-                pairs.append({"orig": chunk, "reg": reg})
-                yield _sse_event("progress", {"current": i + 1, "total": total,
-                                              "result": {"orig": chunk, "reg": reg}})
-            yield _sse_event("done", {
-                "full_reg": separator.join(p["reg"] for p in pairs),
-                "chunks": pairs,
-                "separator": separator,
+        full_reg_by_part = {}
+        for pair in pairs:
+            full_reg_by_part.setdefault(pair["part_index"], []).append(pair)
+        separators_by_part = {b["part_index"]: b["separator"] for b in batches}
+        parts_out = []
+        for part_index in range(len(parts_lines)):
+            part_pairs = full_reg_by_part.get(part_index, [])
+            sep = separators_by_part.get(part_index, "\n")
+            parts_out.append({
+                "chunks": part_pairs,
+                "full_reg": sep.join(p["reg"] for p in part_pairs),
+                "separator": sep,
             })
+
+        yield _sse_event("done", {
+            "full_reg": "\n".join(p["full_reg"] for p in parts_out),
+            "chunks": pairs,
+            "parts": parts_out,
+            "separator": parts_out[0]["separator"] if parts_out else "\n",
+        })
 
     return Response(
         stream_with_context(generate()),

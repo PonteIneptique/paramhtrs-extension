@@ -692,18 +692,21 @@ createApp({
         }
         {% endif %}
 
-        // Stream normalize results
+        // Stream normalize results. Each source file/part is split
+        // independently server-side (so punctuation-mode batches never
+        // merge lines from different parts) by sending one line-array per
+        // part; single-source inputs are just one implicit part.
         const isMultiAlto = this.inputMode === 'alto' && this.altoFiles.length > 1;
         const effLines = this.effectiveLines;
+        const partsLines = isMultiAlto
+          ? this.altoFiles.map(f => f.lines.filter(l => l.text && l.text.trim()).map(l => l.text.trim()))
+          : [effLines.map(l => l.text)];
         const response = await fetch(`${ROOT}/api/normalize`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
-            inputtext: effLines.map(l => l.text).join('\n'),
-            // Multi-file ALTO needs a 1:1 chunk-per-line mapping to slice the
-            // result back into per-file parts, so force "lines" split mode
-            // regardless of what was selected.
-            split_mode: isMultiAlto ? 'lines' : this.splitMode,
+            parts: partsLines,
+            split_mode: this.splitMode,
             min_words: this.minWords,
             delimiters: this.delimiters,
           })
@@ -715,6 +718,7 @@ createApp({
         let buffer = '';
         let finalFullReg = '';
         let finalChunks = null;
+        let finalParts = null;
         let finalSeparator = '\n';
 
         while (true) {
@@ -735,27 +739,27 @@ createApp({
             } else if (evt.type === 'done') {
               finalFullReg = evt.full_reg || '';
               finalChunks = evt.chunks || null;
+              finalParts = evt.parts || null;
               finalSeparator = evt.separator ?? '\n';
             }
           }
         }
 
         if (isMultiAlto) {
-          let offset = 0;
-          const subparts = this.altoFiles.map(f => {
+          // Lines (one per ALTO line, for display/alto_id) are kept separate
+          // from chunks (the model's own batching, which may span several
+          // lines in punctuation mode) — the server aligns "chunks" against
+          // the flattened lines text directly, same as the single-source path.
+          const subparts = this.altoFiles.map((f, partIndex) => {
             const validLines = f.lines.filter(l => l.text && l.text.trim());
-            const sliceChunks = finalChunks ? finalChunks.slice(offset, offset + validLines.length) : [];
-            offset += validLines.length;
+            const partChunks = finalParts?.[partIndex]?.chunks || [];
             return {
               id: f.filename,
-              lines: validLines.map((l, i) => ({
-                abbr: l.text.trim(),
-                expan: sliceChunks[i]?.reg ?? '',
-                alto_id: l.alto_id || null,
-              })),
+              lines: validLines.map(l => ({ orig: l.text.trim(), alto_id: l.alto_id || null })),
+              chunks: partChunks.map(c => ({ orig: c.orig, reg: c.reg })),
             };
           });
-          await this._saveMultiPart(subparts);
+          await this._saveMultiPart(subparts, finalSeparator);
           return;
         }
 
@@ -831,7 +835,7 @@ createApp({
 
     // Saves a document made of several parts, e.g. {id, lines: [{abbr/orig, expan}]}[].
     // Used for the "Pre-aligned JSON" multi-subpart shape and for multi-file ALTO uploads.
-    async _saveMultiPart(subparts) {
+    async _saveMultiPart(subparts, separator = '\n') {
       this.saving = true;
       try {
         const r = await fetch(`${ROOT}/documents/new`, {
@@ -841,6 +845,7 @@ createApp({
             folder_id: this.selectedFolderId,
             label: this.pageLabel,
             subparts,
+            separator,
           })
         });
         const data = await r.json();

@@ -11,7 +11,11 @@ A failure means Recogito will highlight the wrong characters in the source panel
 """
 
 import pytest
-from app.annot_utils import align_to_annotations, align_to_annotations_from_chunks
+from app.annot_utils import (
+    align_to_annotations,
+    align_to_annotations_from_chunks,
+    apply_annotations_to_text,
+)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -250,3 +254,158 @@ def test_split_on_punct_offsets_with_chunks():
     chunks = [{"orig": l, "reg": r} for l, r in zip(lines, regs)]
     annots = align_to_annotations_from_chunks(chunks, separator="\n")
     assert_offsets_correct(full_text, annots, "punct_offset_regression: ")
+
+
+# ── multi-part punctuation-mode normalization ────────────────────────────────
+#
+# Regression for: "having multiple parts does not lead to normalizing around
+# punct". A Document's full_text joins ALL lines from ALL Parts uniformly
+# with "\n" (Document.full_text in app/models.py), so punctuation-mode chunks
+# must stay scoped to a single Part — never merging lines across a part
+# boundary — while still keeping the same length-preserving "\n"->" "
+# substitution trick that lets one separator value be reused across the
+# whole flattened chunk list.
+
+def test_api_normalize_batches_stay_within_part():
+    """api_normalize's per-part batching (the actual fix) must never merge
+    lines from two different parts into the same punctuation-mode chunk."""
+    from app.bp_norm import _split_on_punct, _enforce_max_bytes
+
+    delimiters = ["."]
+    min_words = 5
+    parts_lines = [
+        ["Hello world.", "This is part one.", "Second line."],
+        ["Part two starts here.", "More words to reach the threshold here."],
+    ]
+
+    batches = []
+    for part_index, orig_lines in enumerate(parts_lines):
+        part_chunks = _split_on_punct(" ".join(orig_lines), delimiters, min_words)
+        part_chunks = _enforce_max_bytes(part_chunks, 512)
+        for chunk in part_chunks:
+            batches.append({"part_index": part_index, "chunk": chunk})
+
+    # No chunk should contain text from both parts.
+    for batch in batches:
+        if batch["part_index"] == 0:
+            assert "Part two" not in batch["chunk"]
+        else:
+            assert "Hello world" not in batch["chunk"]
+
+    # Every chunk must be attributed to exactly the part it came from.
+    part0_text = " ".join(b["chunk"] for b in batches if b["part_index"] == 0)
+    part1_text = " ".join(b["chunk"] for b in batches if b["part_index"] == 1)
+    assert part0_text == " ".join(parts_lines[0])
+    assert part1_text == " ".join(parts_lines[1])
+
+
+def test_align_to_annotations_from_chunks_across_part_boundary():
+    """A punctuation-mode chunk spanning multiple original lines within one
+    part must still align correctly against the Document-level, newline-
+    joined full_text that spans multiple parts."""
+    parts_lines = [
+        ["Hello wrld. This is prt one.", "Secnd line of part one."],
+        ["Prt two strts here. It has mre words."],
+    ]
+    full_text = "\n".join(line for lines in parts_lines for line in lines)
+
+    # Chunk 0 spans both lines of part 0 (punctuation mode batched them
+    # together); chunk 1 is part 1's only line.
+    chunks = [
+        {"orig": "Hello wrld. This is prt one. Secnd line of part one.",
+         "reg": "Hello world. This is part one. Second line of part one."},
+        {"orig": "Prt two strts here. It has mre words.",
+         "reg": "Part two starts here. It has more words."},
+    ]
+
+    annots = align_to_annotations_from_chunks(chunks, separator=" ")
+    assert_offsets_correct(full_text, annots, "multi_part_punct: ")
+
+    result = apply_annotations_to_text(full_text, annots)
+    assert result == "\n".join(line for lines in [
+        ["Hello world. This is part one.", "Second line of part one."],
+        ["Part two starts here. It has more words."],
+    ] for line in lines)
+
+
+def test_document_create_subparts_chunks_field():
+    """app/bp_document.py's multi-source 'subparts' shape: when an entry
+    carries its own 'chunks' (decoupled from per-line Lines, e.g. punctuation
+    mode), flat_chunks must come from those chunks, not from per-line
+    'expan' — and the resulting annotations must still resolve correctly
+    against the multi-part Document.full_text."""
+    from app import app
+    from app.models import db, Folder, Document, Part, Line, Project, User
+
+    app.config.update(
+        TESTING=True,
+        SQLALCHEMY_DATABASE_URI="sqlite:///:memory:",
+        SECRET_KEY="test-secret",
+    )
+    with app.app_context():
+        db.create_all()
+        user = User(username="subparts-chunks-test", password_hash="x")
+        db.session.add(user)
+        db.session.flush()
+        proj = Project(name="P", description="", creator_id=user.id)
+        db.session.add(proj)
+        db.session.flush()
+        folder = Folder(name="F", description="", project_id=proj.id,
+                         creator_id=user.id, language="lat")
+        db.session.add(folder)
+        db.session.flush()
+
+        document = Document(folder_id=folder.id, label="D1", order=1, status="pending")
+        db.session.add(document)
+        db.session.flush()
+
+        subpart_entries = [
+            {"id": "file1.xml", "lines": [
+                {"orig": "Hello wrld. This is prt one.", "alto_id": "l1"},
+                {"orig": "Secnd line of part one.", "alto_id": "l2"},
+            ], "chunks": [
+                {"orig": "Hello wrld. This is prt one. Secnd line of part one.",
+                 "reg": "Hello world. This is part one. Second line of part one."},
+            ]},
+            {"id": "file2.xml", "lines": [
+                {"orig": "Prt two strts here. It has mre words.", "alto_id": "l3"},
+            ], "chunks": [
+                {"orig": "Prt two strts here.", "reg": "Part two starts here."},
+                {"orig": "It has mre words.", "reg": "It has more words."},
+            ]},
+        ]
+        flat_chunks = []
+        for sp_idx, entry in enumerate(subpart_entries):
+            part = Part(document_id=document.id, order=sp_idx)
+            part.original_filename = entry.get("id")
+            db.session.add(part)
+            db.session.flush()
+            for idx, line_entry in enumerate(entry.get("lines", [])):
+                orig = line_entry.get("orig", "").strip()
+                line = Line(part_id=part.id, order=idx, original_text=orig,
+                            alto_id=line_entry.get("alto_id"))
+                db.session.add(line)
+            # Mirrors app/bp_document.py: when "chunks" is present, use it
+            # instead of building one chunk per line from "expan".
+            flat_chunks.extend(entry.get("chunks") or [])
+        db.session.flush()
+        document.set_annotations(align_to_annotations_from_chunks(flat_chunks, separator=" "))
+        db.session.commit()
+
+        assert document.full_text == (
+            "Hello wrld. This is prt one.\n"
+            "Secnd line of part one.\n"
+            "Prt two strts here. It has mre words."
+        )
+        assert document.normalized_text == (
+            "Hello world. This is part one.\n"
+            "Second line of part one.\n"
+            "Part two starts here. It has more words."
+        )
+        offsets = document.part_offsets
+        assert [o["original_filename"] for o in offsets] == ["file1.xml", "file2.xml"]
+        assert_offsets_correct(document.full_text, document.annotations,
+                                "document_create_subparts_chunks: ")
+
+        db.session.remove()
+        db.drop_all()

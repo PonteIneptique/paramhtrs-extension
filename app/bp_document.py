@@ -51,6 +51,14 @@ def document_create():
         if subpart_entries:
             # Multi-source shape: one Part per entry, lines flattened in order
             # for alignment so annotations can land at Document-relative offsets.
+            #
+            # Each entry's "chunks" (if given) carries the normalization-model's
+            # own batching ({"orig", "reg"} pairs, not necessarily one per Line —
+            # e.g. punctuation-mode batches span several Lines) so alignment is
+            # scoped to what the model actually saw, same as the single-source
+            # path below. Falls back to building one chunk per Line from each
+            # line entry's "expan" for callers that pre-align per line (e.g.
+            # the pre-aligned JSON import, which has no separate chunks step).
             flat_chunks = []
             for sp_idx, entry in enumerate(subpart_entries):
                 part = Part(document_id=document.id, order=sp_idx)
@@ -68,7 +76,10 @@ def document_create():
                         alto_id=line_entry.get("alto_id") or None,
                     )
                     db.session.add(line)
-                    flat_chunks.append({"orig": orig, "reg": line_entry.get("expan", "")})
+                    if "chunks" not in entry:
+                        flat_chunks.append({"orig": orig, "reg": line_entry.get("expan", "")})
+                if "chunks" in entry:
+                    flat_chunks.extend(entry.get("chunks") or [])
             db.session.flush()
             separator = data.get("separator", "\n")
             if any(c.get("reg") for c in flat_chunks):
