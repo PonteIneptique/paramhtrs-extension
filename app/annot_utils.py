@@ -108,9 +108,20 @@ def align_to_annotations(original_text: str, regularized_text: str) -> list:
     return _alignments_to_annotations(alignments, original_text)
 
 
-def align_one_chunk(orig: str, reg: str, reference_text: str, char_offset: int) -> list:
+def align_one_chunk(orig: str, reg: str, full_text: str, char_offset: int) -> list:
     """Align a single (orig, reg) chunk pair and return annotations positioned
-    against `reference_text` starting at `char_offset`.
+    against `full_text` starting at `char_offset`.
+
+    `full_text` must be the real underlying document text (e.g.
+    Document.full_text), NOT a separator-joined reconstruction of the chunks
+    fed to the model. In punctuation/dots mode, a chunk's `orig` can span
+    several original lines joined with a plain space — but the document's
+    real text has a newline there. Both are 1 character, so char_offset math
+    (purely additive over len(orig)/len(separator)) still lands on the right
+    *position* either way, but if an edit happens to fall exactly on that
+    joint, slicing a synthetic separator-joined string for the annotation's
+    exact/prefix/suffix would grab the wrong character at that one spot.
+    Slicing the real full_text instead is correct regardless.
 
     Factored out of align_to_annotations_from_chunks so the background
     normalization worker (worker.py) can call it one chunk at a time, as each
@@ -121,10 +132,10 @@ def align_one_chunk(orig: str, reg: str, reference_text: str, char_offset: int) 
         return []
     from .char_alignment import align_words
     alignments = align_words(orig, reg)
-    return _alignments_to_annotations(alignments, reference_text, char_offset)
+    return _alignments_to_annotations(alignments, full_text, char_offset)
 
 
-def align_to_annotations_from_chunks(chunks: list[dict], separator: str = "\n") -> list:
+def align_to_annotations_from_chunks(chunks: list[dict], separator: str = "\n", full_text: str | None = None) -> list:
     """Align each (orig, reg) chunk pair independently and return consolidated annotations.
 
     Aligning per-chunk keeps each sub-problem small and scoped to what the
@@ -137,13 +148,21 @@ def align_to_annotations_from_chunks(chunks: list[dict], separator: str = "\n") 
                    the full page text was assembled.  Typically "\n" (lines
                    mode) or " " (dots mode).  Pilcrow chunks already carry
                    their own delimiter so separator="" is correct there.
+        full_text: the real underlying document text to slice annotation
+                   context from (see align_one_chunk's docstring for why this
+                   must NOT be the separator-joined chunk text in general).
+                   Defaults to the separator-joined reconstruction for
+                   backward compatibility when no real text is available,
+                   but callers that have one (document_create, worker.py)
+                   should always pass it.
     """
-    reference_text = separator.join(c["orig"] for c in chunks)
+    if full_text is None:
+        full_text = separator.join(c["orig"] for c in chunks)
     all_annotations = []
     char_offset = 0
     for idx, chunk in enumerate(chunks):
         orig, reg = chunk["orig"], chunk.get("reg", "")
-        all_annotations.extend(align_one_chunk(orig, reg, reference_text, char_offset))
+        all_annotations.extend(align_one_chunk(orig, reg, full_text, char_offset))
         char_offset += len(orig)
         if idx < len(chunks) - 1:
             char_offset += len(separator)

@@ -175,6 +175,7 @@ const DOCUMENT_UPDATE_URL_TEMPLATE = {{ url_for('bp_document.document_update', d
 const DOCUMENT_MOVE_URL_TEMPLATE   = {{ url_for('bp_document.document_move',   document_id=0)|tojson }};
 const PROJECT_FOLDERS_URL       = {{ url_for('bp_folder.api_project_folders', project_id=document.project_id)|tojson }};
 const FOLDER_DOCUMENT_DELETE_URL_TEMPLATE = {{ url_for('bp_document.document_delete', document_id=0)|tojson }};
+const DOCUMENT_REPROCESS_URL_TEMPLATE = {{ url_for('bp_document.api_document_reprocess', document_id=0)|tojson }};
 const PAGES_REORDER_URL         = {{ url_for('bp_folder.api_folder_reorder_documents', folder_id=document.id)|tojson }};
 
 document.getElementById('folder-edit-btn')?.addEventListener('click', () => {
@@ -221,6 +222,9 @@ document.querySelectorAll('.js-page-edit-btn').forEach(btn => {
                 currentId: FOLDER_ID,
                 submitUrl: DOCUMENT_MOVE_URL_TEMPLATE.replace(/\/0\/move$/, `/${pageId}/move`),
                 bodyKey: 'folder_id',
+            },
+            reprocess: {
+                url: DOCUMENT_REPROCESS_URL_TEMPLATE.replace(/\/0\/reprocess$/, `/${pageId}/reprocess`),
             },
             delete: {
                 url: FOLDER_DOCUMENT_DELETE_URL_TEMPLATE.replace(/\/0\/delete$/, `/${pageId}/delete`),

@@ -1531,6 +1531,7 @@ window.__EDITOR_CONFIG__ = {
     pageStatus:       {{ url_for('bp_document.api_document_status',           document_id=page.id)|tojson }},
     documentUpdate:   {{ url_for('bp_document.document_update',               document_id=page.id)|tojson }},
     documentDelete:   {{ url_for('bp_document.document_delete',               document_id=page.id)|tojson }},
+    documentReprocess: {{ url_for('bp_document.api_document_reprocess',       document_id=page.id)|tojson }},
     addWork:          {{ url_for('bp_document.api_document_add_work',         document_id=page.id)|tojson }},
     removeWork:       {{ url_for('bp_document.api_document_remove_work',      document_id=page.id, work_id=0)|tojson }}.replace('/0', '/__WORK_ID__'),
     deleteLine:       {{ url_for('bp_norm.line_delete',                line_id=0)|tojson }}.replace('/0/', '/__LINE_ID__/'),

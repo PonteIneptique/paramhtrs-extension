@@ -17,6 +17,27 @@ bp_document = Blueprint(
 )
 
 
+def _queue_normalization_job(document: Document, parts_lines: list, data: dict) -> NormalizationJob:
+    """Builds chunks from parts_lines and queues a NormalizationJob for
+    worker.py to pick up. Shared by document_create's normalize=true path
+    and api_document_reprocess."""
+    split_mode = data.get("split_mode", "lines")
+    min_words = int(data.get("min_words", 100))
+    delimiters = list(data.get("delimiters", "¶;."))
+    max_chunk_bytes = current_app.config["MAX_CHUNK_BYTES"]
+    chunks, separator = build_chunks(parts_lines, split_mode, min_words, delimiters, max_chunk_bytes)
+
+    job = NormalizationJob(document_id=document.id, status="queued", separator=separator)
+    db.session.add(job)
+    db.session.flush()
+    for order, chunk in enumerate(chunks):
+        db.session.add(NormalizationJobChunk(
+            job_id=job.id, order=order,
+            part_index=chunk["part_index"], orig=chunk["orig"],
+        ))
+    return job
+
+
 # -------------------------
 # Create document + part + lines atomically (called from ingestion wizard)
 #
@@ -96,7 +117,8 @@ def document_create():
             db.session.flush()
             separator = data.get("separator", "\n")
             if not normalize and any(c.get("reg") for c in flat_chunks):
-                document.set_annotations(align_to_annotations_from_chunks(flat_chunks, separator=separator))
+                document.set_annotations(align_to_annotations_from_chunks(
+                    flat_chunks, separator=separator, full_text=document.full_text))
         else:
             part = Part(document_id=document.id, order=0)
             if data.get("original_filename"):
@@ -125,28 +147,16 @@ def document_create():
                 chunks = data.get("chunks")
                 separator = data.get("separator", "\n")
                 full_reg = (data.get("full_reg") or "").strip()
+                full_text = "\n".join(orig_lines)
                 if chunks:
-                    document.set_annotations(align_to_annotations_from_chunks(chunks, separator=separator))
+                    document.set_annotations(align_to_annotations_from_chunks(
+                        chunks, separator=separator, full_text=full_text))
                 elif full_reg:
-                    full_text = "\n".join(orig_lines)
                     document.set_annotations(align_to_annotations(full_text, full_reg))
                 # else: no annotations — leave empty
 
         if normalize:
-            split_mode = data.get("split_mode", "lines")
-            min_words = int(data.get("min_words", 100))
-            delimiters = list(data.get("delimiters", "¶;."))
-            max_chunk_bytes = current_app.config["MAX_CHUNK_BYTES"]
-            chunks, separator = build_chunks(parts_lines, split_mode, min_words, delimiters, max_chunk_bytes)
-
-            job = NormalizationJob(document_id=document.id, status="queued", separator=separator)
-            db.session.add(job)
-            db.session.flush()
-            for order, chunk in enumerate(chunks):
-                db.session.add(NormalizationJobChunk(
-                    job_id=job.id, order=order,
-                    part_index=chunk["part_index"], orig=chunk["orig"],
-                ))
+            _queue_normalization_job(document, parts_lines, data)
 
         db.session.commit()
         return jsonify({
@@ -288,6 +298,31 @@ def api_document_annotations(document: Document):
         "annotations": document.annotations or [],
         **_job_progress_dict(document.active_job),
     })
+
+
+# -------------------------
+# Reprocess: re-run normalization on a document's current lines, discarding
+# its existing annotations. Lets you re-check normalization/alignment on a
+# document that's already been imported, the same way "delete" lets you
+# discard one — exposed from the metadata modal.
+# -------------------------
+
+@bp_document.route("/api/documents/<int:document_id>/reprocess", methods=["POST"])
+@requires_access(Document, 'document_id')
+def api_document_reprocess(document: Document):
+    active = document.active_job
+    if active is not None and active.status in ("queued", "running"):
+        abort(409)
+
+    parts_lines = [[line.original_text for line in part.lines] for part in document.parts]
+
+    # Discard the previous run's annotations — reprocessing replaces them,
+    # it doesn't layer a second set on top.
+    document.set_annotations([])
+
+    _queue_normalization_job(document, parts_lines, request.json or {})
+    db.session.commit()
+    return jsonify({"status": "ok"})
 
 
 # -------------------------

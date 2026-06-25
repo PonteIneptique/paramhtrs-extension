@@ -1260,6 +1260,13 @@ document.querySelectorAll('.text-col').forEach(col => {
             submitUrl: urls.movePage,
             bodyKey: 'folder_id',
           },
+          reprocess: {
+            url: urls.documentReprocess,
+            onQueued: () => {
+              this.annotations = [];  // server already discarded the old set
+              this._startProcessingPoll();
+            },
+          },
           delete: { url: urls.documentDelete, label: 'Delete this document' },
           onSaved: () => window.location.reload(),
         });

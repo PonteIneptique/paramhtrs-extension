@@ -17,7 +17,7 @@ import time
 from datetime import datetime, timezone
 
 from app import app
-from app.models import db, NormalizationJob, NormalizationJobChunk, Annotation
+from app.models import db, NormalizationJob, NormalizationJobChunk, Annotation, Document
 from app.process import get_model_and_tokenizer, normalize_line
 from app.annot_utils import align_one_chunk
 
@@ -59,14 +59,19 @@ def process_job(job: NormalizationJob, model, tokenizer) -> None:
         .order_by(NormalizationJobChunk.order)
         .all()
     )
-    reference_text = job.separator.join(c.orig for c in chunks)
+    # Slice annotation context from the real document text, not a
+    # separator-joined reconstruction of the chunks — in punctuation mode a
+    # chunk can span several original lines joined with a plain space, while
+    # the document's real text has a newline there; see align_one_chunk's
+    # docstring in app/annot_utils.py for why that matters.
+    full_text = db.session.get(Document, job.document_id).full_text
     char_offset = 0
     for idx, chunk in enumerate(chunks):
         if chunk.reg is None:  # resume support: skip chunks already done by a prior (crashed) run
             reg = normalize_line(chunk.orig, model, tokenizer)
             chunk.reg = reg
             chunk.processed_at = utcnow()
-            annots = align_one_chunk(chunk.orig, reg, reference_text, char_offset)
+            annots = align_one_chunk(chunk.orig, reg, full_text, char_offset)
             for a in annots:
                 db.session.add(Annotation.from_dict(job.document_id, a))
             db.session.commit()  # this chunk's annotations are now visible immediately

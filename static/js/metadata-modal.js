@@ -124,6 +124,32 @@
         };
       }
 
+      // ── Reprocess ──
+      const reprocessGroup = document.querySelector('#metaModal [data-field-group="reprocess"]');
+      reprocessGroup.style.display = config.reprocess ? '' : 'none';
+      if (config.reprocess) {
+        const btn = $('metaReprocessBtn');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-arrows-rotate me-1"></i>Reprocess';
+        btn.onclick = async () => {
+          if (!confirm('Re-run normalization on this document? This replaces its current annotations.')) return;
+          btn.disabled = true;
+          btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queuing…';
+          const r = await fetch(config.reprocess.url, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config.reprocess.body || {}),
+          });
+          if (!r.ok) {
+            alert(r.status === 409 ? 'Already processing — wait for it to finish first.' : 'Failed to queue reprocessing');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-arrows-rotate me-1"></i>Reprocess';
+            return;
+          }
+          if (config.reprocess.onQueued) config.reprocess.onQueued();
+          else window.location.reload();
+        };
+      }
+
       // ── Delete ──
       const deleteGroup = document.querySelector('#metaModal [data-field-group="delete"]');
       deleteGroup.style.display = config.delete ? '' : 'none';
