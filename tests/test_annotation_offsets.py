@@ -76,6 +76,28 @@ def test_deletion():
     assert_offsets_correct(orig, annots, "deletion: ")
 
 
+def test_trailing_punct_split_does_not_overlap_next_annotation():
+    """gał. -> Gal.: splits into s('gał','Gal.') + s('.',':').
+
+    The "extend span by one char" heuristic in _alignments_to_annotations
+    must not steal the trailing '.' into the 'gał'->'Gal.' annotation just
+    because the target happens to end with '.' too -- that same '.' is the
+    source of the very next annotation ('.'->':' ), so stealing it produces
+    two overlapping TextPositionSelectors over the same character.
+    """
+    orig = "gał."
+    reg = "Gal.:"
+    annots = align_to_annotations(orig, reg)
+    assert_offsets_correct(orig, annots, "trailing_punct_split: ")
+
+    positions = sorted(_get_pos(a) for a in annots)
+    for (start, end), (next_start, next_end) in zip(positions, positions[1:]):
+        assert end <= next_start, (
+            f"trailing_punct_split: overlapping annotations {(start, end)} "
+            f"and {(next_start, next_end)} in {orig!r} -> {reg!r}"
+        )
+
+
 def test_multi_line_single_call():
     """Full text passed directly (lines joined with \\n)."""
     orig = (
