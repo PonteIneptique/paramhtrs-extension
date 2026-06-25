@@ -12,3 +12,4 @@ flask-login==0.6.3
 Flask-Migrate>=4.0
 rapidfuzz
 python-dotenv
+optimum[onnxruntime]==2.1.0

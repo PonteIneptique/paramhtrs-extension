@@ -87,6 +87,14 @@
         {% else %}
         <span class="badge bg-light text-dark" title="No abbreviation resolutions on this document">— validated</span>
         {% endif %}
+        {% if page.id in processing %}
+        <span class="badge bg-primary processing-badge" data-page-id="{{ page.id }}">
+          <span class="spinner-border spinner-border-sm" style="width:.7rem;height:.7rem;"></span>
+          {{ processing[page.id].current }}/{{ processing[page.id].total }}
+        </span>
+        {% else %}
+        <span class="badge bg-primary processing-badge" data-page-id="{{ page.id }}" style="display:none;"></span>
+        {% endif %}
         <span class="badge
           {% if page.status == 'done' %}bg-success
           {% elif page.status == 'for_review' %}bg-info text-dark
@@ -116,6 +124,42 @@
   </p>
   {% endif %}
 </div>
+
+{% if processing %}
+<script>
+// Bulk-polls background normalization progress for every document on this
+// page in one request, so the "N/M chunks" badges update live without a
+// full page reload. Stops once nothing in this folder is still processing.
+(function() {
+    const FOLDER_PROCESSING_URL = {{ url_for('bp_folder.api_folder_processing_status', folder_id=document.id)|tojson }};
+    async function poll() {
+        let data;
+        try {
+            const r = await fetch(FOLDER_PROCESSING_URL);
+            data = await r.json();
+        } catch (e) {
+            setTimeout(poll, 3000);
+            return;
+        }
+        let anyProcessing = false;
+        document.querySelectorAll('.processing-badge').forEach(badge => {
+            const pageId = Number(badge.dataset.pageId);
+            const info = data[pageId];
+            if (info) {
+                anyProcessing = true;
+                badge.style.display = '';
+                badge.innerHTML = `<span class="spinner-border spinner-border-sm" style="width:.7rem;height:.7rem;"></span> ${info.current}/${info.total}`;
+            } else {
+                badge.style.display = 'none';
+            }
+        });
+        if (anyProcessing) setTimeout(poll, 3000);
+        else location.reload();  // a job just finished — refresh to show its results
+    }
+    setTimeout(poll, 3000);
+})();
+</script>
+{% endif %}
 
 {% if can_edit %}
 {% include "_metadata_modal.html" %}

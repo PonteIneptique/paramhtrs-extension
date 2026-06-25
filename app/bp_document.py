@@ -1,12 +1,13 @@
 import os
 
-from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, abort, Response
+from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, abort, Response, current_app
 from flask_login import login_required, current_user
 from sqlalchemy import func
 
-from .models import db, Document, Part, Line, Folder, Project, User, Work
+from .models import db, Document, Part, Line, Folder, Project, User, Work, NormalizationJob, NormalizationJobChunk
 from .bp_auth import requires_access
 from .annot_utils import align_to_annotations, align_to_annotations_from_chunks, build_tei_from_annotations, document_metadata
+from .normalize_jobs import build_chunks
 
 bp_document = Blueprint(
     "bp_document", __name__,
@@ -26,6 +27,12 @@ bp_document = Blueprint(
 #     -> one Document with one Part per entry in "subparts" (original_filename=id),
 #        annotated across the flattened, concatenated line sequence so
 #        annotations can span part boundaries.
+#
+# Either shape may additionally set `normalize: true` (+ split_mode/min_words/
+# delimiters) instead of providing chunks/full_reg/expan up front: Parts/Lines
+# are created immediately (so full_text is fixed right away), but annotation
+# alignment is deferred to a queued NormalizationJob picked up by worker.py —
+# the model is never called inline in this request.
 # -------------------------
 
 @bp_document.route("/documents/new", methods=["GET", "POST"])
@@ -47,6 +54,10 @@ def document_create():
         db.session.add(document)
         db.session.flush()
 
+        normalize = bool(data.get("normalize"))
+        flat_chunks = []  # only used for the synchronous (non-normalize) paths
+        parts_lines = []  # one list of orig line-texts per Part, in order — for build_chunks
+
         subpart_entries = data.get("subparts")
         if subpart_entries:
             # Multi-source shape: one Part per entry, lines flattened in order
@@ -59,12 +70,12 @@ def document_create():
             # path below. Falls back to building one chunk per Line from each
             # line entry's "expan" for callers that pre-align per line (e.g.
             # the pre-aligned JSON import, which has no separate chunks step).
-            flat_chunks = []
             for sp_idx, entry in enumerate(subpart_entries):
                 part = Part(document_id=document.id, order=sp_idx)
                 part.original_filename = entry.get("id")
                 db.session.add(part)
                 db.session.flush()
+                part_orig_lines = []
                 for idx, line_entry in enumerate(entry.get("lines", [])):
                     orig = (line_entry.get("abbr") or line_entry.get("orig") or "").strip()
                     if not orig:
@@ -76,13 +87,15 @@ def document_create():
                         alto_id=line_entry.get("alto_id") or None,
                     )
                     db.session.add(line)
-                    if "chunks" not in entry:
+                    part_orig_lines.append(orig)
+                    if not normalize and "chunks" not in entry:
                         flat_chunks.append({"orig": orig, "reg": line_entry.get("expan", "")})
-                if "chunks" in entry:
+                parts_lines.append(part_orig_lines)
+                if not normalize and "chunks" in entry:
                     flat_chunks.extend(entry.get("chunks") or [])
             db.session.flush()
             separator = data.get("separator", "\n")
-            if any(c.get("reg") for c in flat_chunks):
+            if not normalize and any(c.get("reg") for c in flat_chunks):
                 document.set_annotations(align_to_annotations_from_chunks(flat_chunks, separator=separator))
         else:
             part = Part(document_id=document.id, order=0)
@@ -104,18 +117,37 @@ def document_create():
                 )
                 db.session.add(line)
                 orig_lines.append(orig)
+            parts_lines.append(orig_lines)
 
             db.session.flush()
 
-            chunks = data.get("chunks")
-            separator = data.get("separator", "\n")
-            full_reg = (data.get("full_reg") or "").strip()
-            if chunks:
-                document.set_annotations(align_to_annotations_from_chunks(chunks, separator=separator))
-            elif full_reg:
-                full_text = "\n".join(orig_lines)
-                document.set_annotations(align_to_annotations(full_text, full_reg))
-            # else: no annotations — leave empty
+            if not normalize:
+                chunks = data.get("chunks")
+                separator = data.get("separator", "\n")
+                full_reg = (data.get("full_reg") or "").strip()
+                if chunks:
+                    document.set_annotations(align_to_annotations_from_chunks(chunks, separator=separator))
+                elif full_reg:
+                    full_text = "\n".join(orig_lines)
+                    document.set_annotations(align_to_annotations(full_text, full_reg))
+                # else: no annotations — leave empty
+
+        if normalize:
+            split_mode = data.get("split_mode", "lines")
+            min_words = int(data.get("min_words", 100))
+            delimiters = list(data.get("delimiters", "¶;."))
+            max_chunk_bytes = current_app.config["MAX_CHUNK_BYTES"]
+            chunks, separator = build_chunks(parts_lines, split_mode, min_words, delimiters, max_chunk_bytes)
+
+            job = NormalizationJob(document_id=document.id, status="queued", separator=separator)
+            db.session.add(job)
+            db.session.flush()
+            for order, chunk in enumerate(chunks):
+                db.session.add(NormalizationJobChunk(
+                    job_id=job.id, order=order,
+                    part_index=chunk["part_index"], orig=chunk["orig"],
+                ))
+
         db.session.commit()
         return jsonify({
             "status": "ok",
@@ -161,6 +193,7 @@ def document_editor(document: Document):
         works=[{"id": w.id, "title": w.title, "genre": w.genre} for w in document.works],
         part_works={part.id: [{"id": w.id, "title": w.title, "genre": w.genre} for w in part.works]
                     for part in document.parts},
+        processing=_job_progress_dict(document.active_job),
     )
 
 
@@ -218,6 +251,43 @@ def api_document_status(document: Document):
     document.status = request.json.get("status", document.status)
     db.session.commit()
     return jsonify({"status": "ok"})
+
+
+# -------------------------
+# Background normalization progress (polled by the editor while a document
+# is "in process" — replaces the old held-open SSE connection from
+# /api/normalize)
+# -------------------------
+
+def _job_progress_dict(job: NormalizationJob | None) -> dict:
+    if job is None or job.status == "done":
+        return {"processing": False, "status": job.status if job else None,
+                "current": 0, "total": 0, "error": None}
+    return {
+        "processing": job.status in ("queued", "running"),
+        "status": job.status,
+        "current": job.processed_chunks,
+        "total": job.total_chunks,
+        "error": job.error,
+    }
+
+
+@bp_document.route("/api/documents/<int:document_id>/processing-status")
+@requires_access(Document, 'document_id')
+def api_document_processing_status(document: Document):
+    return jsonify(_job_progress_dict(document.active_job))
+
+
+@bp_document.route("/api/documents/<int:document_id>/annotations")
+@requires_access(Document, 'document_id')
+def api_document_annotations(document: Document):
+    """Lets the editor re-fetch the current annotation set while a
+    NormalizationJob is running, so already-processed chunks render as
+    normalized text/highlights without a full page reload."""
+    return jsonify({
+        "annotations": document.annotations or [],
+        **_job_progress_dict(document.active_job),
+    })
 
 
 # -------------------------

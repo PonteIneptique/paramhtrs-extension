@@ -18,6 +18,8 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///./lines.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SEQ2SEQ_MODEL'] = os.getenv('SEQ2SEQ_MODEL', 'comma-project/normalization-byt5-small')
+app.config['MODEL_QUANTIZED_PATH'] = os.getenv('MODEL_QUANTIZED_PATH', os.path.join(
+    os.path.dirname(__file__), '..', 'model-quantized'))
 app.config['MAX_CHUNK_BYTES'] = int(os.getenv('MAX_CHUNK_BYTES', 512))
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'jfbqh2brbsefonp12294810i23hrisnbfdhbdiauOJSOBSDFDU9 209IEWR')
 app.config['SESSION_COOKIE_NAME'] = os.getenv('SESSION_COOKIE_NAME', 'paramhtr_session')
@@ -59,6 +61,9 @@ app.register_blueprint(bp_comma)
 
 from .bp_cli import cli_group
 app.cli.add_command(cli_group)
+
+from .bp_quantize import quantize_command
+app.cli.add_command(quantize_command)
 
 if __name__ == "__main__":
     app.run(debug=True)

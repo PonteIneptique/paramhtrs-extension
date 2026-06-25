@@ -429,6 +429,17 @@ class Document(HasMetadataMixin, db.Model):
         single-part case. Multi-part documents manage filenames per part."""
         return self.parts[0].original_filename if self.parts else None
 
+    @property
+    def active_job(self):
+        """Most recent normalization job, if any — used to show "processing"
+        state. Kept orthogonal to the editorial `status` field above."""
+        return (
+            NormalizationJob.query
+            .filter_by(document_id=self.id)
+            .order_by(NormalizationJob.id.desc())
+            .first()
+        )
+
 
 class Part(HasMetadataMixin, db.Model):
     """One imported source's lines (formerly 'Subpart') within a Document.
@@ -479,6 +490,59 @@ class Line(db.Model):
     def user_has_access(self, user: User) -> bool:
         part = Part.query.get(self.part_id)
         return part.user_has_access(user)
+
+
+class NormalizationJob(db.Model):
+    """Tracks a background normalization run for one Document, processed by
+    worker.py. The chunk boundaries/separator are fixed at creation time (see
+    app/normalize_jobs.py:build_chunks) so each chunk's character offset
+    within Document.full_text is known immediately, before the model has
+    touched anything — that's what lets the worker persist annotations for
+    each chunk as soon as it's normalized, instead of waiting for the whole
+    job to finish."""
+    __tablename__ = "normalization_jobs"
+    id = db.Column(db.Integer, primary_key=True)
+    document_id = db.Column(db.Integer, db.ForeignKey("documents.id"), nullable=False)
+    status = db.Column(db.String(20), nullable=False, default="queued")
+    separator = db.Column(db.String(10), nullable=False, default="\n")
+    error = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, server_default=db.func.now())
+    started_at = db.Column(db.DateTime, nullable=True)
+    finished_at = db.Column(db.DateTime, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued', 'running', 'done', 'failed')",
+            name="check_normalization_job_status_valid"
+        ),
+    )
+
+    chunks = db.relationship(
+        "NormalizationJobChunk",
+        backref="job",
+        cascade="all, delete-orphan",
+        lazy=True,
+        order_by="NormalizationJobChunk.order",
+    )
+
+    @property
+    def total_chunks(self) -> int:
+        return len(self.chunks)
+
+    @property
+    def processed_chunks(self) -> int:
+        return sum(1 for c in self.chunks if c.reg is not None)
+
+
+class NormalizationJobChunk(db.Model):
+    __tablename__ = "normalization_job_chunks"
+    id = db.Column(db.Integer, primary_key=True)
+    job_id = db.Column(db.Integer, db.ForeignKey("normalization_jobs.id"), nullable=False)
+    order = db.Column(db.Integer, nullable=False, default=0)
+    part_index = db.Column(db.Integer, nullable=False, default=0)
+    orig = db.Column(db.Text, nullable=False)
+    reg = db.Column(db.Text, nullable=True)
+    processed_at = db.Column(db.DateTime, nullable=True)
 
 
 # -------------------------

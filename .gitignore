@@ -1,4 +1,6 @@
 .env
+deploy/generated
+model-quantized
 todo.md
 graphify-out
 model

@@ -20,17 +20,8 @@
 <div id="ingestion-app" class="container mt-4" style="max-width: 760px;">
   <h2>Add Lines{% if folder %} — <span class="text-muted fw-normal fs-5">{{ folder.name }}</span>{% endif %}</h2>
 
-  <!-- Step indicator -->
-  <div class="d-flex gap-2 mb-4">
-    <span :class="['badge', step >= 1 ? 'bg-primary' : 'bg-secondary']">1 Input</span>
-    <template v-if="inputMode !== 'json'">
-      <span class="text-muted">›</span>
-      <span :class="['badge', step >= 2 ? 'bg-primary' : 'bg-secondary']">2 Normalizing</span>
-    </template>
-  </div>
-
-  <!-- ── STEP 1: input ──────────────────────────────────────────────── -->
-  <div class="step" :class="{active: step === 1}">
+  <!-- ── Input ──────────────────────────────────────────────────────── -->
+  <div class="step active">
 
     {% if not folder %}
     <!-- Project + Folder selection (only when no folder_id in URL) -->
@@ -286,11 +277,11 @@
     </div>
 
     <div class="d-flex gap-2 mt-3 flex-wrap">
-      <button v-if="inputMode !== 'json'" class="btn btn-primary" @click="goNormalize" :disabled="!canProceed || normalizing || saving">
-        <span v-if="normalizing"><span class="spinner-border spinner-border-sm"></span> Normalizing…</span>
+      <button v-if="inputMode !== 'json'" class="btn btn-primary" @click="goNormalize" :disabled="!canProceed || saving">
+        <span v-if="saving"><span class="spinner-border spinner-border-sm"></span> Submitting…</span>
         <span v-else>Normalize →</span>
       </button>
-      <button v-if="inputMode !== 'json'" class="btn btn-outline-secondary" @click="goImportDirect" :disabled="!canProceed || normalizing || saving">
+      <button v-if="inputMode !== 'json'" class="btn btn-outline-secondary" @click="goImportDirect" :disabled="!canProceed || saving">
         <span v-if="saving"><span class="spinner-border spinner-border-sm"></span> Saving…</span>
         <span v-else>Import without normalization →</span>
       </button>
@@ -299,37 +290,10 @@
         <span v-else>Import →</span>
       </button>
     </div>
-    <div v-if="error" class="alert alert-danger mt-2">[[ error ]]</div>
-  </div>
-
-  <!-- ── STEP 2: normalizing progress ──────────────────────────────── -->
-  <div class="step" :class="{active: step === 2}">
-    <div class="d-flex align-items-baseline gap-3 mb-2">
-      <h4 class="mb-0">Normalizing…</h4>
-      <span class="fs-5 fw-semibold text-primary" v-if="normalizeProgress.total !== null">
-        [[ normalizeProgress.current ]] / [[ normalizeProgress.total ]]
-      </span>
-      <span class="text-muted" v-else>preparing…</span>
-    </div>
-    <div class="progress mb-3" style="height:14px;">
-      <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
-           :style="{width: normalizeProgress.total ? (normalizeProgress.current / normalizeProgress.total * 100) + '%' : '5%'}">
-      </div>
-    </div>
-    <div v-if="normalizeProgress.chunks.length" class="mt-2" style="max-height:260px;overflow-y:auto;">
-      <table class="table table-sm table-bordered mb-0" style="font-size:.8rem;">
-        <thead class="table-light sticky-top">
-          <tr><th style="width:50%">Source</th><th>Normalized</th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="(c, i) in [...normalizeProgress.chunks].reverse()" :key="i">
-            <td class="font-monospace text-muted">[[ c.orig ]]</td>
-            <td class="font-monospace">[[ c.reg ]]</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <button class="btn btn-sm btn-outline-secondary mt-3" @click="step=1">← Back</button>
+    <p v-if="inputMode !== 'json'" class="text-muted small mt-2">
+      "Normalize" submits immediately and runs the model in the background — you'll land on the
+      document editor right away and see normalization progress there as it completes.
+    </p>
     <div v-if="error" class="alert alert-danger mt-2">[[ error ]]</div>
   </div>
 </div>
@@ -342,7 +306,6 @@ createApp({
   delimiters: ['[[', ']]'],
   data() {
     return {
-      step: 1,
       // project/folder selection (only used when no folder_id provided)
       projectSearch: '',
       projectOptions: [],
@@ -381,8 +344,6 @@ createApp({
       minWords: 100,
       delimiters: '¶;.',
       // state
-      normalizing: false,
-      normalizeProgress: { current: 0, total: null, chunks: [] },
       saving: false,
       error: null,
     };
@@ -665,13 +626,10 @@ createApp({
       }));
     },
 
-    // ── Normalize + auto-save ─────────────────────────────────────────
+    // ── Normalize (queued, runs in the background) + auto-save ─────────
     async goNormalize() {
       this.error = null;
-      this.normalizing = true;
-      this.normalizeProgress = { current: 0, total: null, chunks: [] };
-      this.step = 2;
-
+      this.saving = true;
       try {
         {% if not folder %}
         // Create folder if needed (only in project/folder selection mode)
@@ -692,85 +650,27 @@ createApp({
         }
         {% endif %}
 
-        // Stream normalize results. Each source file/part is split
-        // independently server-side (so punctuation-mode batches never
-        // merge lines from different parts) by sending one line-array per
-        // part; single-source inputs are just one implicit part.
-        const isMultiAlto = this.inputMode === 'alto' && this.altoFiles.length > 1;
-        const effLines = this.effectiveLines;
-        const partsLines = isMultiAlto
-          ? this.altoFiles.map(f => f.lines.filter(l => l.text && l.text.trim()).map(l => l.text.trim()))
-          : [effLines.map(l => l.text)];
-        const response = await fetch(`${ROOT}/api/normalize`, {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            parts: partsLines,
-            split_mode: this.splitMode,
-            min_words: this.minWords,
-            delimiters: this.delimiters,
-          })
-        });
-        if (!response.ok) throw new Error(`Normalize failed: HTTP ${response.status}`);
+        // Document/Part/Lines are created immediately; normalization itself
+        // is queued as a NormalizationJob and processed by worker.py — the
+        // model is never called from this request. Progress shows up on the
+        // document editor page (and the folder browse list) via polling.
+        const normalizeOpts = {
+          normalize: true,
+          split_mode: this.splitMode,
+          min_words: this.minWords,
+          delimiters: this.delimiters,
+        };
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let finalFullReg = '';
-        let finalChunks = null;
-        let finalParts = null;
-        let finalSeparator = '\n';
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const sseChunks = buffer.split('\n\n');
-          buffer = sseChunks.pop();
-          for (const sseChunk of sseChunks) {
-            if (!sseChunk.startsWith('data: ')) continue;
-            const evt = JSON.parse(sseChunk.slice(6));
-            if (evt.type === 'progress') {
-              const chunks = evt.result
-                ? [...this.normalizeProgress.chunks, evt.result]
-                : this.normalizeProgress.chunks;
-              this.normalizeProgress = { current: evt.current, total: evt.total, chunks };
-              await new Promise(r => setTimeout(r, 0)); // yield so Vue renders each chunk
-            } else if (evt.type === 'done') {
-              finalFullReg = evt.full_reg || '';
-              finalChunks = evt.chunks || null;
-              finalParts = evt.parts || null;
-              finalSeparator = evt.separator ?? '\n';
-            }
-          }
-        }
-
-        if (isMultiAlto) {
-          // Lines (one per ALTO line, for display/alto_id) are kept separate
-          // from chunks (the model's own batching, which may span several
-          // lines in punctuation mode) — the server aligns "chunks" against
-          // the flattened lines text directly, same as the single-source path.
-          const subparts = this.altoFiles.map((f, partIndex) => {
-            const validLines = f.lines.filter(l => l.text && l.text.trim());
-            const partChunks = finalParts?.[partIndex]?.chunks || [];
-            return {
-              id: f.filename,
-              lines: validLines.map(l => ({ orig: l.text.trim(), alto_id: l.alto_id || null })),
-              chunks: partChunks.map(c => ({ orig: c.orig, reg: c.reg })),
-            };
-          });
-          await this._saveMultiPart(subparts, finalSeparator);
+        if (this.inputMode === 'alto' && this.altoFiles.length > 1) {
+          await this._saveMultiPart(this._altoFilesToSubparts(), '\n', normalizeOpts);
           return;
         }
-
-        const linesToSave = effLines.map(l => ({ orig: l.text, alto_id: l.alto_id || null }));
-        await this._savePage(linesToSave, finalFullReg, finalChunks, finalSeparator);
-
+        const lines = this.effectiveLines.map(l => ({ orig: l.text, alto_id: l.alto_id || null }));
+        await this._savePage(lines, '', null, '\n', normalizeOpts);
       } catch(e) {
         this.error = e.message || 'An error occurred';
-        // stay on step 2 so the error is visible; user can click ← Back
       } finally {
-        this.normalizing = false;
+        this.saving = false;
       }
     },
 
@@ -805,7 +705,7 @@ createApp({
       }
     },
 
-    async _savePage(lines, full_reg, chunks = null, separator = '\n') {
+    async _savePage(lines, full_reg, chunks = null, separator = '\n', extra = {}) {
       this.saving = true;
       try {
         const r = await fetch(`${ROOT}/documents/new`, {
@@ -820,6 +720,7 @@ createApp({
             separator,
             original_filename: (this.inputMode === 'alto' && this.altoFiles.length === 1)
               ? this.altoFiles[0].filename : null,
+            ...extra,
           })
         });
         const data = await r.json();
@@ -835,7 +736,7 @@ createApp({
 
     // Saves a document made of several parts, e.g. {id, lines: [{abbr/orig, expan}]}[].
     // Used for the "Pre-aligned JSON" multi-subpart shape and for multi-file ALTO uploads.
-    async _saveMultiPart(subparts, separator = '\n') {
+    async _saveMultiPart(subparts, separator = '\n', extra = {}) {
       this.saving = true;
       try {
         const r = await fetch(`${ROOT}/documents/new`, {
@@ -846,6 +747,7 @@ createApp({
             label: this.pageLabel,
             subparts,
             separator,
+            ...extra,
           })
         });
         const data = await r.json();

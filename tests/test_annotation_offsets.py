@@ -14,6 +14,7 @@ import pytest
 from app.annot_utils import (
     align_to_annotations,
     align_to_annotations_from_chunks,
+    align_one_chunk,
     apply_annotations_to_text,
 )
 
@@ -206,7 +207,7 @@ def test_split_on_punct_no_spurious_space():
     in the original, so splitting there would inject a phantom space into reference_text
     and shift all subsequent annotation offsets by +1.
     """
-    from app.bp_norm import _split_on_punct
+    from app.normalize_jobs import _split_on_punct
 
     text = "iot par nombre .li sairz. leur femes"
     chunks = _split_on_punct(text, ["."], min_words=2)
@@ -223,7 +224,7 @@ def test_split_on_punct_no_spurious_space():
 
 def test_split_on_punct_still_splits_at_sentence_boundary():
     """A delimiter followed by a real space (sentence boundary) must still split."""
-    from app.bp_norm import _split_on_punct
+    from app.normalize_jobs import _split_on_punct
 
     # min_words=3 so it flushes after the first sentence
     text = "abc def ghi. jkl mno pqr"
@@ -256,6 +257,55 @@ def test_split_on_punct_offsets_with_chunks():
     assert_offsets_correct(full_text, annots, "punct_offset_regression: ")
 
 
+# ── align_one_chunk / worker equivalence ──────────────────────────────────────
+
+def test_align_one_chunk_matches_bulk_alignment():
+    """worker.py calls align_one_chunk per chunk, as each chunk's reg arrives,
+    instead of align_to_annotations_from_chunks all at once. The two must
+    produce identical annotations for the same input — this is what makes the
+    incremental-persistence refactor behavior-preserving."""
+    lines = [
+        "ione laloy desiuis.:Qins aoroient ⁊ leruoient",
+        "les ydoles ⁊si feisoient faire ymages demeintes",
+        "camblances ou il auoient lor fiance. ⁊ si creoiẽt",
+    ]
+    regs = [
+        "ione la loi des iuis ains aoroient et largioient",
+        "les ydeles et si fesoient faire ymages de maintes",
+        "semblances o il auoient lor fiances et si creoient",
+    ]
+    chunks = [{"orig": l, "reg": r} for l, r in zip(lines, regs)]
+    separator = "\n"
+
+    bulk_annots = align_to_annotations_from_chunks(chunks, separator=separator)
+
+    # Simulate the worker: reference_text/char_offset are fixed up front
+    # (known from `orig` alone, independent of when each `reg` arrives), then
+    # each chunk is aligned on its own as it's "processed".
+    reference_text = separator.join(c["orig"] for c in chunks)
+    incremental_annots = []
+    char_offset = 0
+    for idx, chunk in enumerate(chunks):
+        incremental_annots.extend(
+            align_one_chunk(chunk["orig"], chunk["reg"], reference_text, char_offset)
+        )
+        char_offset += len(chunk["orig"])
+        if idx < len(chunks) - 1:
+            char_offset += len(separator)
+
+    def _without_ids(annots):
+        out = []
+        for a in annots:
+            a = dict(a)
+            a.pop("id", None)
+            a["target"] = {k: v for k, v in a["target"].items() if k != "annotation"}
+            out.append(a)
+        return out
+
+    assert _without_ids(incremental_annots) == _without_ids(bulk_annots)
+    assert_offsets_correct(reference_text, incremental_annots, "align_one_chunk: ")
+
+
 # ── multi-part punctuation-mode normalization ────────────────────────────────
 #
 # Regression for: "having multiple parts does not lead to normalizing around
@@ -269,7 +319,7 @@ def test_split_on_punct_offsets_with_chunks():
 def test_api_normalize_batches_stay_within_part():
     """api_normalize's per-part batching (the actual fix) must never merge
     lines from two different parts into the same punctuation-mode chunk."""
-    from app.bp_norm import _split_on_punct, _enforce_max_bytes
+    from app.normalize_jobs import _split_on_punct, _enforce_max_bytes
 
     delimiters = ["."]
     min_words = 5

@@ -99,6 +99,13 @@ def folder_browse(folder: Folder):
                        joinedload(Document.parts).joinedload(Part.metadata_))
               .order_by(Document.order).all())
     page_validation = {document.id: page_validation_counts(document) for document in documents}
+    processing = {}
+    for document in documents:
+        job = document.active_job
+        if job and job.status != "done":
+            processing[document.id] = {
+                "status": job.status, "current": job.processed_chunks, "total": job.total_chunks,
+            }
     can_edit = (
         current_user.is_admin
         or Project.query.get(folder.project_id).creator_id == current_user.id
@@ -109,6 +116,7 @@ def folder_browse(folder: Folder):
         document=folder,
         pages=documents,
         page_validation=page_validation,
+        processing=processing,
         can_edit=can_edit,
         languages=LANGUAGES,
         works=[{"id": w.id, "title": w.title, "genre": w.genre} for w in folder.works],
@@ -247,6 +255,28 @@ def api_folder_reorder_documents(folder: Folder):
         documents_by_id[document_id].order = idx
     db.session.commit()
     return jsonify({"status": "ok"})
+
+
+# -------------------------
+# Bulk background-normalization progress for every document in a folder
+# (one request for the whole browse list, polled while any row is processing)
+# -------------------------
+
+@bp_folder.route("/api/folders/<int:folder_id>/processing-status")
+@requires_access(Folder, 'folder_id')
+def api_folder_processing_status(folder: Folder):
+    result = {}
+    for document in folder.documents:
+        job = document.active_job
+        if job is None or job.status == "done":
+            continue
+        result[document.id] = {
+            "status": job.status,
+            "current": job.processed_chunks,
+            "total": job.total_chunks,
+            "error": job.error,
+        }
+    return jsonify(result)
 
 
 # -------------------------

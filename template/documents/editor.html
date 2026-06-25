@@ -730,6 +730,21 @@ body { overflow: hidden; }
     </div>
   </div>
 
+  <!-- Background normalization progress (polled — see pollProcessingStatus) -->
+  <div v-if="processing.processing"
+       style="background:#e7f1ff;color:#084298;padding:6px 12px;font-size:.85rem;display:flex;align-items:center;gap:10px;border-bottom:1px solid #b6d4fe;">
+    <span class="spinner-border spinner-border-sm"></span>
+    <span>Normalizing in the background… [[ processing.current ]] / [[ processing.total ]] chunks</span>
+    <div class="progress flex-grow-1" style="max-width:240px;height:8px;">
+      <div class="progress-bar bg-primary"
+           :style="{width: processing.total ? (processing.current / processing.total * 100) + '%' : '5%'}"></div>
+    </div>
+  </div>
+  <div v-else-if="processing.status === 'failed'"
+       style="background:#f8d7da;color:#842029;padding:6px 12px;font-size:.85rem;display:flex;align-items:center;gap:8px;border-bottom:1px solid #f5c2c7;">
+    <i class="fa-solid fa-triangle-exclamation"></i>
+    Background normalization failed: [[ processing.error ]]
+  </div>
 
   <!-- Save error banner -->
   <div v-if="saveError"
@@ -1505,6 +1520,7 @@ window.__EDITOR_CONFIG__ = {
   pageStatus:    {{ page.status|tojson }},
   pageQid:       {{ (page.qid or '')|tojson }},
   pageFilename:  {{ (page.original_filename or '')|tojson }},
+  processing:    {{ processing|tojson }},
   currentUserId: {{ current_user.id }},
   folderId:      {{ document.id }},
   projectId:     {{ document.project_id }},
@@ -1523,6 +1539,8 @@ window.__EDITOR_CONFIG__ = {
     partRemoveWork:   {{ url_for('bp_document.api_part_remove_work',    part_id=0, work_id=0)|tojson }}.replace('/0/works/0', '/__PART_ID__/works/__WORK_ID__'),
     movePage:         {{ url_for('bp_document.document_move',                document_id=page.id)|tojson }},
     projectFolders:   {{ url_for('bp_folder.api_project_folders',       project_id=document.project_id)|tojson }},
+    processingStatus: {{ url_for('bp_document.api_document_processing_status', document_id=page.id)|tojson }},
+    documentAnnotations: {{ url_for('bp_document.api_document_annotations', document_id=page.id)|tojson }},
   },
 };
 </script>

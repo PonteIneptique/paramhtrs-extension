@@ -10,7 +10,7 @@ import sys
 import click
 from flask.cli import AppGroup
 
-from .bp_norm import _split_on_punct, _enforce_max_bytes
+from .normalize_jobs import _split_on_punct, _enforce_max_bytes
 from .char_alignment import align_words
 
 cli_group = AppGroup("align", help="Chunk & align original vs regularized text.")

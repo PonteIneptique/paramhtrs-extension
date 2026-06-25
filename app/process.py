@@ -5,7 +5,7 @@ import os
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from flask import current_app, Response
 
-def normalize_line(input_text: str, model: AutoModelForSeq2SeqLM, tokenizer: AutoTokenizer) -> str:
+def normalize_line(input_text: str, model, tokenizer: AutoTokenizer) -> str:
     input_text = unicodedata.normalize("NFD", input_text)
     inputs = tokenizer(input_text, return_tensors="pt", padding=True)
     outputs = model.generate(**inputs, max_length=1024)
@@ -13,7 +13,20 @@ def normalize_line(input_text: str, model: AutoModelForSeq2SeqLM, tokenizer: Aut
     return decoded
 
 
-def get_model_and_tokenizer() -> Tuple[AutoModelForSeq2SeqLM, AutoTokenizer]:
+def get_model_and_tokenizer() -> Tuple[object, AutoTokenizer]:
+    """Loads the normalization model, preferring the ONNX-quantized export
+    produced by `flask quantize` (app/bp_quantize.py) when present at
+    MODEL_QUANTIZED_PATH. ORTModelForSeq2SeqLM exposes the same .generate()
+    API as AutoModelForSeq2SeqLM, so normalize_line() above needs no changes
+    either way. Falls back to the original HuggingFace checkpoint if
+    `flask quantize` has never been run."""
+    quantized_path = current_app.config["MODEL_QUANTIZED_PATH"]
+    if os.path.isdir(quantized_path) and os.listdir(quantized_path):
+        from optimum.onnxruntime import ORTModelForSeq2SeqLM
+        return (
+            ORTModelForSeq2SeqLM.from_pretrained(quantized_path),
+            AutoTokenizer.from_pretrained(quantized_path),
+        )
     return (
         AutoModelForSeq2SeqLM.from_pretrained(current_app.config["SEQ2SEQ_MODEL"]),
         AutoTokenizer.from_pretrained(current_app.config["SEQ2SEQ_MODEL"])

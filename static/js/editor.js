@@ -38,6 +38,7 @@ export function createEditorApp(config) {
         pageId:              config.pageId,
         pageLabel:           config.pageLabel,
         pageStatus:          config.pageStatus,
+        processing:          config.processing || { processing: false, status: null, current: 0, total: 0, error: null },
         semtagLabels:        SEMTAG_LABELS,
         hoveredAnnotationId: null,
         hoverEnabled:        localStorage.getItem('editorHoverEnabled') === '1',
@@ -262,10 +263,12 @@ export function createEditorApp(config) {
         if (!e.target.closest('.fm-gap-wrap'))  this.focusGapOpen  = false;
       };
       document.addEventListener('click', this._closeDropdowns);
+      if (this.processing.processing) this._startProcessingPoll();
     },
     beforeUnmount() {
       document.removeEventListener('keydown', this._handleKeydown);
       document.removeEventListener('click', this._closeDropdowns);
+      clearTimeout(this._processingPollTimer);
     },
 
     methods: {
@@ -1276,6 +1279,37 @@ document.querySelectorAll('.text-col').forEach(col => {
             this.partLabels[partId] = data.original_filename || '';
           },
         });
+      },
+
+      // ── Background normalization progress (replaces the old held-open SSE
+      // connection from /api/normalize: the model now runs in worker.py, and
+      // this just polls for progress) ─────────────────────────────────────
+      async pollProcessingStatus() {
+        try {
+          const r = await fetch(urls.processingStatus);
+          const data = await r.json();
+          const wasProcessing = this.processing.processing;
+          const previousCurrent = this.processing.current;
+          this.processing = data;
+          if (data.current > previousCurrent || (wasProcessing && !data.processing)) {
+            // New chunk(s) landed, or the job just finished — re-fetch
+            // annotations so already-normalized text shows up without a
+            // full page reload.
+            await this._refetchAnnotations();
+          }
+        } catch (e) {
+          // Network hiccup — keep polling, don't surface an error banner for this.
+        }
+        if (this.processing.processing) this._startProcessingPoll();
+      },
+      _startProcessingPoll() {
+        clearTimeout(this._processingPollTimer);
+        this._processingPollTimer = setTimeout(() => this.pollProcessingStatus(), 2000);
+      },
+      async _refetchAnnotations() {
+        const r = await fetch(urls.documentAnnotations);
+        const data = await r.json();
+        this.annotations = data.annotations;
       },
     },
   });

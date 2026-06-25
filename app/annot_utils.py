@@ -108,6 +108,22 @@ def align_to_annotations(original_text: str, regularized_text: str) -> list:
     return _alignments_to_annotations(alignments, original_text)
 
 
+def align_one_chunk(orig: str, reg: str, reference_text: str, char_offset: int) -> list:
+    """Align a single (orig, reg) chunk pair and return annotations positioned
+    against `reference_text` starting at `char_offset`.
+
+    Factored out of align_to_annotations_from_chunks so the background
+    normalization worker (worker.py) can call it one chunk at a time, as each
+    chunk's `reg` comes back from the model, and persist that chunk's
+    annotations immediately — without waiting for the rest of the document.
+    """
+    if not reg:
+        return []
+    from .char_alignment import align_words
+    alignments = align_words(orig, reg)
+    return _alignments_to_annotations(alignments, reference_text, char_offset)
+
+
 def align_to_annotations_from_chunks(chunks: list[dict], separator: str = "\n") -> list:
     """Align each (orig, reg) chunk pair independently and return consolidated annotations.
 
@@ -122,15 +138,12 @@ def align_to_annotations_from_chunks(chunks: list[dict], separator: str = "\n") 
                    mode) or " " (dots mode).  Pilcrow chunks already carry
                    their own delimiter so separator="" is correct there.
     """
-    from .char_alignment import align_words
     reference_text = separator.join(c["orig"] for c in chunks)
     all_annotations = []
     char_offset = 0
     for idx, chunk in enumerate(chunks):
         orig, reg = chunk["orig"], chunk.get("reg", "")
-        if reg:
-            alignments = align_words(orig, reg)
-            all_annotations.extend(_alignments_to_annotations(alignments, reference_text, char_offset))
+        all_annotations.extend(align_one_chunk(orig, reg, reference_text, char_offset))
         char_offset += len(orig)
         if idx < len(chunks) - 1:
             char_offset += len(separator)
