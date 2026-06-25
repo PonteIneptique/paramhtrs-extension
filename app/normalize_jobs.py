@@ -7,6 +7,32 @@ independently of the chunks around it.
 """
 import re
 
+_RE_NEWLINE_RUN = re.compile(r"[ \t]*\n[ \t\n]*")
+_RE_SPACE_RUN = re.compile(r"[ \t]+")
+
+
+def normalize_whitespace(text: str) -> str:
+    """Collapse whitespace runs so every chunk's length stays in lockstep with
+    the offset bookkeeping done around it (build_chunks/worker.py/
+    align_to_annotations_from_chunks all advance char_offset by len(orig)).
+
+    char_alignment.align_words() normalises whitespace internally (RE_SPACE)
+    before running its DP, which silently shortens any run of 2+ whitespace
+    characters. If the text fed in still had such runs, the alignment's
+    source spans no longer sum to len(orig), and every annotation positioned
+    after that point in the chunk drifts off its real character offset --
+    compounding into the kind of document-wide misalignment seen on
+    long/multi-line documents with irregular OCR spacing. Normalising here,
+    before the text ever reaches build_chunks or get stored as a Line, keeps
+    that internal collapse a no-op.
+
+    A whitespace run containing a newline collapses to a single '\\n'; any
+    other run of spaces/tabs collapses to a single ' '.
+    """
+    text = _RE_NEWLINE_RUN.sub("\n", text)
+    text = _RE_SPACE_RUN.sub(" ", text)
+    return text
+
 
 def _split_on_punct(text: str, delimiters: list[str], min_words: int) -> list[str]:
     """Split text after any delimiter character, accumulating until min_words is reached."""

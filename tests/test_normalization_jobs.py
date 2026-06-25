@@ -10,6 +10,7 @@ in-memory SQLite database (no real ML model — normalize_line is monkeypatched)
 import pytest
 from app import app as flask_app
 from app.models import db, User, Project, Folder, Document, NormalizationJob, NormalizationJobChunk
+from app.normalize_jobs import normalize_whitespace
 import worker
 
 
@@ -306,6 +307,41 @@ def test_reprocess_rejects_while_already_processing(app, client, folder):
 # text being sliced from the separator-joined reconstruction instead of the
 # real document text, which only showed up when an edit landed exactly on
 # that joint.
+
+def test_normalize_whitespace_collapses_runs():
+    assert normalize_whitespace("aa  bb") == "aa bb"
+    assert normalize_whitespace("aa \n  bb") == "aa\nbb"
+    assert normalize_whitespace("aa\n\n\nbb") == "aa\nbb"
+    assert normalize_whitespace("aa\tbb") == "aa bb"
+
+
+def test_double_space_in_a_line_no_longer_garbles_alignment(app, client, folder, monkeypatch):
+    """Regression for the /document/22 bug: a line containing a double space
+    (or other multi-char whitespace run) used to desync align_words' internal
+    char positions from the char_offset bookkeeping in worker.py, garbling
+    every annotation positioned after that run within the same chunk.
+
+    document_create now normalises whitespace when storing Line.original_text
+    (see normalize_jobs.normalize_whitespace), so the double space here is
+    already collapsed by the time the chunk reaches the model/aligner."""
+    _login(client)
+    resp = client.post("/documents/new", json={
+        "folder_id": folder.id, "label": "Doc11",
+        "lines": [{"orig": "aa  bb typo cc"}],
+        "normalize": True, "split_mode": "lines",
+    })
+    doc_id = int(resp.get_json()["redirect"].rstrip("/").split("/")[-1])
+    doc = db.session.get(Document, doc_id)
+    assert doc.full_text == "aa bb typo cc"  # double space already collapsed
+
+    job = doc.active_job
+    monkeypatch.setattr(worker, "normalize_line",
+                         lambda text, model, tok: text.replace("typo", "fix"))
+    worker.process_job(job, None, None)
+
+    doc = db.session.get(Document, doc_id)
+    assert doc.normalized_text == "aa bb fix cc"
+
 
 def test_worker_offsets_correct_when_model_merges_across_a_line_boundary(app, client, folder, monkeypatch):
     _login(client)

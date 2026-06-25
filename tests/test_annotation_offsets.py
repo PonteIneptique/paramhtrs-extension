@@ -17,6 +17,7 @@ from app.annot_utils import (
     align_one_chunk,
     apply_annotations_to_text,
 )
+from app.normalize_jobs import normalize_whitespace
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -113,6 +114,41 @@ def test_chunks_lines_mode():
     annots = align_to_annotations_from_chunks(chunks, separator="\n")
     assert annots
     assert_offsets_correct(full_text, annots, "chunks_lines_mode: ")
+
+
+def test_irregular_whitespace_run_garbles_reconstruction_without_normalization():
+    """Regression for /document/22: a real ALTO line ("py.cito." followed by a
+    13-space run before "siłi.") used to desync align_words' internal char
+    positions from the offset bookkeeping around it, garbling every
+    annotation positioned after that run within the chunk.
+
+    `reg` below is the real comma-project/normalization-byt5-small model's
+    actual output for this exact input (captured directly from the model, not
+    hand-written), so this reproduces the live failure, not a synthetic one.
+    """
+    lines = [
+        "⁋ Si dolor fũit ĩ stõ młierib dab̾ iera",
+        "py.cito.             siłi.⁊ t̾sserã an.",
+        "⁋ Exꝑim̃tũ exꝑtũ ad uitiũ pulmonis",
+    ]
+    orig_with_irregular_whitespace = " ".join(lines)
+    reg = (" si dolor fuerit in facto mulieribus, dabis iera publica cito. "
+           "Similiter trisseram ante. Experimentum expertum ad vitium pulmonis")
+
+    # Without normalization, the multi-space run shrinks under align_words'
+    # internal whitespace collapsing, desyncing every position after it.
+    buggy_annots = align_one_chunk(orig_with_irregular_whitespace, reg,
+                                    orig_with_irregular_whitespace, 0)
+    garbled = apply_annotations_to_text(orig_with_irregular_whitespace, buggy_annots)
+    assert garbled != reg  # demonstrates the bug this fix addresses
+
+    # With the fix (document_create normalizes Line.original_text before it
+    # ever reaches the chunker/aligner), the run is already collapsed, so
+    # align_words' internal collapsing is a no-op and offsets stay in sync.
+    fixed_orig = normalize_whitespace(orig_with_irregular_whitespace)
+    fixed_annots = align_one_chunk(fixed_orig, reg, fixed_orig, 0)
+    assert_offsets_correct(fixed_orig, fixed_annots, "irregular_whitespace: ")
+    assert apply_annotations_to_text(fixed_orig, fixed_annots) == reg
 
 
 def test_chunks_punctuation_mode():

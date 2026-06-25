@@ -5,12 +5,14 @@ import os
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from flask import current_app, Response
 
+from .normalize_jobs import normalize_whitespace
+
 def normalize_line(input_text: str, model, tokenizer: AutoTokenizer) -> str:
     input_text = unicodedata.normalize("NFD", input_text)
     inputs = tokenizer(input_text, return_tensors="pt", padding=True)
     outputs = model.generate(**inputs, max_length=1024)
     decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
-    return decoded
+    return normalize_whitespace(decoded)
 
 
 def get_model_and_tokenizer() -> Tuple[object, AutoTokenizer]:

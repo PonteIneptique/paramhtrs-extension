@@ -7,7 +7,7 @@ from sqlalchemy import func
 from .models import db, Document, Part, Line, Folder, Project, User, Work, NormalizationJob, NormalizationJobChunk
 from .bp_auth import requires_access
 from .annot_utils import align_to_annotations, align_to_annotations_from_chunks, build_tei_from_annotations, document_metadata
-from .normalize_jobs import build_chunks
+from .normalize_jobs import build_chunks, normalize_whitespace
 
 bp_document = Blueprint(
     "bp_document", __name__,
@@ -98,7 +98,7 @@ def document_create():
                 db.session.flush()
                 part_orig_lines = []
                 for idx, line_entry in enumerate(entry.get("lines", [])):
-                    orig = (line_entry.get("abbr") or line_entry.get("orig") or "").strip()
+                    orig = normalize_whitespace((line_entry.get("abbr") or line_entry.get("orig") or "").strip())
                     if not orig:
                         continue
                     line = Line(
@@ -128,7 +128,7 @@ def document_create():
 
             orig_lines = []
             for idx, entry in enumerate(data.get("lines", [])):
-                orig = entry.get("orig", "").strip()
+                orig = normalize_whitespace(entry.get("orig", "").strip())
                 if not orig:
                     continue
                 line = Line(
@@ -314,7 +314,19 @@ def api_document_reprocess(document: Document):
     if active is not None and active.status in ("queued", "running"):
         abort(409)
 
-    parts_lines = [[line.original_text for line in part.lines] for part in document.parts]
+    # Normalise whitespace on existing lines in place: documents imported
+    # before this normalisation existed may still carry multi-space/multi-
+    # newline runs in original_text, which is exactly what caused the
+    # alignment drift reprocessing is meant to fix (see normalize_whitespace's
+    # docstring). Document.full_text is derived live from these rows, so
+    # updating them here keeps it in lockstep with the chunks below.
+    parts_lines = []
+    for part in document.parts:
+        part_lines = []
+        for line in part.lines:
+            line.original_text = normalize_whitespace(line.original_text)
+            part_lines.append(line.original_text)
+        parts_lines.append(part_lines)
 
     # Discard the previous run's annotations — reprocessing replaces them,
     # it doesn't layer a second set on top.
