@@ -169,31 +169,59 @@ def _escape_segment(text: str) -> str:
 
 
 
-def page_metadata(page) -> dict:
-    """Extract TEI metadata dict from a Page ORM object."""
-    doc = page.document
-    all_works = list(page.works.all()) + [w for w in doc.works.all()]
+def document_metadata(document) -> dict:
+    """Extract TEI metadata dict from a Document ORM object."""
+    folder = document.folder
+    all_works = list(document.works) + list(folder.works)
     seen, unique_works = set(), []
     for w in all_works:
         if w.id not in seen:
             seen.add(w.id)
             unique_works.append({"title": w.title, "genre": w.genre})
+
+    parts_meta = []
+    for part in document.parts:
+        if not (part.qid or part.works):
+            continue
+        parts_meta.append({
+            "xml_id": f"part-{part.id}",
+            "qid": part.qid,
+            "works": [{"title": w.title, "genre": w.genre} for w in part.works],
+        })
+
     return {
-        "title": page.label,
-        "document": doc.name,
-        "project": doc.project.name,
-        "language": doc.language,
-        "qid": doc.qid,
+        "title": document.label,
+        "document": folder.name,
+        "project": folder.project.name,
+        "language": folder.language,
+        "qid": folder.qid,
+        "document_qid": document.qid,
+        "iiif_manifest_url": folder.iiif_manifest_url,
         "works": unique_works,
+        "parts": parts_meta,
     }
+
+
+def _ms_items_xml(works: list, indent: str) -> str:
+    items = []
+    for w in works:
+        genre_attr = f' n="{escape(w["genre"])}"' if w.get("genre") else ""
+        items.append(f'{indent}<msItem{genre_attr}><title>{escape(w["title"])}</title></msItem>')
+    return ("\n" + "\n".join(items)) if items else ""
 
 
 def build_tei_header(meta: dict, users_by_id: dict = None, contributor_ids: set = None) -> str:
     """Build a standalone <teiHeader> block from a metadata dict.
 
     metadata dict (all keys optional):
-        title, document, project, language, qid,
+        title, document, project, language, qid, document_qid, iiif_manifest_url,
         works: list[{"title": str, "genre": str|None}]
+        parts: list[{"xml_id": str, "qid": str|None, "works": list[{"title","genre"}]}]
+            — per-Part metadata (only entries with a qid or works), rendered as
+            <msPart> elements with @corresp pointing at the <milestone
+            xml:id="..."/> marker emitted for the same part in the body (the
+            msPart itself gets its own xml:id, distinct from the milestone's,
+            since XML ids must be unique document-wide).
     """
     meta = meta or {}
 
@@ -215,21 +243,34 @@ def build_tei_header(meta: dict, users_by_id: dict = None, contributor_ids: set 
     source_desc_parts = []
     if meta.get("qid"):
         source_desc_parts.append(f'        <idno type="URI">{escape(meta["qid"])}</idno>')
+    if meta.get("document_qid"):
+        source_desc_parts.append(f'        <idno type="URI" subtype="document">{escape(meta["document_qid"])}</idno>')
+    if meta.get("iiif_manifest_url"):
+        source_desc_parts.append(f'        <idno type="IIIF">{escape(meta["iiif_manifest_url"])}</idno>')
     ms_contents = ""
     works = meta.get("works") or []
     if works:
-        items = []
-        for w in works:
-            genre_attr = f' n="{escape(w["genre"])}"' if w.get("genre") else ""
-            items.append(f'          <msItem{genre_attr}><title>{escape(w["title"])}</title></msItem>')
-        ms_contents = "\n        <msContents>\n" + "\n".join(items) + "\n        </msContents>"
+        ms_contents = "\n        <msContents>" + _ms_items_xml(works, "          ") + "\n        </msContents>"
 
-    if source_desc_parts or ms_contents:
+    ms_parts_xml = ""
+    for part in meta.get("parts") or []:
+        part_ident = ""
+        if part.get("qid"):
+            part_ident = f'\n          <msIdentifier>\n            <idno type="URI">{escape(part["qid"])}</idno>\n          </msIdentifier>'
+        part_contents = ""
+        if part.get("works"):
+            part_contents = "\n          <msContents>" + _ms_items_xml(part["works"], "            ") + "\n          </msContents>"
+        ms_parts_xml += (
+            f'\n        <msPart xml:id="ms-{escape(part["xml_id"])}" corresp="#{escape(part["xml_id"])}">'
+            f'{part_ident}{part_contents}\n        </msPart>'
+        )
+
+    if source_desc_parts or ms_contents or ms_parts_xml:
         ms_ident = ""
         if source_desc_parts:
             ms_ident = "\n        <msIdentifier>\n" + "\n".join(source_desc_parts) + "\n        </msIdentifier>"
         source_desc = f'''    <sourceDesc>
-      <msDesc>{ms_ident}{ms_contents}
+      <msDesc>{ms_ident}{ms_contents}{ms_parts_xml}
       </msDesc>
     </sourceDesc>'''
     else:
@@ -253,7 +294,7 @@ def build_tei_header(meta: dict, users_by_id: dict = None, contributor_ids: set 
   </teiHeader>'''
 
 
-def build_tei_from_annotations(original_text: str, annotations: list, users_by_id: dict = None, metadata: dict = None, lines: list = None) -> str:
+def build_tei_from_annotations(original_text: str, annotations: list, users_by_id: dict = None, metadata: dict = None, lines: list = None, subparts: list = None) -> str:
     """Build a TEI XML document from annotations.
 
     metadata dict (all keys optional):
@@ -261,8 +302,13 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
         works: list[{"title": str, "genre": str|None}]
 
     lines: optional list of {"start": int, "alto_id": str|None} giving each
-        original line's start offset within original_text (see Page.line_offsets).
+        original line's start offset within original_text (see Document.line_offsets).
         When provided, each <lb/> is annotated with @n=<alto_id> of the line it starts.
+
+    subparts: optional list of {"start": int, "original_filename": str|None} giving
+        each part's start offset within original_text (see Document.part_offsets).
+        When a Document has more than one part, a <milestone unit="part"
+        n="<original_filename>"/> is emitted at each boundary after the first.
     """
     sorted_annots = sorted(
         annotations,
@@ -270,11 +316,28 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
     )
 
     line_alto_by_start = {l["start"]: l["alto_id"] for l in (lines or []) if l.get("alto_id")}
+    subpart_milestones_by_start = {
+        s["start"]: {
+            "xml_id": f'part-{s.get("part_id", "")}',
+            "n": s.get("original_filename") or str(s.get("part_id", "")),
+        }
+        for s in (subparts or [])[1:]
+    }
+
+    def _milestone_tag(m: dict) -> str:
+        return f'<milestone unit="part" xml:id="{escape(m["xml_id"])}" n="{escape(m["n"])}"/>'
 
     body_parts = []
     span_entries = []
     word_count, cursor, tokens_on_line = 0, 0, 0
     annot_resp_id = None  # set per-annotation before calling process_segment
+
+    if subparts and len(subparts) > 1:
+        first = subparts[0]
+        body_parts.append(_milestone_tag({
+            "xml_id": f'part-{first.get("part_id", "")}',
+            "n": first.get("original_filename") or str(first.get("part_id", "")),
+        }) + '\n        ')
 
     if lines and lines[0].get("alto_id"):
         body_parts.append(f'<lb n="{escape(lines[0]["alto_id"])}"/>\n        ')
@@ -284,6 +347,16 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
         nonlocal word_count, tokens_on_line, annot_resp_id
         local_ids = []
         has_internal_lb = orig_label and '\n' in orig_label
+
+        # A subpart boundary that falls *inside* an annotated span (the
+        # annotation's original text crosses it) isn't caught by the \n-token
+        # branch below, since the tokenized `text` here is often the
+        # regularized value rather than the raw original text. Emit it once,
+        # up front, so it isn't silently dropped — same fix as the UI divider.
+        if has_internal_lb:
+            for s in sorted(subpart_milestones_by_start):
+                if abs_start < s < abs_start + len(orig_label):
+                    body_parts.append(_milestone_tag(subpart_milestones_by_start[s]) + '\n        ')
 
         # Tokenize reg value (words, punctuation, or manual newlines)
         tokens = list(re.finditer(r"(\w+)|([^\w\s]+)|(\n)", text))
@@ -303,6 +376,9 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
                 next_line_start = abs_start + match.end()
                 alto_id = line_alto_by_start.get(next_line_start)
                 n_attr = f' n="{escape(alto_id)}"' if alto_id else ''
+                subpart_m = subpart_milestones_by_start.get(next_line_start)
+                if subpart_m is not None:
+                    body_parts.append(_milestone_tag(subpart_m) + '\n        ')
                 body_parts.append(f'<lb{n_attr}/>\n        ')
                 tokens_on_line = 0
                 continue
@@ -381,6 +457,9 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
                 resp_attr = f' resp="#{escape(users_by_id[resp_id])}"'
             gap_open = "<gap/>" if gap_before else ""
             gap_close = "<gap/>" if gap_after else ""
+            for s in sorted(subpart_milestones_by_start):
+                if start < s < end:
+                    body_parts.append(_milestone_tag(subpart_milestones_by_start[s]) + '\n        ')
             body_parts.append(f'<unclear reason="illegible" cert="low"{resp_attr}>{gap_open}{escape(raw_text)}{gap_close}</unclear>')
         elif body.get("purpose") == "non_resolv_abbr":
             reason = body.get("reason", "other")

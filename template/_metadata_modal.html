@@ -1,0 +1,107 @@
+<!-- Shared metadata modal — populated/wired by static/js/metadata-modal.js.
+     Include once per page; call MetadataModal.open({...}) to use it for a
+     Folder, a Document, or a Part. -->
+<div class="modal fade" id="metaModal" tabindex="-1" aria-labelledby="metaModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="metaModalTitle">
+          <i class="fa-solid fa-pen me-2"></i><span id="metaModalTitleText"></span>
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+
+        <h6 class="text-uppercase text-muted small fw-semibold mb-2">Metadata</h6>
+        <form id="metaForm">
+          <div class="mb-2" data-field-group="title" style="display:none;">
+            <label class="form-label form-label-sm mb-1 small" id="metaTitleLabel">Name</label>
+            <input type="text" class="form-control" id="metaTitleInput">
+          </div>
+          <div class="mb-2" data-field-group="description" style="display:none;">
+            <label class="form-label form-label-sm mb-1 small">Description</label>
+            <textarea class="form-control" name="description" rows="2"></textarea>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-6" data-field-group="language" style="display:none;">
+              <label class="form-label form-label-sm mb-1 small">Language</label>
+              <select class="form-select" name="language"></select>
+            </div>
+            <div class="col-6" data-field-group="status" style="display:none;">
+              <label class="form-label form-label-sm mb-1 small">Status</label>
+              <select class="form-select" name="status">
+                <option value="pending">pending</option>
+                <option value="active">active</option>
+                <option value="for_review">for_review</option>
+                <option value="done">done</option>
+              </select>
+            </div>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-6" data-field-group="qid" style="display:none;">
+              <label class="form-label form-label-sm mb-1 small">QID</label>
+              <input type="text" class="form-control" name="qid" placeholder="e.g. Q12345">
+            </div>
+            <div class="col-6" data-field-group="iiif_manifest_url" style="display:none;">
+              <label class="form-label form-label-sm mb-1 small">IIIF Manifest URL</label>
+              <input type="text" class="form-control" name="iiif_manifest_url" placeholder="https://...">
+            </div>
+            <div class="col-6" data-field-group="original_filename" style="display:none;">
+              <label class="form-label form-label-sm mb-1 small" data-field-label="original_filename">Original filename</label>
+              <input type="text" class="form-control" name="original_filename">
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary btn-sm">Save metadata</button>
+        </form>
+
+        <div data-field-group="works" class="mt-4" style="display:none;">
+          <hr>
+          <h6 class="text-uppercase text-muted small fw-semibold mb-2">Works</h6>
+          <div class="mb-3" id="metaWorksChips"></div>
+          <div class="border rounded p-3 bg-light">
+            <p class="mb-2 small text-muted fw-semibold">Link a new work</p>
+            <div class="d-flex gap-2 align-items-end flex-wrap">
+              <div class="flex-grow-1" style="min-width:140px;">
+                <label class="form-label form-label-sm mb-1 small">Title <span class="text-danger">*</span></label>
+                <input type="text" class="form-control form-control-sm" id="metaWorkTitle" placeholder="e.g. Vie de saint Martin">
+              </div>
+              <div style="min-width:120px;">
+                <label class="form-label form-label-sm mb-1 small">Genre</label>
+                <input type="text" class="form-control form-control-sm" id="metaWorkGenre" placeholder="e.g. hagiography">
+              </div>
+              <button class="btn btn-sm btn-primary" type="button" id="metaWorkAddBtn">Add</button>
+            </div>
+          </div>
+        </div>
+
+        <div data-field-group="move" class="mt-4" style="display:none;">
+          <hr>
+          <h6 class="text-uppercase text-muted small fw-semibold mb-2" id="metaMoveLabel">Move</h6>
+          <div class="d-flex gap-2 align-items-end flex-wrap mb-2">
+            <div class="flex-grow-1" style="min-width:200px;">
+              <select class="form-select form-select-sm" id="metaMoveTarget">
+                <option value="">Loading…</option>
+              </select>
+            </div>
+            <button class="btn btn-sm btn-outline-primary" type="button" id="metaMoveBtn">
+              <i class="fa-solid fa-arrow-right-arrow-left me-1"></i>Move
+            </button>
+          </div>
+        </div>
+
+        <div data-field-group="delete" class="mt-4" style="display:none;">
+          <hr>
+          <h6 class="text-uppercase text-muted small fw-semibold mb-2">Danger zone</h6>
+          <a href="#" id="metaDeleteLink" class="btn btn-outline-danger btn-sm">
+            <i class="fa-solid fa-trash me-1"></i><span id="metaDeleteLabel">Delete</span>
+          </a>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/static/js/metadata-modal.js"></script>

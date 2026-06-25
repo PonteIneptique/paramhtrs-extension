@@ -1,4 +1,5 @@
 from sqlalchemy import CheckConstraint, inspect, text
+from sqlalchemy.orm import declared_attr
 from flask import current_app
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin, current_user
@@ -39,16 +40,62 @@ class Work(db.Model):
     genre = db.Column(db.String(100), nullable=True)
 
 
-class DocumentWork(db.Model):
-    __tablename__ = "document_work"
-    document_id = db.Column(db.Integer, db.ForeignKey("documents.id"), primary_key=True)
-    work_id     = db.Column(db.Integer, db.ForeignKey("works.id"),     primary_key=True)
+class MetadataWork(db.Model):
+    __tablename__ = "metadata_work"
+    metadata_id = db.Column(db.Integer, db.ForeignKey("metadata.id"), primary_key=True)
+    work_id     = db.Column(db.Integer, db.ForeignKey("works.id"),    primary_key=True)
 
 
-class PageWork(db.Model):
-    __tablename__ = "page_work"
-    page_id = db.Column(db.Integer, db.ForeignKey("pages.id"), primary_key=True)
-    work_id = db.Column(db.Integer, db.ForeignKey("works.id"), primary_key=True)
+class Metadata(db.Model):
+    """Standalone metadata object — language/QID/filename/IIIF/works — that any
+    Folder, Document, or Part can be linked to via a nullable metadata_id FK
+    (see HasMetadataMixin). Kept separate from the structural models so it can
+    eventually be shared/reused across entries, not just owned 1:1."""
+    __tablename__ = "metadata"
+    id = db.Column(db.Integer, primary_key=True)
+    language = db.Column(db.String(10), nullable=True)
+    qid = db.Column(db.String(100), nullable=True)
+    original_filename = db.Column(db.String(500), nullable=True)
+    iiif_manifest_url = db.Column(db.Text, nullable=True)
+
+    works = db.relationship(
+        "Work",
+        secondary="metadata_work",
+        backref=db.backref("metadata_entries", lazy="dynamic"),
+        lazy="dynamic",
+    )
+
+
+class HasMetadataMixin:
+    """Adds an optional, lazily-created link to a Metadata row."""
+
+    @declared_attr
+    def metadata_id(cls):
+        return db.Column(db.Integer, db.ForeignKey("metadata.id"), nullable=True)
+
+    @declared_attr
+    def metadata_(cls):
+        return db.relationship("Metadata")
+
+    def get_or_create_metadata(self) -> "Metadata":
+        if self.metadata_ is None:
+            self.metadata_ = Metadata()
+            db.session.add(self.metadata_)
+        return self.metadata_
+
+    @property
+    def works(self) -> list:
+        return list(self.metadata_.works.all()) if self.metadata_ else []
+
+    def add_work(self, work: "Work") -> None:
+        self.get_or_create_metadata().works.append(work)
+
+    def remove_work(self, work_id: int) -> None:
+        if not self.metadata_:
+            return
+        work = Work.query.get(work_id)
+        if work:
+            self.metadata_.works.remove(work)
 
 
 class ProjectUser(db.Model):
@@ -64,8 +111,8 @@ class Project(db.Model):
     description = db.Column(db.Text, nullable=False)
     creator_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
 
-    documents = db.relationship(
-        "Document",
+    folders = db.relationship(
+        "Folder",
         backref="project",
         cascade="all, delete-orphan",
         lazy=True,
@@ -89,42 +136,56 @@ class Project(db.Model):
         ).count() > 0
 
 
-class DocumentUser(db.Model):
-    __tablename__ = "document_user"
+class FolderUser(db.Model):
+    __tablename__ = "folder_user"
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
-    document_id = db.Column(db.Integer, db.ForeignKey("documents.id"), primary_key=True)
+    folder_id = db.Column(db.Integer, db.ForeignKey("folders.id"), primary_key=True)
 
 
-class Document(db.Model):
-    __tablename__ = "documents"
+class Folder(HasMetadataMixin, db.Model):
+    __tablename__ = "folders"
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text, nullable=False, default="")
     project_id = db.Column(db.Integer, db.ForeignKey("projects.id"), nullable=False)
     creator_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
-    language = db.Column(db.String(10), nullable=False, default="fre")
-    qid = db.Column(db.String(100), nullable=True)
-    iiif_manifest_url = db.Column(db.Text, nullable=True)
 
-    pages = db.relationship(
-        "Page",
-        backref="document",
+    documents = db.relationship(
+        "Document",
+        backref="folder",
         cascade="all, delete-orphan",
         lazy=True,
-        order_by="Page.order"
+        order_by="Document.order"
     )
     users = db.relationship(
         "User",
-        secondary="document_user",
+        secondary="folder_user",
         lazy="dynamic"
     )
 
-    works = db.relationship(
-        "Work",
-        secondary="document_work",
-        backref=db.backref("documents", lazy="dynamic"),
-        lazy="dynamic",
-    )
+    @property
+    def language(self):
+        return self.metadata_.language if self.metadata_ else "fre"
+
+    @language.setter
+    def language(self, value):
+        self.get_or_create_metadata().language = value
+
+    @property
+    def qid(self):
+        return self.metadata_.qid if self.metadata_ else None
+
+    @qid.setter
+    def qid(self, value):
+        self.get_or_create_metadata().qid = value
+
+    @property
+    def iiif_manifest_url(self):
+        return self.metadata_.iiif_manifest_url if self.metadata_ else None
+
+    @iiif_manifest_url.setter
+    def iiif_manifest_url(self, value):
+        self.get_or_create_metadata().iiif_manifest_url = value
 
     def user_has_access(self, user) -> bool:
         if not getattr(user, 'is_authenticated', False):
@@ -132,9 +193,9 @@ class Document(db.Model):
         project = Project.query.get(self.project_id)
         if project.user_has_access(user):
             return True
-        return DocumentUser.query.filter(
-            DocumentUser.document_id == self.id,
-            DocumentUser.user_id == user.id
+        return FolderUser.query.filter(
+            FolderUser.folder_id == self.id,
+            FolderUser.user_id == user.id
         ).count() > 0
 
 
@@ -142,7 +203,7 @@ class Annotation(db.Model):
     __tablename__ = "annotations"
 
     id            = db.Column(db.String(36),  primary_key=True)
-    page_id       = db.Column(db.Integer, db.ForeignKey("pages.id"), nullable=False, index=True)
+    document_id   = db.Column(db.Integer, db.ForeignKey("documents.id"), nullable=False, index=True)
     body_value    = db.Column(db.Text,        nullable=True)
     body_purpose  = db.Column(db.String(50),  nullable=True)
     body_reason   = db.Column(db.String(50),  nullable=True)
@@ -157,7 +218,7 @@ class Annotation(db.Model):
     body_gap_before = db.Column(db.Boolean,   nullable=False, default=False)
     body_gap_after  = db.Column(db.Boolean,   nullable=False, default=False)
 
-    page = db.relationship("Page", back_populates="annotation_rows")
+    document = db.relationship("Document", back_populates="annotation_rows")
 
     def to_dict(self) -> dict:
         body_entry = {"type": "TextualBody",
@@ -192,14 +253,14 @@ class Annotation(db.Model):
         return d
 
     @classmethod
-    def from_dict(cls, page_id: int, data: dict) -> "Annotation":
+    def from_dict(cls, document_id: int, data: dict) -> "Annotation":
         sel  = data.get("target", {}).get("selector", [])
         pos  = next((s for s in sel if s.get("type") == "TextPositionSelector"), {})
         quo  = next((s for s in sel if s.get("type") == "TextQuoteSelector"),    {})
         body = (data.get("body") or [{}])[0]
         return cls(
             id           = data["id"],
-            page_id      = page_id,
+            document_id  = document_id,
             body_value   = body.get("value"),
             body_purpose = body.get("purpose"),
             body_reason  = body.get("reason"),
@@ -216,9 +277,9 @@ class Annotation(db.Model):
         )
 
     @classmethod
-    def upsert_from_dict(cls, page_id: int, data: dict) -> None:
+    def upsert_from_dict(cls, document_id: int, data: dict) -> None:
         """Update existing row or insert new one from a W3C annotation dict."""
-        existing = cls.query.filter_by(id=data["id"], page_id=page_id).first()
+        existing = cls.query.filter_by(id=data["id"], document_id=document_id).first()
         if existing:
             sel  = data.get("target", {}).get("selector", [])
             pos  = next((s for s in sel if s.get("type") == "TextPositionSelector"), {})
@@ -238,29 +299,30 @@ class Annotation(db.Model):
             existing.body_gap_before = body.get("gap_before", False)
             existing.body_gap_after  = body.get("gap_after", False)
         else:
-            db.session.add(cls.from_dict(page_id, data))
+            db.session.add(cls.from_dict(document_id, data))
 
 
-class Page(db.Model):
-    __tablename__ = "pages"
+class Document(HasMetadataMixin, db.Model):
+    """The continuous, annotatable text unit (formerly 'Page', then 'Part') —
+    shown in a Folder's browse list and edited in the 3-panel editor. Made up
+    of one or more Parts (formerly 'Subpart')."""
+    __tablename__ = "documents"
     id = db.Column(db.Integer, primary_key=True)
-    document_id = db.Column(db.Integer, db.ForeignKey("documents.id"), nullable=False)
+    folder_id = db.Column(db.Integer, db.ForeignKey("folders.id"), nullable=False)
     label = db.Column(db.String(200), nullable=False)
     order = db.Column(db.Integer, nullable=False, default=0)
     status = db.Column(db.String(20), nullable=False, default="pending")
-    qid = db.Column(db.String(100), nullable=True)
-    original_filename = db.Column(db.String(500), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
             "status IN ('pending', 'active', 'done', 'for_review')",
-            name="check_page_status_valid"
+            name="check_document_status_valid"
         ),
     )
 
     annotation_rows = db.relationship(
         "Annotation",
-        back_populates="page",
+        back_populates="document",
         cascade="all, delete-orphan",
         lazy="select",
         order_by="Annotation.target_start",
@@ -271,29 +333,35 @@ class Page(db.Model):
         return [a.to_dict() for a in self.annotation_rows]
 
     def set_annotations(self, annots: list) -> None:
-        """Replace all annotations for this page."""
-        Annotation.query.filter_by(page_id=self.id).delete(synchronize_session=False)
+        """Replace all annotations for this document."""
+        Annotation.query.filter_by(document_id=self.id).delete(synchronize_session=False)
         for data in annots:
             db.session.add(Annotation.from_dict(self.id, data))
 
-    works = db.relationship(
-        "Work",
-        secondary="page_work",
-        backref=db.backref("pages", lazy="dynamic"),
-        lazy="dynamic",
-    )
-
-    lines = db.relationship(
-        "Line",
-        backref="page",
+    parts = db.relationship(
+        "Part",
+        backref="document",
         cascade="all, delete-orphan",
         lazy=True,
-        order_by="Line.order"
+        order_by="Part.order"
     )
 
     @property
+    def qid(self):
+        return self.metadata_.qid if self.metadata_ else None
+
+    @qid.setter
+    def qid(self, value):
+        self.get_or_create_metadata().qid = value
+
+    @property
+    def lines(self) -> list:
+        """All lines across all parts, in part/line order."""
+        return [line for part in self.parts for line in part.lines]
+
+    @property
     def full_text(self) -> str:
-        """Original text of all lines joined by newline."""
+        """Original text of all lines (across all parts) joined by newline."""
         return "\n".join(line.original_text for line in self.lines)
 
     @property
@@ -312,44 +380,105 @@ class Page(db.Model):
             offset += len(line.original_text) + 1
         return offsets
 
+    @property
+    def part_offsets(self) -> list:
+        """List of {start, part_id, original_filename} giving each part's
+        start offset within full_text, used to mark part boundaries (e.g. as
+        <milestone/> in TEI export) when a Document is made of several parts."""
+        offsets = []
+        offset = 0
+        for part in self.parts:
+            offsets.append({
+                "start": offset,
+                "part_id": part.id,
+                "original_filename": part.original_filename,
+            })
+            for line in part.lines:
+                offset += len(line.original_text) + 1
+        return offsets
+
     def user_has_access(self, user: User) -> bool:
-        document = Document.query.get(self.document_id)
-        return document.user_has_access(user)
+        folder = Folder.query.get(self.folder_id)
+        return folder.user_has_access(user)
 
     @property
     def prev(self):
         return (
-            Page.query
-            .filter(Page.document_id == self.document_id, Page.order < self.order)
-            .order_by(Page.order.desc())
+            Document.query
+            .filter(Document.folder_id == self.folder_id, Document.order < self.order)
+            .order_by(Document.order.desc())
             .first()
         )
 
     @property
     def next(self):
         return (
-            Page.query
-            .filter(Page.document_id == self.document_id, Page.order > self.order)
-            .order_by(Page.order.asc())
+            Document.query
+            .filter(Document.folder_id == self.folder_id, Document.order > self.order)
+            .order_by(Document.order.asc())
             .first()
         )
 
     @property
     def line_count(self):
-        return Line.query.filter_by(page_id=self.id).count()
+        return sum(len(part.lines) for part in self.parts)
+
+    @property
+    def original_filename(self):
+        """Filename of the first part, for display/editing in the common
+        single-part case. Multi-part documents manage filenames per part."""
+        return self.parts[0].original_filename if self.parts else None
+
+
+class Part(HasMetadataMixin, db.Model):
+    """One imported source's lines (formerly 'Subpart') within a Document.
+    Most Documents have exactly one Part; several Parts let cleanup/annotation
+    span what used to be separate imports as one continuous text."""
+    __tablename__ = "parts"
+    id = db.Column(db.Integer, primary_key=True)
+    document_id = db.Column(db.Integer, db.ForeignKey("documents.id"), nullable=False)
+    order = db.Column(db.Integer, nullable=False, default=0)
+
+    lines = db.relationship(
+        "Line",
+        backref="part",
+        cascade="all, delete-orphan",
+        lazy=True,
+        order_by="Line.order"
+    )
+
+    @property
+    def original_filename(self):
+        return self.metadata_.original_filename if self.metadata_ else None
+
+    @original_filename.setter
+    def original_filename(self, value):
+        self.get_or_create_metadata().original_filename = value
+
+    @property
+    def qid(self):
+        return self.metadata_.qid if self.metadata_ else None
+
+    @qid.setter
+    def qid(self, value):
+        self.get_or_create_metadata().qid = value
+
+    def user_has_access(self, user: User) -> bool:
+        document = Document.query.get(self.document_id)
+        return document.user_has_access(user)
 
 
 class Line(db.Model):
     __tablename__ = "lines"
     id = db.Column(db.Integer, primary_key=True)
-    page_id = db.Column(db.Integer, db.ForeignKey("pages.id"), nullable=False)
+    part_id = db.Column(db.Integer, db.ForeignKey("parts.id"), nullable=False)
     order = db.Column(db.Integer, nullable=False, default=0)
     original_text = db.Column(db.Text, nullable=False)
     alto_id = db.Column(db.String(200), nullable=True)
 
     def user_has_access(self, user: User) -> bool:
-        page = Page.query.get(self.page_id)
-        return page.user_has_access(user)
+        part = Part.query.get(self.part_id)
+        return part.user_has_access(user)
 
 
 # -------------------------
@@ -438,11 +567,8 @@ def db_upgrade():
             ("users",       "nickname",           "VARCHAR(80)"),
             ("users",       "orcid",              "VARCHAR(30)"),
             ("users",       "institution",        "VARCHAR(200)"),
-            ("documents",   "iiif_manifest_url",  "TEXT"),
             ("annotations", "body_reason",        "VARCHAR(50)"),
             ("annotations", "body_semtag",        "VARCHAR(50)"),
-            ("pages",       "qid",                "VARCHAR(100)"),
-            ("pages",       "original_filename",  "VARCHAR(500)"),
         ]
         for table, col, col_def in new_columns:
             existing = [c["name"] for c in inspector.get_columns(table)]
@@ -458,39 +584,39 @@ def db_upgrade():
 
 @db_cli.command("migrate-annotations")
 def db_migrate_annotations():
-    """Migrate page.annotations JSON column to the annotations table."""
+    """Migrate document.annotations JSON column to the annotations table (legacy, pre-Document-table schema)."""
     with current_app.app_context():
         db.create_all()
         click.echo("Ensuring annotations table exists...")
 
-        result = db.session.execute(text("SELECT id, annotations FROM pages")).fetchall()
+        result = db.session.execute(text("SELECT id, annotations FROM documents")).fetchall()
         total = 0
         skipped = 0
-        for page_id, ann_json in result:
+        for document_id, ann_json in result:
             if not ann_json:
                 continue
             annots = json.loads(ann_json) if isinstance(ann_json, str) else ann_json
             if not annots:
                 continue
-            existing = Annotation.query.filter_by(page_id=page_id).count()
+            existing = Annotation.query.filter_by(document_id=document_id).count()
             if existing:
-                click.echo(f"  Page {page_id}: {existing} rows already present — skipping")
+                click.echo(f"  Document {document_id}: {existing} rows already present — skipping")
                 skipped += 1
                 continue
             for ann_data in annots:
                 try:
-                    db.session.add(Annotation.from_dict(page_id, ann_data))
+                    db.session.add(Annotation.from_dict(document_id, ann_data))
                 except Exception as exc:
-                    click.echo(f"  WARNING page {page_id} / ann {ann_data.get('id')}: {exc}")
+                    click.echo(f"  WARNING document {document_id} / ann {ann_data.get('id')}: {exc}")
             total += len(annots)
-            click.echo(f"  Page {page_id}: {len(annots)} annotations")
+            click.echo(f"  Document {document_id}: {len(annots)} annotations")
 
         db.session.commit()
-        click.echo(f"Migrated {total} annotations across {len(result) - skipped} pages.")
+        click.echo(f"Migrated {total} annotations across {len(result) - skipped} documents.")
 
         try:
-            db.session.execute(text("ALTER TABLE pages DROP COLUMN annotations"))
+            db.session.execute(text("ALTER TABLE documents DROP COLUMN annotations"))
             db.session.commit()
-            click.echo("Dropped pages.annotations column.")
+            click.echo("Dropped documents.annotations column.")
         except Exception as exc:
-            click.echo(f"Could not drop pages.annotations column (safe to ignore): {exc}")
+            click.echo(f"Could not drop documents.annotations column (safe to ignore): {exc}")

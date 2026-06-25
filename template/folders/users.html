@@ -4,14 +4,14 @@
   <nav aria-label="breadcrumb">
     <ol class="breadcrumb">
       <li class="breadcrumb-item"><a href="{{ url_for('bp_project.project_browse', project_id=document.project_id) }}">{{ document.project.name }}</a></li>
-      <li class="breadcrumb-item"><a href="{{ url_for('bp_document.document_browse', document_id=document.id) }}">{{ document.name }}</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('bp_folder.folder_browse', folder_id=document.id) }}">{{ document.name }}</a></li>
       <li class="breadcrumb-item active">Manage Access</li>
     </ol>
   </nav>
 
-  <h2>Document Access — {{ document.name }}</h2>
-  <p class="text-muted">Users with project-level access already have access to this document.
-     Add users here to grant access to this document only.</p>
+  <h2>Folder Access — {{ document.name }}</h2>
+  <p class="text-muted">Users with project-level access already have access to this folder.
+     Add users here to grant access to this folder only.</p>
 
   <div id="users-app">
     <table class="table table-bordered align-middle">
@@ -19,7 +19,7 @@
         <tr>
           <th>User</th>
           <th>Project access</th>
-          <th>Document access</th>
+          <th>Folder access</th>
           <th></th>
         </tr>
       </thead>
@@ -60,18 +60,18 @@
   </div>
 </div>
 <script>
-const documentId = {{ document.id }};
+const folderId = {{ document.id }};
 
 async function addUser(userId, btn) {
   btn.disabled = true;
-  const resp = await fetch(`${ROOT}/api/documents/${documentId}/users/${userId}`, {method: 'POST'});
+  const resp = await fetch(`${ROOT}/api/folders/${folderId}/users/${userId}`, {method: 'POST'});
   if (resp.ok) { location.reload(); }
   else { btn.disabled = false; alert('Error adding user'); }
 }
 
 async function removeUser(userId, btn) {
   btn.disabled = true;
-  const resp = await fetch(`${ROOT}/api/documents/${documentId}/users/${userId}`, {method: 'DELETE'});
+  const resp = await fetch(`${ROOT}/api/folders/${folderId}/users/${userId}`, {method: 'DELETE'});
   if (resp.ok) { location.reload(); }
   else { btn.disabled = false; alert('Error removing user'); }
 }

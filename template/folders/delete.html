@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-5" style="max-width: 500px;">
+  <h2>Delete Folder</h2>
+  <p>Are you sure you want to delete <strong>{{ document.name }}</strong>?
+     This will permanently remove all its documents and lines.</p>
+  <a href="{{ url_for('bp_folder.folder_delete', folder_id=document.id, confirm=True) }}" class="btn btn-danger">Yes, delete</a>
+  <a href="{{ url_for('bp_folder.folder_browse', folder_id=document.id) }}" class="btn btn-outline-secondary ms-2">Cancel</a>
+</div>
+{% endblock %}

@@ -16,9 +16,9 @@ from flask import (
 )
 from sqlalchemy import or_
 from flask_login import login_required, current_user
-from .models import Project, Document, db, User, ProjectUser
+from .models import Project, Folder, db, User, ProjectUser
 from .bp_auth import requires_access
-from .annot_utils import build_tei_from_annotations, page_metadata
+from .annot_utils import build_tei_from_annotations, document_metadata
 
 bp_project = Blueprint(
     "bp_project",
@@ -57,30 +57,30 @@ def project_create():
 def project_browse(project: Project):
     from sqlalchemy.orm import joinedload
     from .stats_report import page_validation_counts
-    from .models import Page
+    from .models import Document
     search = request.args.get("search", "").strip()
-    documents = Document.query.filter_by(project_id=project.id)
+    folders = Folder.query.filter_by(project_id=project.id)
     if search:
-        documents = documents.filter(Document.name.ilike(f"%{search}%"))
-    documents = (documents
-                 .options(joinedload(Document.pages).joinedload(Page.annotation_rows))
-                 .order_by(Document.name).all())
+        folders = folders.filter(Folder.name.ilike(f"%{search}%"))
+    folders = (folders
+                 .options(joinedload(Folder.documents).joinedload(Document.annotation_rows))
+                 .order_by(Folder.name).all())
 
     document_validation = {}
     for_review_counts = {}
-    for document in documents:
+    for folder in folders:
         subs = validated = 0
-        for page in document.pages:
+        for page in folder.documents:
             p_subs, p_validated = page_validation_counts(page)
             subs += p_subs
             validated += p_validated
-        document_validation[document.id] = (subs, validated)
-        for_review_counts[document.id] = sum(1 for page in document.pages if page.status == "for_review")
+        document_validation[folder.id] = (subs, validated)
+        for_review_counts[folder.id] = sum(1 for page in folder.documents if page.status == "for_review")
 
     return render_template(
         "projects/edit.html",
         project=project,
-        documents=documents,
+        documents=folders,
         document_validation=document_validation,
         for_review_counts=for_review_counts,
         search=search,
@@ -148,13 +148,14 @@ def project_users(project_id):
 @requires_access(Project, 'project_id')
 def project_stats(project: Project):
     from .stats_report import compute_stats, build_chart_svg, load_font_face, today_str
-    from .models import Page, Document
+    from .models import Document, Part
     from sqlalchemy.orm import joinedload
-    pages = (Page.query
-             .join(Page.document)
-             .filter(Document.project_id == project.id)
-             .options(joinedload(Page.annotation_rows), joinedload(Page.lines))
-             .order_by(Document.name, Page.order)
+    pages = (Document.query
+             .join(Document.folder)
+             .filter(Folder.project_id == project.id)
+             .options(joinedload(Document.annotation_rows),
+                      joinedload(Document.parts).joinedload(Part.lines))
+             .order_by(Folder.name, Document.order)
              .all())
     stats = compute_stats(pages)
     html = render_template('stats_report.html',
@@ -175,16 +176,18 @@ def project_download_zip(project: Project):
     users_by_id = {u.id: u.nickname or u.username for u in User.query.all()}
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for document in Document.query.filter_by(project_id=project.id).order_by(Document.name).all():
-            if not document.user_has_access(current_user):
+        for folder in Folder.query.filter_by(project_id=project.id).order_by(Folder.name).all():
+            if not folder.user_has_access(current_user):
                 continue
-            safe_doc = document.name.replace("/", "_").replace("\\", "_")
-            for page in document.pages:
-                safe_label = page.label.replace("/", "_").replace("\\", "_")
-                tei = build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id, metadata=page_metadata(page), lines=page.line_offsets)
+            safe_doc = folder.name.replace("/", "_").replace("\\", "_")
+            for document in folder.documents:
+                safe_label = document.label.replace("/", "_").replace("\\", "_")
+                tei = build_tei_from_annotations(document.full_text, document.annotations or [], users_by_id=users_by_id,
+                                                  metadata=document_metadata(document), lines=document.line_offsets,
+                                                  subparts=document.part_offsets)
                 zf.writestr(f"{safe_doc}/{safe_label}.xml", tei)
-                zf.writestr(f"{safe_doc}/{safe_label}.json", json.dumps(page.annotations or [], ensure_ascii=False, indent=2))
-                zf.writestr(f"{safe_doc}/{safe_label}_source.txt", page.full_text)
+                zf.writestr(f"{safe_doc}/{safe_label}.json", json.dumps(document.annotations or [], ensure_ascii=False, indent=2))
+                zf.writestr(f"{safe_doc}/{safe_label}_source.txt", document.full_text)
     buf.seek(0)
     safe_name = project.name.replace("/", "_").replace("\\", "_")
     return Response(

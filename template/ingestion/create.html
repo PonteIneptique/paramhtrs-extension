@@ -18,7 +18,7 @@
 
 {% block content %}
 <div id="ingestion-app" class="container mt-4" style="max-width: 760px;">
-  <h2>Add Lines{% if document %} — <span class="text-muted fw-normal fs-5">{{ document.name }}</span>{% endif %}</h2>
+  <h2>Add Lines{% if folder %} — <span class="text-muted fw-normal fs-5">{{ folder.name }}</span>{% endif %}</h2>
 
   <!-- Step indicator -->
   <div class="d-flex gap-2 mb-4">
@@ -32,8 +32,8 @@
   <!-- ── STEP 1: input ──────────────────────────────────────────────── -->
   <div class="step" :class="{active: step === 1}">
 
-    {% if not document %}
-    <!-- Project + Document selection (only when no document_id in URL) -->
+    {% if not folder %}
+    <!-- Project + Folder selection (only when no folder_id in URL) -->
     <div class="mb-3">
       <label class="form-label fw-semibold">Project <span class="text-danger">*</span></label>
       <input type="text" class="form-control mb-1" v-model="projectSearch" placeholder="Search projects…" @input="searchProjects">
@@ -43,15 +43,15 @@
     </div>
 
     <div class="mb-3" v-if="selectedProjectId">
-      <label class="form-label fw-semibold">Document <span class="text-danger">*</span></label>
-      <select class="form-select mb-1" v-model="selectedDocumentId">
+      <label class="form-label fw-semibold">Folder <span class="text-danger">*</span></label>
+      <select class="form-select mb-1" v-model="selectedFolderId">
         <option value="">— select or create below —</option>
-        <option v-for="d in documentOptions" :key="d.id" :value="d.id">[[ d.name ]]</option>
+        <option v-for="d in folderOptions" :key="d.id" :value="d.id">[[ d.name ]]</option>
       </select>
-      <div v-if="selectedDocumentId === ''" class="border rounded p-3 bg-light">
-        <p class="mb-2 small text-muted">Create a new document:</p>
-        <input type="text" class="form-control form-control-sm mb-2" v-model="newDoc.name" placeholder="Name *">
-        <select class="form-select form-select-sm mb-2" v-model="newDoc.language">
+      <div v-if="selectedFolderId === ''" class="border rounded p-3 bg-light">
+        <p class="mb-2 small text-muted">Create a new folder:</p>
+        <input type="text" class="form-control form-control-sm mb-2" v-model="newFolder.name" placeholder="Name *">
+        <select class="form-select form-select-sm mb-2" v-model="newFolder.language">
           <option value="fre">French</option>
           <option value="lat">Latin</option>
           <option value="spa">Spanish</option>
@@ -59,14 +59,14 @@
           <option value="eng">English</option>
           <option value="ger">German</option>
         </select>
-        <input type="text" class="form-control form-control-sm" v-model="newDoc.qid" placeholder="Biblissima QID (optional)">
+        <input type="text" class="form-control form-control-sm" v-model="newFolder.qid" placeholder="Biblissima QID (optional)">
       </div>
     </div>
     {% endif %}
 
-    <!-- Page label -->
+    <!-- Document label -->
     <div class="mb-3">
-      <label class="form-label fw-semibold">Page label <span class="text-danger">*</span></label>
+      <label class="form-label fw-semibold">Document label <span class="text-danger">*</span></label>
       <input type="text" class="form-control" v-model="pageLabel" placeholder="e.g. fol. 12r, p. 5, col. A">
     </div>
 
@@ -138,24 +138,48 @@
       <!-- ALTO upload mode -->
       <div v-if="inputMode === 'alto'">
         <div class="drop-zone"
-             :class="{'drag-over': dragging, 'has-file': altoFileName}"
+             :class="{'drag-over': dragging, 'has-file': altoFiles.length}"
              @dragover.prevent="dragging=true"
              @dragleave="dragging=false"
              @drop.prevent="onAltoDrop"
              @click="$refs.altoInput.click()">
           <i class="fa-solid fa-file-xml fa-2x mb-2 d-block"></i>
-          <span v-if="altoFileName"><strong>[[ altoFileName ]]</strong><br><small>[[ altoLines.length ]] line(s) extracted</small></span>
-          <span v-else>Click or drag &amp; drop an ALTO XML file here</span>
+          <span v-if="altoFiles.length"><strong>[[ altoFiles.length ]] file(s)</strong><br><small>[[ totalAltoLines ]] line(s) extracted</small></span>
+          <span v-else>Click or drag &amp; drop one or more ALTO XML files here</span>
         </div>
-        <input type="file" ref="altoInput" accept=".xml,.alto" style="display:none" @change="onAltoFileSelect">
+        <input type="file" ref="altoInput" accept=".xml,.alto" multiple style="display:none" @change="onAltoFileSelect">
+        <div v-if="altoFiles.length > 1" class="alert alert-info py-2 small mt-2 mb-0">
+          <i class="fa-solid fa-circle-info"></i>
+          [[ altoFiles.length ]] files uploaded — each becomes its own <strong>part</strong> within one document,
+          so you can annotate them as one continuous text while still seeing where each file's content starts.
+        </div>
 
-        <div v-if="altoLines.length" class="mt-3">
-          <p class="small text-muted mb-1">Extracted lines (edit if needed):</p>
-          <div v-for="(line, i) in altoLines" :key="i" class="d-flex gap-2 mb-1 align-items-center">
-            <span class="text-muted small" style="min-width:2em;">[[ i+1 ]].</span>
-            <span class="text-muted small font-monospace" style="min-width:6em; font-size:.7rem;" :title="line.alto_id">[[ line.alto_id || '' ]]</span>
-            <input type="text" class="form-control form-control-sm" v-model="altoLines[i].text">
-            <button class="btn btn-sm btn-outline-danger" @click="altoLines.splice(i,1)">✕</button>
+        <div v-if="altoFiles.length" class="mt-3">
+          <p class="small text-muted mb-1">
+            Extracted lines (edit if needed)<span v-if="altoFiles.length > 1">; drag <i class="fa-solid fa-grip-vertical"></i> to reorder parts</span>:
+          </p>
+          <div ref="altoFilesList">
+            <div v-for="(file, fi) in altoFiles" :key="file.filename" class="mb-3 border rounded p-2">
+              <div class="d-flex justify-content-between align-items-center" :class="{'mb-2': !file.collapsed && file.lines.length}">
+                <div class="d-flex align-items-center gap-2">
+                  <i v-if="altoFiles.length > 1" class="fa-solid fa-grip-vertical text-muted alto-drag-handle" style="cursor:grab;"></i>
+                  <button type="button" class="btn btn-sm btn-link p-0 text-decoration-none" @click="file.collapsed = !file.collapsed">
+                    <i class="fa-solid" :class="file.collapsed ? 'fa-chevron-right' : 'fa-chevron-down'"></i>
+                  </button>
+                  <strong class="small"><i class="fa-solid fa-file-xml me-1"></i>[[ file.filename ]]
+                    <span class="text-muted fw-normal">([[ file.lines.length ]] line(s))</span></strong>
+                </div>
+                <button class="btn btn-sm btn-outline-danger py-0 px-1" @click="altoFiles.splice(fi,1)" title="Remove this file">✕</button>
+              </div>
+              <template v-if="!file.collapsed">
+                <div v-for="(line, i) in file.lines" :key="i" class="d-flex gap-2 mb-1 align-items-center">
+                  <span class="text-muted small" style="min-width:2em;">[[ i+1 ]].</span>
+                  <span class="text-muted small font-monospace" style="min-width:6em; font-size:.7rem;" :title="line.alto_id">[[ line.alto_id || '' ]]</span>
+                  <input type="text" class="form-control form-control-sm" v-model="file.lines[i].text">
+                  <button class="btn btn-sm btn-outline-danger" @click="file.lines.splice(i,1)">✕</button>
+                </div>
+              </template>
+            </div>
           </div>
         </div>
       </div>
@@ -164,8 +188,11 @@
       <div v-if="inputMode === 'json'">
         <div class="alert alert-info py-2 small mb-2">
           <i class="fa-solid fa-circle-info"></i>
-          Upload a JSON file of the form <code>{"lines": [{"abbr": "…", "expan": "…"}]}</code>.
-          Each <em>abbr</em>/<em>expan</em> pair is aligned directly — no normalization step.
+          Upload a JSON file of the form <code>{"lines": [{"abbr": "…", "expan": "…"}]}</code>,
+          or a multi-source file of the form
+          <code>{"readable": "…", "subparts": [{"id": "…", "lines": [{"abbr": "…", "expan": "…"}]}]}</code>
+          — each entry in <em>subparts</em> becomes a subpart, joined into one continuous,
+          annotatable part. Each <em>abbr</em>/<em>expan</em> pair is aligned directly — no normalization step.
         </div>
         <div class="drop-zone mb-2"
              :class="{'drag-over': jsonDragging, 'has-file': jsonFileName}"
@@ -174,11 +201,18 @@
              @drop.prevent="onJsonDrop"
              @click="$refs.jsonInput.click()">
           <i class="fa-solid fa-file-import fa-2x mb-2 d-block"></i>
-          <span v-if="jsonFileName"><strong>[[ jsonFileName ]]</strong><br><small>[[ jsonLines.length ]] line(s) loaded</small></span>
+          <span v-if="jsonFileName && jsonSubparts"><strong>[[ jsonFileName ]]</strong><br><small>[[ jsonSubparts.length ]] subpart(s), [[ jsonSubparts.reduce((n,p) => n + (p.lines||[]).length, 0) ]] line(s) loaded</small></span>
+          <span v-else-if="jsonFileName"><strong>[[ jsonFileName ]]</strong><br><small>[[ jsonLines.length ]] line(s) loaded</small></span>
           <span v-else>Click or drag &amp; drop a JSON file here</span>
         </div>
         <input type="file" ref="jsonInput" accept=".json" style="display:none" @change="onJsonFileSelect">
-        <div v-if="jsonLines.length" class="mt-3">
+        <div v-if="jsonSubparts" class="mt-3">
+          <p class="small text-muted mb-1">Preview:</p>
+          <div v-for="(part, pi) in jsonSubparts" :key="pi" class="mb-2">
+            <div class="small fw-semibold text-muted">[[ part.id || ('part ' + (pi+1)) ]] — [[ (part.lines||[]).length ]] line(s)</div>
+          </div>
+        </div>
+        <div v-else-if="jsonLines.length" class="mt-3">
           <p class="small text-muted mb-1">Preview (edit if needed):</p>
           <div v-for="(line, i) in jsonLines" :key="i" class="d-flex gap-2 mb-1 align-items-center">
             <span class="text-muted small" style="min-width:2em;">[[ i+1 ]].</span>
@@ -300,6 +334,7 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 <script>
 const { createApp } = Vue;
 
@@ -308,26 +343,26 @@ createApp({
   data() {
     return {
       step: 1,
-      // project/doc selection (only used when no document_id provided)
+      // project/folder selection (only used when no folder_id provided)
       projectSearch: '',
       projectOptions: [],
       selectedProjectId: {{ project_id or 'null' }},
-      documentOptions: [],
-      selectedDocumentId: {{ document_id or "''" }},
-      newDoc: { name: '', language: 'fre', qid: '' },
+      folderOptions: [],
+      selectedFolderId: {{ folder_id or "''" }},
+      newFolder: { name: '', language: 'fre', qid: '' },
       pageLabel: '',
       // input mode
       inputMode: 'text',
       rawText: '',
-      // ALTO
-      altoFileName: '',
-      altoLines: [],
+      // ALTO — one entry per uploaded file: {filename, lines: [{text, alto_id}]}
+      altoFiles: [],
       dragging: false,
       // IIIF
       iiifUrl: '',
       // Pre-aligned JSON
       jsonFileName: '',
       jsonLines: [],
+      jsonSubparts: null,
       jsonDragging: false,
       // CoMMA
       commaUrl:      '',
@@ -353,9 +388,14 @@ createApp({
     };
   },
   computed: {
+    totalAltoLines() {
+      return this.altoFiles.reduce((n, f) => n + f.lines.length, 0);
+    },
     effectiveLines() {
       if (this.inputMode === 'alto') {
-        return this.altoLines.filter(l => l.text && l.text.trim()).map(l => ({ text: l.text.trim(), alto_id: l.alto_id || null }));
+        return this.altoFiles.flatMap(f => f.lines)
+          .filter(l => l.text && l.text.trim())
+          .map(l => ({ text: l.text.trim(), alto_id: l.alto_id || null }));
       }
       if (this.inputMode === 'json') return [];
       if (this.inputMode === 'comma') {
@@ -367,12 +407,13 @@ createApp({
     },
     canProceed() {
       const hasDoc = {{ 'true' if document else 'false' }}
-        || this.selectedDocumentId
-        || this.newDoc.name.trim();
-      {% if not document %}
+        || this.selectedFolderId
+        || this.newFolder.name.trim();
+      {% if not folder %}
       if (!this.selectedProjectId) return false;
       {% endif %}
       if (this.inputMode === 'json') {
+        if (this.jsonSubparts) return !!(hasDoc && this.pageLabel.trim() && this.jsonSubparts.length > 0);
         return !!(hasDoc && this.pageLabel.trim() && this.jsonLines.length > 0);
       }
       if (this.inputMode === 'comma') {
@@ -384,26 +425,26 @@ createApp({
   async created() {
     const params = new URLSearchParams(window.location.search);
     if (params.get('input_tab') === 'comma') this.inputMode = 'comma';
-    {% if not document %}
+    {% if not folder %}
     await this.searchProjects();
-    if (this.selectedProjectId) await this.loadDocuments();
+    if (this.selectedProjectId) await this.loadFolders();
     {% endif %}
   },
   methods: {
-    {% if not document %}
+    {% if not folder %}
     async searchProjects() {
       const q = this.projectSearch ? `&search=${encodeURIComponent(this.projectSearch)}` : '';
       const r = await fetch(`${ROOT}/projects?format=json${q}`);
       this.projectOptions = await r.json();
     },
     async onProjectChange() {
-      this.selectedDocumentId = '';
-      this.documentOptions = [];
-      if (this.selectedProjectId) await this.loadDocuments();
+      this.selectedFolderId = '';
+      this.folderOptions = [];
+      if (this.selectedProjectId) await this.loadFolders();
     },
-    async loadDocuments() {
-      const r = await fetch(`${ROOT}/api/projects/${this.selectedProjectId}/documents`);
-      this.documentOptions = await r.json();
+    async loadFolders() {
+      const r = await fetch(`${ROOT}/api/projects/${this.selectedProjectId}/folders`);
+      this.folderOptions = await r.json();
     },
     {% endif %}
 
@@ -415,21 +456,20 @@ createApp({
 
     // ── ALTO parsing ──────────────────────────────────────────────────
     onAltoFileSelect(e) {
-      const file = e.target.files[0];
-      if (file) this.readAltoFile(file);
+      Array.from(e.target.files || []).forEach(f => this.readAltoFile(f));
+      e.target.value = '';
     },
     onAltoDrop(e) {
       this.dragging = false;
-      const file = e.dataTransfer.files[0];
-      if (file) this.readAltoFile(file);
+      Array.from(e.dataTransfer.files || []).forEach(f => this.readAltoFile(f));
     },
     readAltoFile(file) {
-      this.altoFileName = file.name;
       const reader = new FileReader();
       reader.onload = (e) => {
         const { lines, label } = this.parseAlto(e.target.result);
-        this.altoLines = lines;
+        this.altoFiles.push({ filename: file.name, lines, collapsed: false });
         if (label && !this.pageLabel) this.pageLabel = label;
+        this.$nextTick(() => this._initAltoSort());
       };
       reader.readAsText(file);
     },
@@ -454,6 +494,18 @@ createApp({
         if (content) lines.push({ text: content, alto_id });
       }
       return { lines, label };
+    },
+    _initAltoSort() {
+      const el = this.$refs.altoFilesList;
+      if (!el || el._sortable) return;
+      el._sortable = Sortable.create(el, {
+        handle: '.alto-drag-handle',
+        animation: 150,
+        onEnd: (evt) => {
+          const moved = this.altoFiles.splice(evt.oldIndex, 1)[0];
+          this.altoFiles.splice(evt.newIndex, 0, moved);
+        },
+      });
     },
 
     // ── IIIF manifest ─────────────────────────────────────────────────
@@ -513,9 +565,19 @@ createApp({
       reader.onload = (ev) => {
         try {
           const data = JSON.parse(ev.target.result);
-          this.jsonLines = (data.lines || [])
-            .filter(l => l.abbr !== undefined || l.expan !== undefined)
-            .map(l => ({ abbr: String(l.abbr ?? ''), expan: String(l.expan ?? '') }));
+          if (Array.isArray(data.subparts)) {
+            // Multi-source shape: {source, readable, subparts: [{id, lines: [{abbr, expan}]}], excluded}
+            // Each "part" entry becomes a Subpart of one Part, so cleanup/annotation
+            // can span across them as a single continuous text.
+            this.jsonSubparts = data.subparts;
+            this.jsonLines = [];
+            if (!this.pageLabel.trim() && data.readable) this.pageLabel = data.readable;
+          } else {
+            this.jsonSubparts = null;
+            this.jsonLines = (data.lines || [])
+              .filter(l => l.abbr !== undefined || l.expan !== undefined)
+              .map(l => ({ abbr: String(l.abbr ?? ''), expan: String(l.expan ?? '') }));
+          }
           this.error = null;
         } catch (err) {
           this.error = 'Could not parse JSON: ' + err.message;
@@ -527,23 +589,27 @@ createApp({
       this.error = null;
       this.saving = true;
       try {
-        {% if not document %}
-        if (!this.selectedDocumentId) {
-          const r = await fetch(`${ROOT}/documents/new`, {
+        {% if not folder %}
+        if (!this.selectedFolderId) {
+          const r = await fetch(`${ROOT}/folders/new`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
               project_id: this.selectedProjectId,
-              name: this.newDoc.name,
-              language: this.newDoc.language,
-              qid: this.newDoc.qid || null,
+              name: this.newFolder.name,
+              language: this.newFolder.language,
+              qid: this.newFolder.qid || null,
             })
           });
           const data = await r.json();
-          if (!r.ok || data.status !== 'ok') throw new Error(data.error || 'Could not create document');
-          this.selectedDocumentId = data.id;
+          if (!r.ok || data.status !== 'ok') throw new Error(data.error || 'Could not create folder');
+          this.selectedFolderId = data.id;
         }
         {% endif %}
+        if (this.jsonSubparts) {
+          await this._saveMultiPart(this.jsonSubparts);
+          return;
+        }
         const lines = this.jsonLines.map(l => ({ orig: l.abbr, alto_id: null }));
         const chunks = this.jsonLines.map(l => ({ orig: l.abbr, reg: l.expan }));
         await this._savePage(lines, '', chunks, '\n');
@@ -559,23 +625,27 @@ createApp({
       this.error = null;
       this.saving = true;
       try {
-        {% if not document %}
-        if (!this.selectedDocumentId) {
-          const r = await fetch(`${ROOT}/documents/new`, {
+        {% if not folder %}
+        if (!this.selectedFolderId) {
+          const r = await fetch(`${ROOT}/folders/new`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
               project_id: this.selectedProjectId,
-              name: this.newDoc.name,
-              language: this.newDoc.language,
-              qid: this.newDoc.qid || null,
+              name: this.newFolder.name,
+              language: this.newFolder.language,
+              qid: this.newFolder.qid || null,
             })
           });
           const data = await r.json();
-          if (!r.ok || data.status !== 'ok') throw new Error(data.error || 'Could not create document');
-          this.selectedDocumentId = data.id;
+          if (!r.ok || data.status !== 'ok') throw new Error(data.error || 'Could not create folder');
+          this.selectedFolderId = data.id;
         }
         {% endif %}
+        if (this.inputMode === 'alto' && this.altoFiles.length > 1) {
+          await this._saveMultiPart(this._altoFilesToSubparts());
+          return;
+        }
         const lines = this.effectiveLines.map(l => ({ orig: l.text, alto_id: l.alto_id || null }));
         await this._savePage(lines, '', null, '\n');
       } catch(e) {
@@ -583,6 +653,16 @@ createApp({
       } finally {
         this.saving = false;
       }
+    },
+
+    // Builds the {id, lines: [{orig, alto_id}]}[] shape from altoFiles, in
+    // their current (possibly reordered) order, dropping blank lines.
+    _altoFilesToSubparts() {
+      return this.altoFiles.map(f => ({
+        id: f.filename,
+        lines: f.lines.filter(l => l.text && l.text.trim())
+          .map(l => ({ orig: l.text.trim(), alto_id: l.alto_id || null })),
+      }));
     },
 
     // ── Normalize + auto-save ─────────────────────────────────────────
@@ -593,33 +673,37 @@ createApp({
       this.step = 2;
 
       try {
-        {% if not document %}
-        // Create document if needed (only in project/doc selection mode)
-        if (!this.selectedDocumentId) {
-          const r = await fetch(`${ROOT}/documents/new`, {
+        {% if not folder %}
+        // Create folder if needed (only in project/folder selection mode)
+        if (!this.selectedFolderId) {
+          const r = await fetch(`${ROOT}/folders/new`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
               project_id: this.selectedProjectId,
-              name: this.newDoc.name,
-              language: this.newDoc.language,
-              qid: this.newDoc.qid || null,
+              name: this.newFolder.name,
+              language: this.newFolder.language,
+              qid: this.newFolder.qid || null,
             })
           });
           const data = await r.json();
-          if (!r.ok || data.status !== 'ok') throw new Error(data.error || 'Could not create document');
-          this.selectedDocumentId = data.id;
+          if (!r.ok || data.status !== 'ok') throw new Error(data.error || 'Could not create folder');
+          this.selectedFolderId = data.id;
         }
         {% endif %}
 
         // Stream normalize results
+        const isMultiAlto = this.inputMode === 'alto' && this.altoFiles.length > 1;
         const effLines = this.effectiveLines;
         const response = await fetch(`${ROOT}/api/normalize`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
             inputtext: effLines.map(l => l.text).join('\n'),
-            split_mode: this.splitMode,
+            // Multi-file ALTO needs a 1:1 chunk-per-line mapping to slice the
+            // result back into per-file parts, so force "lines" split mode
+            // regardless of what was selected.
+            split_mode: isMultiAlto ? 'lines' : this.splitMode,
             min_words: this.minWords,
             delimiters: this.delimiters,
           })
@@ -654,6 +738,25 @@ createApp({
               finalSeparator = evt.separator ?? '\n';
             }
           }
+        }
+
+        if (isMultiAlto) {
+          let offset = 0;
+          const subparts = this.altoFiles.map(f => {
+            const validLines = f.lines.filter(l => l.text && l.text.trim());
+            const sliceChunks = finalChunks ? finalChunks.slice(offset, offset + validLines.length) : [];
+            offset += validLines.length;
+            return {
+              id: f.filename,
+              lines: validLines.map((l, i) => ({
+                abbr: l.text.trim(),
+                expan: sliceChunks[i]?.reg ?? '',
+                alto_id: l.alto_id || null,
+              })),
+            };
+          });
+          await this._saveMultiPart(subparts);
+          return;
         }
 
         const linesToSave = effLines.map(l => ({ orig: l.text, alto_id: l.alto_id || null }));
@@ -701,16 +804,43 @@ createApp({
     async _savePage(lines, full_reg, chunks = null, separator = '\n') {
       this.saving = true;
       try {
-        const r = await fetch(`${ROOT}/pages/new`, {
+        const r = await fetch(`${ROOT}/documents/new`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
-            document_id: this.selectedDocumentId,
+            folder_id: this.selectedFolderId,
             label: this.pageLabel,
             lines,
             full_reg,
             chunks,
             separator,
+            original_filename: (this.inputMode === 'alto' && this.altoFiles.length === 1)
+              ? this.altoFiles[0].filename : null,
+          })
+        });
+        const data = await r.json();
+        if (data.status === 'ok') {
+          window.location.href = data.redirect;
+        } else {
+          throw new Error('Save failed');
+        }
+      } finally {
+        this.saving = false;
+      }
+    },
+
+    // Saves a document made of several parts, e.g. {id, lines: [{abbr/orig, expan}]}[].
+    // Used for the "Pre-aligned JSON" multi-subpart shape and for multi-file ALTO uploads.
+    async _saveMultiPart(subparts) {
+      this.saving = true;
+      try {
+        const r = await fetch(`${ROOT}/documents/new`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            folder_id: this.selectedFolderId,
+            label: this.pageLabel,
+            subparts,
           })
         });
         const data = await r.json();

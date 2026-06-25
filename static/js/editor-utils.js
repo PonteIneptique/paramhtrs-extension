@@ -72,10 +72,65 @@ export function applyAnnotations(text, annotations) {
   return result;
 }
 
+// Renders a block divider at each part boundary (after the first), so a
+// Document made of several imported parts visibly shows where one ends and
+// the next begins instead of reading as one undifferentiated text.
+//
+// The label is rendered via a CSS ::before on an otherwise-empty element
+// (see part-divider/::before in editor.html) — generated content is not
+// part of the DOM text, so it's invisible to Range.toString()/textContent
+// and doesn't shift the character offsets the editor uses for click/selection
+// positions, which assume the rendered text exactly matches fullText.
+function _partDividerHtml(part) {
+  const label = part.original_filename || `part ${part.part_id}`;
+  return `<div class="part-divider" data-part-id="${escapeHtml(String(part.part_id ?? ''))}" `
+       + `data-part-label="${escapeHtml(label)}"></div>`;
+}
+
+// Escapes text[start:end), splicing in part-divider markup at any boundary
+// offsets that fall within the range.
+function _escapeWithDividers(text, start, end, boundaries) {
+  let html = '';
+  let pos = start;
+  for (const b of boundaries) {
+    if (b.start <= pos || b.start >= end) continue;
+    html += escapeHtml(text.slice(pos, b.start)) + _partDividerHtml(b.part);
+    pos = b.start;
+  }
+  html += escapeHtml(text.slice(pos, end));
+  return html;
+}
+
+// Like _escapeWithDividers, but for a single annotation's <mark>: if a
+// part boundary falls inside [start, end), the annotation is split into
+// multiple <mark> fragments (same data-annotation id and classes) with the
+// divider between them, so the boundary stays visible even when an
+// annotation's span crosses it.
+function _markWithDividers(text, start, end, boundaries, cls, annotId, renderText) {
+  let html = '';
+  let pos = start;
+  for (const b of boundaries) {
+    if (b.start <= pos || b.start >= end) continue;
+    if (b.start > pos) {
+      html += `<mark class="${cls}" data-annotation="${escapeHtml(annotId)}">${renderText(text.slice(pos, b.start))}</mark>`;
+    }
+    html += _partDividerHtml(b.part);
+    pos = b.start;
+  }
+  if (pos < end) {
+    html += `<mark class="${cls}" data-annotation="${escapeHtml(annotId)}">${renderText(text.slice(pos, end))}</mark>`;
+  }
+  return html;
+}
+
 // ── Source panel HTML ─────────────────────────────────────────────────────────
-export function buildSourceHtml(fullText, annotsSorted, selectedAnnotationId) {
+export function buildSourceHtml(fullText, annotsSorted, selectedAnnotationId, partOffsets = []) {
   const text  = fullText;
   const selId = selectedAnnotationId;
+  const boundaries = partOffsets
+    .filter(s => s.start > 0)
+    .map(s => ({ start: s.start, part: s }))
+    .sort((a, b) => a.start - b.start);
   // Insertions (zero-width) at the same start as a regular annotation must be
   // rendered first so the ∅ marker visually precedes the annotated span.
   const annots = [...annotsSorted].sort((a, b) => {
@@ -90,7 +145,7 @@ export function buildSourceHtml(fullText, annotsSorted, selectedAnnotationId) {
     const s = getStart(a), e = getEnd(a);
     const renderFrom = Math.max(s, cursor);
 
-    if (s > cursor) html += escapeHtml(text.slice(cursor, s));
+    if (s > cursor) html += _escapeWithDividers(text, cursor, s, boundaries);
 
     const cls = ['r6o-annotation',
       selId === a.id     ? 'selected'           : '',
@@ -104,12 +159,12 @@ export function buildSourceHtml(fullText, annotsSorted, selectedAnnotationId) {
     if (s === e) {
       html += `<mark class="${cls}" data-annotation="${escapeHtml(a.id)}"></mark>`;
     } else if (renderFrom < e) {
-      html += `<mark class="${cls}" data-annotation="${escapeHtml(a.id)}">${renderVisibleSource(text.slice(renderFrom, e))}</mark>`;
+      html += _markWithDividers(text, renderFrom, e, boundaries, cls, a.id, renderVisibleSource);
     }
     cursor = Math.max(cursor, e);
   }
 
-  if (cursor < text.length) html += escapeHtml(text.slice(cursor));
+  if (cursor < text.length) html += _escapeWithDividers(text, cursor, text.length, boundaries);
   return html;
 }
 

@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4">
+  <nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="{{ url_for('bp_project.project_lists') }}">Projects</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('bp_project.project_browse', project_id=document.project_id) }}">{{ document.project.name }}</a></li>
+      <li class="breadcrumb-item active">{{ document.name }}</li>
+    </ol>
+  </nav>
+
+  <div class="d-flex justify-content-between align-items-start mb-2">
+    <h1 class="mb-0">{{ document.name }}</h1>
+    <div class="d-flex gap-2">
+      <a href="{{ url_for('bp_folder.folder_stats', folder_id=document.id) }}" class="btn btn-sm btn-secondary">
+        <i class="fa-solid fa-chart-simple"></i> Stats
+      </a>
+      <a href="{{ url_for('bp_folder.folder_export_tei', folder_id=document.id) }}" class="btn btn-sm btn-info">
+        <i class="fa-solid fa-file-code"></i> Export TEI
+      </a>
+      <a href="{{ url_for('bp_folder.folder_download_zip', folder_id=document.id) }}" class="btn btn-sm btn-success">
+        <i class="fa-solid fa-file-zipper"></i> Download ZIP
+      </a>
+      {% if can_edit %}
+      <a href="{{ url_for('bp_folder.folder_users', folder_id=document.id) }}" class="btn btn-sm btn-outline-warning">
+        <i class="fa-solid fa-users"></i> Access
+      </a>
+      {% endif %}
+    </div>
+  </div>
+  <p class="text-muted">{{ document.description }}</p>
+  <div class="mb-1">
+    <span class="badge bg-secondary">{{ document.language }}</span>
+    {% if document.qid %}<span class="badge bg-light text-dark ms-1">{{ document.qid }}</span>{% endif %}
+  </div>
+
+  {% if can_edit %}
+  <button class="btn btn-outline-secondary btn-sm mt-2 mb-3" type="button" id="folder-edit-btn">
+    <i class="fa-solid fa-pen"></i> Edit Metadata
+  </button>
+  {% endif %}
+
+  <hr>
+
+  <!-- Documents list -->
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="mb-0">Documents</h2>
+    <div class="d-flex gap-2">
+      <a href="{{ url_for('bp_norm.ingestion_new', folder_id=document.id, input_tab='comma') }}" class="btn btn-sm btn-outline-info">
+        <i class="fa-solid fa-cloud-arrow-down"></i> From CoMMA
+      </a>
+      <a href="{{ url_for('bp_norm.ingestion_new', folder_id=document.id) }}" class="btn btn-sm btn-primary">
+        <i class="fa-solid fa-plus"></i> Add Document
+      </a>
+    </div>
+  </div>
+
+  {% if pages %}
+  <div class="list-group" id="pages-list">
+    {% for page in pages %}
+    {% set total = page.line_count %}
+    <div class="list-group-item d-flex justify-content-between align-items-center" data-page-id="{{ page.id }}">
+      {% if can_edit %}
+      <span class="page-drag-handle text-muted me-2" style="cursor:grab;" title="Drag to reorder">
+        <i class="fa-solid fa-grip-vertical"></i>
+      </span>
+      {% endif %}
+      <a href="{{ url_for('bp_document.document_editor', document_id=page.id) }}" class="flex-grow-1 text-decoration-none text-body">
+        <strong>{{ page.label }}</strong>
+        <small class="text-muted ms-2">{{ total }} line(s)</small>
+        {% if page.qid %}<span class="badge bg-light text-dark ms-1">{{ page.qid }}</span>{% endif %}
+        {% if page.parts|length > 1 %}
+        <span class="badge bg-info text-dark ms-1" title="{{ page.parts|map(attribute='original_filename')|select|join(', ') }}">
+          <i class="fa-solid fa-layer-group"></i> {{ page.parts|length }} parts
+        </span>
+        {% elif page.original_filename %}
+        <span class="badge bg-light text-dark ms-1">{{ page.original_filename }}</span>
+        {% endif %}
+      </a>
+      <div class="d-flex align-items-center gap-2">
+        {% set subs, validated = page_validation[page.id] %}
+        {% if subs %}
+        <span class="badge {% if validated == subs %}bg-success{% elif validated %}bg-warning text-dark{% else %}bg-danger{% endif %}"
+              title="{{ validated }}/{{ subs }} resolutions validated">
+          {{ "%.0f"|format(validated / subs * 100) }}%&nbsp;validated
+        </span>
+        {% else %}
+        <span class="badge bg-light text-dark" title="No abbreviation resolutions on this document">— validated</span>
+        {% endif %}
+        <span class="badge
+          {% if page.status == 'done' %}bg-success
+          {% elif page.status == 'for_review' %}bg-info text-dark
+          {% elif page.status == 'active' %}bg-warning text-dark
+          {% else %}bg-secondary{% endif %}">{{ page.status }}</span>
+        {% if can_edit %}
+        <button type="button" class="btn btn-sm btn-outline-secondary js-page-edit-btn"
+                data-page-id="{{ page.id }}"
+                data-label="{{ page.label }}"
+                data-status="{{ page.status }}"
+                data-qid="{{ page.qid or '' }}"
+                data-filename="{{ page.original_filename or '' }}"
+                title="Edit metadata">
+          <i class="fa-solid fa-pen"></i>
+        </button>
+        {% endif %}
+        <a href="{{ url_for('bp_document.document_editor', document_id=page.id) }}" class="text-muted">
+          <i class="fa-solid fa-chevron-right"></i>
+        </a>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-muted">No documents yet.
+    <a href="{{ url_for('bp_norm.ingestion_new', folder_id=document.id) }}">Add the first document.</a>
+  </p>
+  {% endif %}
+</div>
+
+{% if can_edit %}
+{% include "_metadata_modal.html" %}
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+<script>
+const FOLDER_ID = {{ document.id }};
+const PROJECT_ID = {{ document.project_id }};
+const FOLDER_UPDATE_URL         = {{ url_for('bp_folder.folder_update', folder_id=document.id)|tojson }};
+const FOLDER_WORKS_ADD_URL      = {{ url_for('bp_folder.api_folder_add_work', folder_id=document.id)|tojson }};
+const FOLDER_WORKS_REMOVE_TPL   = {{ url_for('bp_folder.api_folder_remove_work', folder_id=document.id, work_id=0)|tojson }}.replace('/0', '/__WORK_ID__');
+const FOLDER_DELETE_URL         = {{ url_for('bp_folder.folder_delete', folder_id=document.id)|tojson }};
+const DOCUMENT_UPDATE_URL_TEMPLATE = {{ url_for('bp_document.document_update', document_id=0)|tojson }};
+const DOCUMENT_MOVE_URL_TEMPLATE   = {{ url_for('bp_document.document_move',   document_id=0)|tojson }};
+const PROJECT_FOLDERS_URL       = {{ url_for('bp_folder.api_project_folders', project_id=document.project_id)|tojson }};
+const FOLDER_DOCUMENT_DELETE_URL_TEMPLATE = {{ url_for('bp_document.document_delete', document_id=0)|tojson }};
+const PAGES_REORDER_URL         = {{ url_for('bp_folder.api_folder_reorder_documents', folder_id=document.id)|tojson }};
+
+document.getElementById('folder-edit-btn')?.addEventListener('click', () => {
+    MetadataModal.open({
+        title: 'Folder metadata — {{ document.name }}',
+        titleField: 'name',
+        titleLabel: 'Name',
+        titleValue: {{ document.name|tojson }},
+        updateUrl: FOLDER_UPDATE_URL,
+        fields: {
+            description: {{ document.description|tojson }},
+            language: {{ document.language|tojson }},
+            qid: {{ (document.qid or '')|tojson }},
+            iiif_manifest_url: {{ (document.iiif_manifest_url or '')|tojson }},
+        },
+        languages: {{ languages|tojson }},
+        works: {{ works|tojson }},
+        worksAddUrl: FOLDER_WORKS_ADD_URL,
+        worksRemoveUrlTemplate: FOLDER_WORKS_REMOVE_TPL,
+        delete: { url: FOLDER_DELETE_URL, label: 'Delete this folder' },
+    });
+});
+
+document.querySelectorAll('.js-page-edit-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const pageId = btn.dataset.pageId;
+        MetadataModal.open({
+            title: 'Document metadata — ' + btn.dataset.label,
+            titleField: 'label',
+            titleLabel: 'Label',
+            titleValue: btn.dataset.label,
+            updateUrl: DOCUMENT_UPDATE_URL_TEMPLATE.replace(/\/0\/edit$/, `/${pageId}/edit`),
+            fields: {
+                status: btn.dataset.status,
+                qid: btn.dataset.qid,
+                original_filename: btn.dataset.filename,
+            },
+            fieldLabels: { original_filename: 'Original filename' },
+            // Works editing for a document happens in its own editor page,
+            // where the current list of linked works is actually loaded.
+            move: {
+                label: 'Move to another folder',
+                targetsUrl: PROJECT_FOLDERS_URL,
+                currentId: FOLDER_ID,
+                submitUrl: DOCUMENT_MOVE_URL_TEMPLATE.replace(/\/0\/move$/, `/${pageId}/move`),
+                bodyKey: 'folder_id',
+            },
+            delete: {
+                url: FOLDER_DOCUMENT_DELETE_URL_TEMPLATE.replace(/\/0\/delete$/, `/${pageId}/delete`),
+                label: 'Delete this document',
+            },
+        });
+    });
+});
+
+const pagesListEl = document.getElementById('pages-list');
+if (pagesListEl) {
+    Sortable.create(pagesListEl, {
+        handle: '.page-drag-handle',
+        animation: 150,
+        onEnd: async () => {
+            const order = Array.from(pagesListEl.children).map(el => Number(el.dataset.pageId));
+            await fetch(PAGES_REORDER_URL, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({order}),
+            });
+        },
+    });
+}
+</script>
+{% endif %}
+{% endblock %}

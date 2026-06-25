@@ -1,13 +1,12 @@
-import io
-import json
 import os
-import zipfile
 
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, abort, Response
 from flask_login import login_required, current_user
-from .models import db, Document, DocumentUser, DocumentWork, Work, Project, Page, Line, User
+from sqlalchemy import func
+
+from .models import db, Document, Part, Line, Folder, Project, User, Work
 from .bp_auth import requires_access
-from .annot_utils import build_tei_from_annotations, build_tei_header, page_metadata
+from .annot_utils import align_to_annotations, align_to_annotations_from_chunks, build_tei_from_annotations, document_metadata
 
 bp_document = Blueprint(
     "bp_document", __name__,
@@ -16,117 +15,249 @@ bp_document = Blueprint(
     static_url_path=''
 )
 
-LANGUAGES = [
-    ("fre", "French"),
-    ("lat", "Latin"),
-    ("spa", "Spanish"),
-    ("ita", "Italian"),
-    ("eng", "English"),
-    ("ger", "German"),
-]
-
-
-def require_document_admin(document: Document):
-    """Abort 403 unless the current user is a site admin, the project creator,
-    or the document creator."""
-    project = Project.query.get(document.project_id)
-    if not (
-        current_user.is_admin
-        or project.creator_id == current_user.id
-        or document.creator_id == current_user.id
-    ):
-        abort(403)
-
 
 # -------------------------
-# Create document
+# Create document + part + lines atomically (called from ingestion wizard)
+#
+# Two JSON shapes are accepted:
+#   - single-source: {folder_id, label, lines: [...], chunks|full_reg, separator}
+#     -> one Document with a single Part holding all lines.
+#   - multi-source: {folder_id, label (or "readable"), subparts: [{id, lines: [...]}], ...}
+#     -> one Document with one Part per entry in "subparts" (original_filename=id),
+#        annotated across the flattened, concatenated line sequence so
+#        annotations can span part boundaries.
 # -------------------------
 
 @bp_document.route("/documents/new", methods=["GET", "POST"])
 @login_required
 def document_create():
     if request.method == "POST":
-        # Support both form and JSON (called from ingestion wizard)
-        if request.is_json:
-            data = request.json
+        data = request.json
+        folder_id = data.get("folder_id")
+        folder = Folder.query.get_or_404(folder_id)
+        if not folder.user_has_access(current_user):
+            abort(403)
+
+        label = (data.get("label") or data.get("readable") or "").strip() or "Document 1"
+
+        max_order = db.session.query(func.max(Document.order)).filter_by(folder_id=folder_id).scalar()
+        next_order = (max_order or 0) + 1
+
+        document = Document(folder_id=folder_id, label=label, order=next_order, status="pending")
+        db.session.add(document)
+        db.session.flush()
+
+        subpart_entries = data.get("subparts")
+        if subpart_entries:
+            # Multi-source shape: one Part per entry, lines flattened in order
+            # for alignment so annotations can land at Document-relative offsets.
+            flat_chunks = []
+            for sp_idx, entry in enumerate(subpart_entries):
+                part = Part(document_id=document.id, order=sp_idx)
+                part.original_filename = entry.get("id")
+                db.session.add(part)
+                db.session.flush()
+                for idx, line_entry in enumerate(entry.get("lines", [])):
+                    orig = (line_entry.get("abbr") or line_entry.get("orig") or "").strip()
+                    if not orig:
+                        continue
+                    line = Line(
+                        part_id=part.id,
+                        order=idx,
+                        original_text=orig,
+                        alto_id=line_entry.get("alto_id") or None,
+                    )
+                    db.session.add(line)
+                    flat_chunks.append({"orig": orig, "reg": line_entry.get("expan", "")})
+            db.session.flush()
+            separator = data.get("separator", "\n")
+            if any(c.get("reg") for c in flat_chunks):
+                document.set_annotations(align_to_annotations_from_chunks(flat_chunks, separator=separator))
         else:
-            data = request.form
+            part = Part(document_id=document.id, order=0)
+            if data.get("original_filename"):
+                part.original_filename = data.get("original_filename")
+            db.session.add(part)
+            db.session.flush()
 
-        project_id = data.get("project_id", type=int) if not request.is_json else int(data.get("project_id", 0))
-        project = Project.query.get_or_404(project_id)
-        if not project.user_has_access(current_user):
-            abort(403)
+            orig_lines = []
+            for idx, entry in enumerate(data.get("lines", [])):
+                orig = entry.get("orig", "").strip()
+                if not orig:
+                    continue
+                line = Line(
+                    part_id=part.id,
+                    order=idx,
+                    original_text=orig,
+                    alto_id=entry.get("alto_id") or None,
+                )
+                db.session.add(line)
+                orig_lines.append(orig)
 
-        doc = Document(
-            name=data.get("name", "Untitled"),
-            description=data.get("description", ""),
-            project_id=project_id,
-            creator_id=current_user.id,
-            language=data.get("language", "fre"),
-            qid=data.get("qid") or None,
-        )
-        db.session.add(doc)
+            db.session.flush()
+
+            chunks = data.get("chunks")
+            separator = data.get("separator", "\n")
+            full_reg = (data.get("full_reg") or "").strip()
+            if chunks:
+                document.set_annotations(align_to_annotations_from_chunks(chunks, separator=separator))
+            elif full_reg:
+                full_text = "\n".join(orig_lines)
+                document.set_annotations(align_to_annotations(full_text, full_reg))
+            # else: no annotations — leave empty
         db.session.commit()
+        return jsonify({
+            "status": "ok",
+            "redirect": url_for("bp_document.document_editor", document_id=document.id)
+        })
 
-        if request.is_json:
-            return jsonify({"status": "ok", "id": doc.id, "name": doc.name})
-        flash("Document created", "success")
-        return redirect(url_for("bp_document.document_browse", document_id=doc.id))
-
-    # GET — show form
-    project_id = request.args.get("project_id", type=int)
-    project = None
-    if project_id:
-        project = Project.query.get_or_404(project_id)
-        if not project.user_has_access(current_user):
+    folder_id = request.args.get("folder_id", type=int)
+    folder = None
+    if folder_id:
+        folder = Folder.query.get_or_404(folder_id)
+        if not folder.user_has_access(current_user):
             abort(403)
-    return render_template("documents/new.html", project=project, languages=LANGUAGES)
+    return render_template("documents/new.html", document=folder)
 
 
 # -------------------------
-# Browse document (list pages)
+# Document editor — 3-panel annotation editor
 # -------------------------
 
 @bp_document.route("/documents/<int:document_id>")
 @requires_access(Document, 'document_id')
-def document_browse(document: Document):
-    from sqlalchemy.orm import joinedload
-    from .stats_report import page_validation_counts
-    pages = (Page.query.filter_by(document_id=document.id)
-              .options(joinedload(Page.annotation_rows))
-              .order_by(Page.order).all())
-    page_validation = {page.id: page_validation_counts(page) for page in pages}
-    can_edit = (
-        current_user.is_admin
-        or Project.query.get(document.project_id).creator_id == current_user.id
-        or document.creator_id == current_user.id
-    )
+def document_editor(document: Document):
+    lines_data = [
+        {
+            "id": line.id,
+            "order": line.order,
+            "original_text": line.original_text,
+            "part_id": part.id,
+        }
+        for part in document.parts
+        for line in part.lines
+    ]
     return render_template(
-        "documents/edit.html",
-        document=document,
-        pages=pages,
-        page_validation=page_validation,
-        can_edit=can_edit,
-        languages=LANGUAGES,
+        "documents/editor.html",
+        page=document,
+        document=document.folder,
+        lines=lines_data,
+        full_text=document.full_text,
+        annotations=document.annotations or [],
+        part_offsets=document.part_offsets,
+        prev_page=document.prev,
+        next_page=document.next,
+        works=[{"id": w.id, "title": w.title, "genre": w.genre} for w in document.works],
+        part_works={part.id: [{"id": w.id, "title": w.title, "genre": w.genre} for w in part.works]
+                    for part in document.parts},
     )
 
 
 # -------------------------
-# Edit document metadata
+# Update a part's metadata (id/original_filename, qid)
+# -------------------------
+
+@bp_document.route("/api/parts/<int:part_id>/edit", methods=["POST"])
+@requires_access(Part, 'part_id')
+def api_part_update(part: Part):
+    data = request.json or {}
+    if "original_filename" in data:
+        part.original_filename = (data.get("original_filename") or "").strip() or None
+    if "qid" in data:
+        part.qid = (data.get("qid") or "").strip() or None
+    db.session.commit()
+    return jsonify({"status": "ok", "original_filename": part.original_filename, "qid": part.qid})
+
+
+# -------------------------
+# Part works CRUD
+# -------------------------
+
+@bp_document.route("/api/parts/<int:part_id>/works", methods=["POST"])
+@requires_access(Part, 'part_id')
+def api_part_add_work(part: Part):
+    data = request.json or {}
+    title = (data.get("title") or "").strip()
+    if not title:
+        abort(400)
+    genre = (data.get("genre") or "").strip() or None
+    work = Work(title=title, genre=genre)
+    db.session.add(work)
+    db.session.flush()
+    part.add_work(work)
+    db.session.commit()
+    return jsonify({"status": "ok", "work": {"id": work.id, "title": work.title, "genre": work.genre}})
+
+
+@bp_document.route("/api/parts/<int:part_id>/works/<int:work_id>", methods=["DELETE"])
+@requires_access(Part, 'part_id')
+def api_part_remove_work(part: Part, work_id):
+    part.remove_work(work_id)
+    db.session.commit()
+    return jsonify({"status": "ok"})
+
+
+# -------------------------
+# Update document status
+# -------------------------
+
+@bp_document.route("/api/documents/<int:document_id>/status", methods=["POST"])
+@requires_access(Document, 'document_id')
+def api_document_status(document: Document):
+    document.status = request.json.get("status", document.status)
+    db.session.commit()
+    return jsonify({"status": "ok"})
+
+
+# -------------------------
+# Update document metadata (label/qid/status)
 # -------------------------
 
 @bp_document.route("/documents/<int:document_id>/edit", methods=["POST"])
 @requires_access(Document, 'document_id')
 def document_update(document: Document):
-    require_document_admin(document)
-    document.name = request.form.get("name", document.name)
-    document.description = request.form.get("description", document.description)
-    document.language = request.form.get("language", document.language)
-    document.qid = request.form.get("qid") or None
-    document.iiif_manifest_url = request.form.get("iiif_manifest_url") or None
+    data = request.json if request.is_json else request.form
+    if "label" in data:
+        document.label = (data.get("label") or "").strip() or document.label
+    if "status" in data:
+        document.status = data.get("status", document.status)
+    if "qid" in data:
+        document.qid = data.get("qid") or None
+    if "original_filename" in data and document.parts:
+        # Editing original_filename through this form only makes sense for the
+        # common single-part case; multi-part documents manage filenames per
+        # part at import time.
+        document.parts[0].original_filename = data.get("original_filename") or None
     db.session.commit()
+    if request.is_json:
+        return jsonify({"status": "ok"})
     flash("Document updated", "success")
-    return redirect(url_for("bp_document.document_browse", document_id=document.id))
+    return redirect(request.form.get("next") or url_for("bp_document.document_editor", document_id=document.id))
+
+
+# -------------------------
+# Move document to another folder (extract)
+# -------------------------
+
+@bp_document.route("/documents/<int:document_id>/move", methods=["POST"])
+@requires_access(Document, 'document_id')
+def document_move(document: Document):
+    data = request.json or {}
+    new_folder_id = data.get("folder_id")
+    if not new_folder_id:
+        abort(400)
+    new_folder_id = int(new_folder_id)
+    new_folder = Folder.query.get_or_404(new_folder_id)
+    if not new_folder.user_has_access(current_user):
+        abort(403)
+    if new_folder_id == document.folder_id:
+        return jsonify({"status": "ok"})
+
+    max_order = db.session.query(func.max(Document.order)).filter_by(folder_id=new_folder_id).scalar()
+    document.folder_id = new_folder_id
+    document.order = (max_order or 0) + 1
+    db.session.commit()
+    return jsonify({"status": "ok", "folder_id": new_folder_id})
 
 
 # -------------------------
@@ -136,189 +267,57 @@ def document_update(document: Document):
 @bp_document.route("/documents/<int:document_id>/delete")
 @requires_access(Document, 'document_id')
 def document_delete(document: Document):
-    require_document_admin(document)
     if request.args.get("confirm", type=bool, default=False):
-        project_id = document.project_id
+        folder_id = document.folder_id
         db.session.delete(document)
         db.session.commit()
         flash("Document deleted", "success")
-        return redirect(url_for("bp_project.project_browse", project_id=project_id))
-    return render_template("documents/delete.html", document=document)
+        return redirect(url_for("bp_folder.folder_browse", folder_id=folder_id))
+    return render_template("documents/delete.html", page=document)
 
 
 # -------------------------
-# Manage document users
-# -------------------------
-
-@bp_document.route("/documents/<int:document_id>/users")
-@login_required
-def document_users(document_id):
-    document = Document.query.get_or_404(document_id)
-    require_document_admin(document)
-    users = User.query.order_by(User.username).all()
-    document_user_ids = {u.id for u in document.users}
-    return render_template(
-        "documents/users.html",
-        document=document,
-        users=users,
-        document_user_ids=document_user_ids,
-    )
-
-
-@bp_document.route("/api/documents/<int:document_id>/users")
-@login_required
-def api_document_users(document_id):
-    document = Document.query.get_or_404(document_id)
-    require_document_admin(document)
-    return jsonify({
-        "document_id": document.id,
-        "users": [
-            {"id": u.id, "username": u.username, "has_access": document.user_has_access(u)}
-            for u in User.query.all()
-        ],
-    })
-
-
-@bp_document.route("/api/documents/<int:document_id>/users/<int:user_id>", methods=["POST"])
-@login_required
-def api_doc_add_user(document_id, user_id):
-    document = Document.query.get_or_404(document_id)
-    require_document_admin(document)
-    if document.creator_id == user_id:
-        abort(400)
-    exists = DocumentUser.query.filter_by(document_id=document_id, user_id=user_id).first()
-    if not exists:
-        db.session.add(DocumentUser(document_id=document_id, user_id=user_id))
-        db.session.commit()
-    return jsonify({"status": "ok"})
-
-
-@bp_document.route("/api/documents/<int:document_id>/users/<int:user_id>", methods=["DELETE"])
-@login_required
-def api_doc_remove_user(document_id, user_id):
-    document = Document.query.get_or_404(document_id)
-    require_document_admin(document)
-    DocumentUser.query.filter_by(document_id=document_id, user_id=user_id).delete()
-    db.session.commit()
-    return jsonify({"status": "ok"})
-
-
-# -------------------------
-# JSON list of documents in a project (for ingestion wizard)
-# -------------------------
-
-@bp_document.route("/api/projects/<int:project_id>/documents")
-@login_required
-def api_project_documents(project_id):
-    project = Project.query.get_or_404(project_id)
-    if not project.user_has_access(current_user):
-        abort(403)
-
-    docs = Document.query.filter_by(project_id=project_id).order_by(Document.name).all()
-
-    accessible = [d for d in docs if d.user_has_access(current_user)]
-    return jsonify([{"id": d.id, "name": d.name, "language": d.language} for d in accessible])
-
-
-# -------------------------
-# Reorder pages within a document
-# -------------------------
-
-@bp_document.route("/api/documents/<int:document_id>/pages/reorder", methods=["POST"])
-@requires_access(Document, 'document_id')
-def api_document_reorder_pages(document: Document):
-    order = (request.json or {}).get("order") or []
-    pages_by_id = {p.id: p for p in Page.query.filter_by(document_id=document.id).all()}
-    if set(order) != set(pages_by_id.keys()):
-        abort(400)
-    for idx, page_id in enumerate(order):
-        pages_by_id[page_id].order = idx
-    db.session.commit()
-    return jsonify({"status": "ok"})
-
-
-# -------------------------
-# TEI export of full document
+# TEI export of a single document
 # -------------------------
 
 @bp_document.route("/documents/<int:document_id>/stats")
 @requires_access(Document, 'document_id')
 def document_stats(document: Document):
     from .stats_report import compute_stats, build_chart_svg, load_font_face, today_str
-    stats = compute_stats(document.pages)
+    stats = compute_stats([document])
     html = render_template('stats_report.html',
-        title=document.name,
+        title=document.label,
         stats=stats,
         chart_svg=build_chart_svg(stats),
         font_face=load_font_face(),
         generated=today_str(),
-        scope='document',
+        scope='page',
     )
     return Response(html, mimetype='text/html',
-                    headers={'Content-Disposition': f'attachment; filename="stats-{document.name}.html"'})
+                    headers={'Content-Disposition': f'attachment; filename="stats-{document.label}.html"'})
 
 
 @bp_document.route("/documents/<int:document_id>/export")
 @requires_access(Document, 'document_id')
 def document_export_tei(document: Document):
     users_by_id = {u.id: u.nickname or u.username for u in User.query.all()}
-
-    corpus_meta = {
-        "document": document.name,
-        "language": document.language,
-        "qid": document.qid,
-        "works": [{"title": w.title, "genre": w.genre} for w in document.works],
-    }
-    corpus_header = build_tei_header(corpus_meta, users_by_id=users_by_id)
-
-    page_teis = [
-        build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id, metadata=page_metadata(page), lines=page.line_offsets)
-        for page in document.pages
-    ]
-
-    tei_corpus = (
-        '<teiCorpus xmlns="http://www.tei-c.org/ns/1.0">\n'
-        f'{corpus_header}\n'
-        + "\n".join(page_teis)
-        + '\n</teiCorpus>'
-    )
-    return Response(tei_corpus, mimetype="text/xml",
-                    headers={"Content-Disposition": f'attachment; filename="{document.name}.xml"'})
-
-
-# -------------------------
-# ZIP download of full document (TEI + annotations JSON per page)
-# -------------------------
-
-@bp_document.route("/documents/<int:document_id>/download")
-@requires_access(Document, 'document_id')
-def document_download_zip(document: Document):
-    users_by_id = {u.id: u.nickname or u.username for u in User.query.all()}
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for page in document.pages:
-            safe_label = page.label.replace("/", "_").replace("\\", "_")
-            tei = build_tei_from_annotations(page.full_text, page.annotations or [], users_by_id=users_by_id, metadata=page_metadata(page), lines=page.line_offsets)
-            zf.writestr(f"{safe_label}.xml", tei)
-            zf.writestr(f"{safe_label}.json", json.dumps(page.annotations or [], ensure_ascii=False, indent=2))
-            zf.writestr(f"{safe_label}_source.txt", page.full_text)
-    buf.seek(0)
-    safe_name = document.name.replace("/", "_").replace("\\", "_")
+    tei = build_tei_from_annotations(document.full_text, document.annotations or [], users_by_id=users_by_id,
+                                      metadata=document_metadata(document), lines=document.line_offsets,
+                                      subparts=document.part_offsets)
     return Response(
-        buf.read(),
-        mimetype="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}.zip"'},
+        tei,
+        mimetype="text/xml",
+        headers={"Content-Disposition": f'attachment; filename="{document.label}.xml"'}
     )
 
 
 # -------------------------
-# Works CRUD
+# Document works CRUD
 # -------------------------
 
 @bp_document.route("/api/documents/<int:document_id>/works", methods=["POST"])
 @requires_access(Document, 'document_id')
-def api_doc_add_work(document: Document):
-    require_document_admin(document)
+def api_document_add_work(document: Document):
     data = request.json or {}
     title = (data.get("title") or "").strip()
     if not title:
@@ -327,18 +326,14 @@ def api_doc_add_work(document: Document):
     work = Work(title=title, genre=genre)
     db.session.add(work)
     db.session.flush()
-    db.session.add(DocumentWork(document_id=document.id, work_id=work.id))
+    document.add_work(work)
     db.session.commit()
     return jsonify({"status": "ok", "work": {"id": work.id, "title": work.title, "genre": work.genre}})
 
 
 @bp_document.route("/api/documents/<int:document_id>/works/<int:work_id>", methods=["DELETE"])
 @requires_access(Document, 'document_id')
-def api_doc_remove_work(document: Document, work_id):
-    require_document_admin(document)
-    DocumentWork.query.filter_by(document_id=document.id, work_id=work_id).delete()
-    # Delete orphaned Work
-    if not DocumentWork.query.filter_by(work_id=work_id).count():
-        Work.query.filter_by(id=work_id).delete()
+def api_document_remove_work(document: Document, work_id):
+    document.remove_work(work_id)
     db.session.commit()
     return jsonify({"status": "ok"})

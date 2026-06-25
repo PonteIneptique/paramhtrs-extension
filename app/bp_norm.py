@@ -5,7 +5,7 @@ import re
 from flask import Blueprint, render_template, request, jsonify, abort, Response, stream_with_context
 from flask_login import login_required, current_user
 
-from .models import db, Line, Page, Annotation
+from .models import db, Line, Document, Annotation
 from .bp_auth import requires_access
 
 bp_norm = Blueprint(
@@ -23,26 +23,27 @@ bp_norm = Blueprint(
 @bp_norm.route("/ingestion/new")
 @login_required
 def ingestion_new():
-    from .models import Document
+    from .models import Folder
     project_id = request.args.get("project_id", type=int)
-    document_id = request.args.get("document_id", type=int)
-    document = None
-    if document_id:
-        document = Document.query.get_or_404(document_id)
-        if not document.user_has_access(current_user):
+    folder_id = request.args.get("folder_id", type=int)
+    folder = None
+    if folder_id:
+        folder = Folder.query.get_or_404(folder_id)
+        if not folder.user_has_access(current_user):
             abort(403)
     return render_template("ingestion/create.html",
                            project_id=project_id,
-                           document_id=document_id,
-                           document=document)
+                           folder_id=folder_id,
+                           folder=folder)
 
 
 # -------------------------
 # Normalize text via model (called from wizard)
 #
 # Streams SSE progress events, then a final "done" event with `full_reg`:
-# the complete normalized text of the page (all batches joined).  The caller
-# passes `full_reg` verbatim to POST /pages/new — no per-line realignment needed.
+# the complete normalized text of the document (all batches joined).  The
+# caller passes `full_reg` verbatim to POST /documents/new — no per-line
+# realignment needed.
 # -------------------------
 
 @bp_norm.route("/api/normalize", methods=["POST"])
@@ -166,21 +167,21 @@ def _enforce_max_bytes(chunks: list[str], max_bytes: int) -> list[str]:
 # Single-annotation upsert (hot path: validate, edit, create)
 # -------------------------
 
-@bp_norm.route("/api/pages/<int:page_id>/annotations/<annotation_id>", methods=["PUT"])
-@requires_access(Page, 'page_id')
-def api_page_save_annotation(page: Page, annotation_id: str):
+@bp_norm.route("/api/documents/<int:document_id>/annotations/<annotation_id>", methods=["PUT"])
+@requires_access(Document, 'document_id')
+def api_page_save_annotation(document: Document, annotation_id: str):
     data = request.json
     if not data or data.get("id") != annotation_id:
         abort(400)
-    Annotation.upsert_from_dict(page.id, data)
+    Annotation.upsert_from_dict(document.id, data)
     db.session.commit()
     return jsonify({"status": "ok"})
 
 
-@bp_norm.route("/api/pages/<int:page_id>/annotations/<annotation_id>", methods=["DELETE"])
-@requires_access(Page, 'page_id')
-def api_page_delete_annotation(page: Page, annotation_id: str):
-    Annotation.query.filter_by(id=annotation_id, page_id=page.id).delete()
+@bp_norm.route("/api/documents/<int:document_id>/annotations/<annotation_id>", methods=["DELETE"])
+@requires_access(Document, 'document_id')
+def api_page_delete_annotation(document: Document, annotation_id: str):
+    Annotation.query.filter_by(id=annotation_id, document_id=document.id).delete()
     db.session.commit()
     return jsonify({"status": "ok"})
 
@@ -189,11 +190,11 @@ def api_page_delete_annotation(page: Page, annotation_id: str):
 # Bulk replace — kept for structural operations (line deletion, clear pending)
 # -------------------------
 
-@bp_norm.route("/api/pages/<int:page_id>/annotations", methods=["PUT"])
-@requires_access(Page, 'page_id')
-def api_page_save_annotations(page: Page):
+@bp_norm.route("/api/documents/<int:document_id>/annotations", methods=["PUT"])
+@requires_access(Document, 'document_id')
+def api_page_save_annotations(document: Document):
     data = request.json
-    page.set_annotations(data.get("annotations", []))
+    document.set_annotations(data.get("annotations", []))
     db.session.commit()
     return jsonify({"status": "ok"})
 
@@ -205,7 +206,7 @@ def api_page_save_annotations(page: Page):
 @bp_norm.route("/api/lines/<int:line_id>/delete", methods=["GET", "POST", "DELETE"])
 @requires_access(Line, 'line_id')
 def line_delete(line: Line):
-    page_id = line.page_id
+    document_id = line.part.document_id
     db.session.delete(line)
     db.session.commit()
-    return jsonify({"status": "ok", "page_id": page_id})
+    return jsonify({"status": "ok", "document_id": document_id})

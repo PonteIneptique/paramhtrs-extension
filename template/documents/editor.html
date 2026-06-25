@@ -143,6 +143,27 @@ body { overflow: hidden; }
 #page-source mark.r6o-markup.hovered {
   background: rgba(13, 110, 253, 0.15);
 }
+.part-divider {
+  display: block;
+  height: 0;
+  margin: 0.6em 0;
+  border-top: 1px dashed #adb5bd;
+  position: relative;
+  user-select: none;
+}
+.part-divider::before {
+  content: "⁘ " attr(data-part-label) " ⁘";
+  position: absolute;
+  top: -0.7em;
+  left: 0;
+  background: #fff;
+  padding: 0 6px;
+  font-size: 0.72em;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: #868e96;
+  white-space: nowrap;
+}
 .line-mgmt-row {
   display: flex;
   align-items: center;
@@ -161,6 +182,21 @@ body { overflow: hidden; }
 }
 .line-mgmt-del { color: #adb5bd; cursor: pointer; background: none; border: none; padding: 0; }
 .line-mgmt-del:hover { color: #dc3545; }
+.part-id-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 4px;
+  padding-top: 6px;
+  border-top: 1px dashed #adb5bd;
+  color: #868e96;
+}
+.part-id-row .fa-grip-lines { font-size: .7rem; }
+.part-id-input {
+  font-size: .75rem;
+  padding: 1px 6px;
+  max-width: 220px;
+}
 
 /* ── Annotation panel ── */
 .annot-row {
@@ -595,22 +631,28 @@ body { overflow: hidden; }
           <a href="{{ url_for('bp_project.project_browse', project_id=document.project_id) }}">{{ document.project.name }}</a>
         </li>
         <li class="breadcrumb-item">
-          <a href="{{ url_for('bp_document.document_browse', document_id=document.id) }}">{{ document.name }}</a>
+          <a href="{{ url_for('bp_folder.folder_browse', folder_id=document.id) }}">{{ document.name }}</a>
         </li>
         <li class="breadcrumb-item active">{{ page.label }}</li>
       </ol>
     </nav>
 
+    <span v-if="hasMultipleParts" class="badge bg-info text-dark me-2" style="cursor:pointer;"
+          :title="partOffsets.map(p => p.original_filename || ('part ' + p.part_id)).join(', ')"
+          @click="$refs.pageSource.querySelector('.part-divider')?.scrollIntoView({behavior:'smooth', block:'center'})">
+      <i class="fa-solid fa-layer-group"></i> [[ partOffsets.length ]] parts
+    </span>
+
     <div class="btn-group btn-group-sm">
       {% if prev_page %}
-      <a href="{{ url_for('bp_page.page_editor', page_id=prev_page.id) }}" class="btn btn-outline-secondary" title="{{ prev_page.label }}">
+      <a href="{{ url_for('bp_document.document_editor', document_id=prev_page.id) }}" class="btn btn-outline-secondary" title="{{ prev_page.label }}">
         &laquo; Prev
       </a>
       {% else %}
       <button class="btn btn-outline-secondary" disabled>&laquo; Prev</button>
       {% endif %}
       {% if next_page %}
-      <a href="{{ url_for('bp_page.page_editor', page_id=next_page.id) }}" class="btn btn-outline-secondary" title="{{ next_page.label }}">
+      <a href="{{ url_for('bp_document.document_editor', document_id=next_page.id) }}" class="btn btn-outline-secondary" title="{{ next_page.label }}">
         Next &raquo;
       </a>
       {% else %}
@@ -633,7 +675,7 @@ body { overflow: hidden; }
       ⇄ Hover
     </button>
 
-    <button class="btn btn-sm btn-outline-secondary" style="font-size:.75rem;padding:1px 6px" data-bs-toggle="modal" data-bs-target="#pageMetaModal">
+    <button class="btn btn-sm btn-outline-secondary" style="font-size:.75rem;padding:1px 6px" @click="openDocumentMetaModal()">
       <i class="fa-solid fa-pen"></i> Metadata
     </button>
 
@@ -650,7 +692,7 @@ body { overflow: hidden; }
       </button>
       <ul class="dropdown-menu dropdown-menu-end">
         <li>
-          <a class="dropdown-item" href="{{ url_for('bp_page.page_export_tei', page_id=page.id) }}">
+          <a class="dropdown-item" href="{{ url_for('bp_document.document_export_tei', document_id=page.id) }}">
             <i class="fa-solid fa-file-export"></i> Download TEI
           </a>
         </li>
@@ -660,14 +702,14 @@ body { overflow: hidden; }
           </a>
         </li>
         <li>
-          <a class="dropdown-item" href="{{ url_for('bp_page.page_stats', page_id=page.id) }}" title="Download statistics report (HTML)">
+          <a class="dropdown-item" href="{{ url_for('bp_document.document_stats', document_id=page.id) }}" title="Download statistics report (HTML)">
             <i class="fa-solid fa-chart-bar"></i> Stats (HTML)
           </a>
         </li>
       </ul>
     </div>
 
-    <!-- Page status -->
+    <!-- Document status -->
     <div class="dropdown">
       <button class="btn btn-sm dropdown-toggle" style="font-size:.75rem;padding:1px 6px"
         :class="{
@@ -745,13 +787,32 @@ body { overflow: hidden; }
       <template v-if="lines.length">
         <hr class="my-3">
         <div class="panel-header">Lines</div>
-        <div v-for="(line, idx) in lines" :key="line.id" class="line-mgmt-row">
-          <span class="line-mgmt-num">#[[ idx + 1 ]]</span>
-          <span class="line-mgmt-text" :title="line.original_text">[[ line.original_text ]]</span>
-          <button class="line-mgmt-del" @click="deleteLine(line, idx)" title="Delete line">
-            <i class="fa-solid fa-trash-can"></i>
-          </button>
-        </div>
+        <template v-for="(line, idx) in lines" :key="line.id">
+          <div v-if="idx === 0 || lines[idx-1].part_id !== line.part_id"
+               class="part-id-row">
+            <template v-if="hasMultipleParts">
+              <i class="fa-solid fa-grip-lines"></i>
+              <input type="text" class="form-control form-control-sm part-id-input"
+                     v-model="partLabels[line.part_id]"
+                     placeholder="part id"
+                     @blur="savePartLabel(line.part_id)"
+                     @keyup.enter="savePartLabel(line.part_id); $event.target.blur()">
+            </template>
+            <span v-else class="text-muted small">Part metadata</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1"
+                    @click="openPartMetaModal(line.part_id, partLabels[line.part_id])"
+                    title="Edit part metadata (QID, works)">
+              <i class="fa-solid fa-pen"></i>
+            </button>
+          </div>
+          <div class="line-mgmt-row">
+            <span class="line-mgmt-num">#[[ idx + 1 ]]</span>
+            <span class="line-mgmt-text" :title="line.original_text">[[ line.original_text ]]</span>
+            <button class="line-mgmt-del" @click="deleteLine(line, idx)" title="Delete line">
+              <i class="fa-solid fa-trash-can"></i>
+            </button>
+          </div>
+        </template>
       </template>
     </div>
 
@@ -1410,95 +1471,7 @@ body { overflow: hidden; }
 
 </div><!-- /#editor-root -->
 
-<!-- Page metadata modal -->
-<div class="modal fade" id="pageMetaModal" tabindex="-1" aria-labelledby="pageMetaModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-centered">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="pageMetaModalLabel">
-          <i class="fa-solid fa-pen me-2"></i>Page metadata — <span class="fw-normal text-muted">{{ page.label }}</span>
-        </h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-
-        <!-- Label / QID / filename -->
-        <h6 class="text-uppercase text-muted small fw-semibold mb-2">Page metadata</h6>
-        <form method="post" action="{{ url_for('bp_page.page_update', page_id=page.id) }}" class="mb-4">
-          <div class="mb-2">
-            <label class="form-label form-label-sm mb-1 small">Label</label>
-            <input type="text" class="form-control" name="label" value="{{ page.label }}" required>
-          </div>
-          <div class="row g-2 mb-2">
-            <div class="col-6">
-              <label class="form-label form-label-sm mb-1 small">QID</label>
-              <input type="text" class="form-control" name="qid" value="{{ page.qid or '' }}" placeholder="e.g. Q12345">
-            </div>
-            <div class="col-6">
-              <label class="form-label form-label-sm mb-1 small">Original filename</label>
-              <input type="text" class="form-control" name="original_filename" value="{{ page.original_filename or '' }}" placeholder="e.g. page_0001.xml">
-            </div>
-          </div>
-          <button type="submit" class="btn btn-primary btn-sm">Save metadata</button>
-        </form>
-
-        <!-- Works -->
-        <h6 class="text-uppercase text-muted small fw-semibold mb-2">Works</h6>
-        <div class="mb-3" id="page-works-chips">
-          {% for work in works %}
-          <span class="badge bg-primary me-1 mb-1" data-work-id="{{ work.id }}" style="font-size:.85em;">
-            {{ work.title }}{% if work.genre %} <em>({{ work.genre }})</em>{% endif %}
-            <button type="button" class="btn-close btn-close-white btn-sm ms-1"
-                    aria-label="Remove" style="font-size:.5em;"
-                    onclick="pageRemoveWork({{ work.id }})"></button>
-          </span>
-          {% else %}
-          <span class="text-muted small" id="page-no-works-label">No works linked yet.</span>
-          {% endfor %}
-        </div>
-        <div class="border rounded p-3 bg-light">
-          <p class="mb-2 small text-muted fw-semibold">Link a new work</p>
-          <div class="d-flex gap-2 align-items-end flex-wrap">
-            <div class="flex-grow-1" style="min-width:140px;">
-              <label class="form-label form-label-sm mb-1 small">Title <span class="text-danger">*</span></label>
-              <input type="text" class="form-control form-control-sm" id="page-work-title" placeholder="e.g. Vie de saint Martin">
-            </div>
-            <div style="min-width:120px;">
-              <label class="form-label form-label-sm mb-1 small">Genre</label>
-              <input type="text" class="form-control form-control-sm" id="page-work-genre" placeholder="e.g. hagiography">
-            </div>
-            <button class="btn btn-sm btn-primary" onclick="pageAddWork()">Add</button>
-          </div>
-        </div>
-
-        <!-- Move -->
-        <hr class="mt-4">
-        <h6 class="text-uppercase text-muted small fw-semibold mb-2">Move to another document</h6>
-        <div class="d-flex gap-2 align-items-end flex-wrap mb-2">
-          <div class="flex-grow-1" style="min-width:200px;">
-            <select class="form-select form-select-sm" id="page-move-target">
-              <option value="">Loading documents…</option>
-            </select>
-          </div>
-          <button class="btn btn-sm btn-outline-primary" onclick="pageMoveTo()">
-            <i class="fa-solid fa-arrow-right-arrow-left me-1"></i>Move
-          </button>
-        </div>
-
-        <!-- Danger zone -->
-        <hr class="mt-4">
-        <h6 class="text-uppercase text-muted small fw-semibold mb-2">Danger zone</h6>
-        <a href="{{ url_for('bp_page.page_delete', page_id=page.id) }}" class="btn btn-outline-danger btn-sm">
-          <i class="fa-solid fa-trash me-1"></i>Delete this page
-        </a>
-
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-      </div>
-    </div>
-  </div>
-</div>
+{% include "_metadata_modal.html" %}
 
 <!-- Clear pending confirmation modal -->
 <div class="modal fade" id="clearPendingModal" tabindex="-1" aria-labelledby="clearPendingModalLabel" aria-hidden="true">
@@ -1524,22 +1497,32 @@ window.__EDITOR_CONFIG__ = {
   lines:         {{ lines|tojson }},
   fullText:      {{ full_text|tojson }},
   annotations:   {{ annotations|tojson }},
+  partOffsets:   {{ part_offsets|tojson }},
+  partWorks:     {{ part_works|tojson }},
+  works:         {{ works|tojson }},
   pageId:        {{ page.id }},
   pageLabel:     {{ page.label|tojson }},
   pageStatus:    {{ page.status|tojson }},
+  pageQid:       {{ (page.qid or '')|tojson }},
+  pageFilename:  {{ (page.original_filename or '')|tojson }},
   currentUserId: {{ current_user.id }},
-  documentId:    {{ document.id }},
+  folderId:      {{ document.id }},
   projectId:     {{ document.project_id }},
   urls: {
-    saveAnnotations:  {{ url_for('bp_norm.api_page_save_annotations',  page_id=page.id)|tojson }},
-    saveAnnotation:   {{ url_for('bp_norm.api_page_save_annotation',   page_id=page.id, annotation_id='__ANN_ID__')|tojson }},
-    deleteAnnotation: {{ url_for('bp_norm.api_page_delete_annotation', page_id=page.id, annotation_id='__ANN_ID__')|tojson }},
-    pageStatus:       {{ url_for('bp_page.api_page_status',            page_id=page.id)|tojson }},
-    addWork:          {{ url_for('bp_page.api_page_add_work',          page_id=page.id)|tojson }},
-    removeWork:       {{ url_for('bp_page.api_page_remove_work',       page_id=page.id, work_id=0)|tojson }}.replace('/0', '/__WORK_ID__'),
+    saveAnnotations:  {{ url_for('bp_norm.api_page_save_annotations',  document_id=page.id)|tojson }},
+    saveAnnotation:   {{ url_for('bp_norm.api_page_save_annotation',   document_id=page.id, annotation_id='__ANN_ID__')|tojson }},
+    deleteAnnotation: {{ url_for('bp_norm.api_page_delete_annotation', document_id=page.id, annotation_id='__ANN_ID__')|tojson }},
+    pageStatus:       {{ url_for('bp_document.api_document_status',           document_id=page.id)|tojson }},
+    documentUpdate:   {{ url_for('bp_document.document_update',               document_id=page.id)|tojson }},
+    documentDelete:   {{ url_for('bp_document.document_delete',               document_id=page.id)|tojson }},
+    addWork:          {{ url_for('bp_document.api_document_add_work',         document_id=page.id)|tojson }},
+    removeWork:       {{ url_for('bp_document.api_document_remove_work',      document_id=page.id, work_id=0)|tojson }}.replace('/0', '/__WORK_ID__'),
     deleteLine:       {{ url_for('bp_norm.line_delete',                line_id=0)|tojson }}.replace('/0/', '/__LINE_ID__/'),
-    movePage:         {{ url_for('bp_page.page_move',                  page_id=page.id)|tojson }},
-    projectDocuments: {{ url_for('bp_document.api_project_documents',  project_id=document.project_id)|tojson }},
+    updatePart:       {{ url_for('bp_document.api_part_update',         part_id=0)|tojson }}.replace('/0/', '/__PART_ID__/'),
+    partAddWork:      {{ url_for('bp_document.api_part_add_work',       part_id=0)|tojson }}.replace('/0/', '/__PART_ID__/'),
+    partRemoveWork:   {{ url_for('bp_document.api_part_remove_work',    part_id=0, work_id=0)|tojson }}.replace('/0/works/0', '/__PART_ID__/works/__WORK_ID__'),
+    movePage:         {{ url_for('bp_document.document_move',                document_id=page.id)|tojson }},
+    projectFolders:   {{ url_for('bp_folder.api_project_folders',       project_id=document.project_id)|tojson }},
   },
 };
 </script>

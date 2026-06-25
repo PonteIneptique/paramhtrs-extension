@@ -31,6 +31,10 @@ export function createEditorApp(config) {
         lines:               config.lines,
         fullText:            config.fullText,
         annotations:         config.annotations,
+        partOffsets:         config.partOffsets || [],
+        partLabels:          Object.fromEntries(
+          (config.partOffsets || []).map(s => [s.part_id, s.original_filename || ''])
+        ),
         pageId:              config.pageId,
         pageLabel:           config.pageLabel,
         pageStatus:          config.pageStatus,
@@ -100,8 +104,10 @@ export function createEditorApp(config) {
       },
 
       sourceHtml() {
-        return buildSourceHtml(this.fullText, this.allAnnotationsSorted, this.selectedAnnotationId);
+        return buildSourceHtml(this.fullText, this.allAnnotationsSorted, this.selectedAnnotationId, this.partOffsets);
       },
+
+      hasMultipleParts() { return this.partOffsets.length > 1; },
 
       normalizedPageText() { return applyAnnotations(this.fullText, this.annotations); },
 
@@ -1018,7 +1024,7 @@ export function createEditorApp(config) {
       async downloadSynoptic() {
         const sorted  = this.allAnnotationsSorted;
         const normPos = computeNormalizedPositions(this.annotations);
-        const srcHtml  = buildSourceHtml(this.fullText, sorted, null);
+        const srcHtml  = buildSourceHtml(this.fullText, sorted, null, this.partOffsets);
         const normHtml = buildNormalizedPageHtml(this.normalizedPageText, sorted, null, normPos);
         const title    = escapeHtml(this.pageLabel || 'Synoptic View');
 
@@ -1104,6 +1110,23 @@ document.querySelectorAll('.text-col').forEach(col => {
         const a    = Object.assign(document.createElement('a'), { href: url, download: `${this.pageLabel || 'synoptic'}.html` });
         a.click();
         URL.revokeObjectURL(url);
+      },
+
+      async savePartLabel(partId) {
+        const value = this.partLabels[partId] || '';
+        try {
+          const r = await fetch(urls.updatePart.replace('__PART_ID__', partId), {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ original_filename: value }),
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const data = await r.json();
+          this.partLabels[partId] = data.original_filename || '';
+          const entry = this.partOffsets.find(s => s.part_id === partId);
+          if (entry) entry.original_filename = data.original_filename;
+        } catch {
+          this.saveError = true;
+        }
       },
 
       async setPageStatus(status) {
@@ -1207,80 +1230,56 @@ document.querySelectorAll('.text-col').forEach(col => {
           el?.focus(); el?.select();
         });
       },
+
+      // ── Shared metadata modal: Document and Part entry points ───────────────
+      // (Folder's own entry point lives in template/folders/edit.html, since
+      // that page isn't a Vue app — both call window.MetadataModal.open().)
+      openDocumentMetaModal() {
+        window.MetadataModal.open({
+          title: 'Document metadata — ' + this.pageLabel,
+          titleField: 'label',
+          titleLabel: 'Label',
+          titleValue: this.pageLabel,
+          updateUrl: urls.documentUpdate,
+          fields: {
+            status: this.pageStatus,
+            qid: config.pageQid,
+            original_filename: config.pageFilename,
+          },
+          fieldLabels: { original_filename: 'Original filename' },
+          works: config.works,
+          worksAddUrl: urls.addWork,
+          worksRemoveUrlTemplate: urls.removeWork,
+          move: {
+            label: 'Move to another folder',
+            targetsUrl: urls.projectFolders,
+            currentId: config.folderId,
+            submitUrl: urls.movePage,
+            bodyKey: 'folder_id',
+          },
+          delete: { url: urls.documentDelete, label: 'Delete this document' },
+          onSaved: () => window.location.reload(),
+        });
+      },
+      openPartMetaModal(partId, originalFilename) {
+        window.MetadataModal.open({
+          title: 'Part metadata — ' + (originalFilename || ('part ' + partId)),
+          updateUrl: urls.updatePart.replace('__PART_ID__', partId),
+          fields: { original_filename: originalFilename || '' },
+          fieldLabels: { original_filename: 'Part id' },
+          works: config.partWorks[partId] || [],
+          worksAddUrl: urls.partAddWork.replace('__PART_ID__', partId),
+          worksRemoveUrlTemplate: urls.partRemoveWork.replace('__PART_ID__', partId),
+          onSaved: (data) => {
+            const part = this.partOffsets.find(p => p.part_id === partId);
+            if (part) part.original_filename = data.original_filename;
+            this.partLabels[partId] = data.original_filename || '';
+          },
+        });
+      },
     },
   });
 }
-
-// ── Page works helpers (called from onclick in HTML) ──────────────────────────
-async function pageAddWork() {
-  const title = document.getElementById('page-work-title').value.trim();
-  if (!title) return;
-  const genre = document.getElementById('page-work-genre').value.trim();
-  const resp = await fetch(window.__EDITOR_CONFIG__.urls.addWork, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({title, genre}),
-  });
-  if (!resp.ok) { alert('Failed to add work'); return; }
-  const data = await resp.json();
-  const work = data.work;
-  document.getElementById('page-no-works-label')?.remove();
-  const chip = document.createElement('span');
-  chip.className = 'badge bg-primary me-1';
-  chip.dataset.workId = work.id;
-  chip.innerHTML = `${work.title}${work.genre ? ` <em>(${work.genre})</em>` : ''}
-    <button type="button" class="btn-close btn-close-white btn-sm ms-1" aria-label="Remove"
-            style="font-size:.5em;" onclick="pageRemoveWork(${work.id})"></button>`;
-  document.getElementById('page-works-chips').appendChild(chip);
-  document.getElementById('page-work-title').value = '';
-  document.getElementById('page-work-genre').value = '';
-}
-
-async function pageRemoveWork(workId) {
-  const url = window.__EDITOR_CONFIG__.urls.removeWork.replace('__WORK_ID__', workId);
-  await fetch(url, {method: 'DELETE'});
-  document.querySelector(`#page-works-chips [data-work-id="${workId}"]`)?.remove();
-  if (!document.querySelectorAll('#page-works-chips .badge').length) {
-    const span = document.createElement('span');
-    span.className = 'text-muted small';
-    span.id = 'page-no-works-label';
-    span.textContent = 'None';
-    document.getElementById('page-works-chips').appendChild(span);
-  }
-}
-
-// ── Move page to another document ─────────────────────────────────────────────
-async function populatePageMoveTargets() {
-  const select = document.getElementById('page-move-target');
-  if (!select) return;
-  const resp = await fetch(window.__EDITOR_CONFIG__.urls.projectDocuments);
-  const docs = await resp.json();
-  const others = docs.filter(d => d.id !== window.__EDITOR_CONFIG__.documentId);
-  select.innerHTML = others.length
-    ? others.map(d => `<option value="${d.id}">${d.name}</option>`).join('')
-    : '<option value="">No other documents in this project</option>';
-}
-
-async function pageMoveTo() {
-  const select = document.getElementById('page-move-target');
-  const documentId = select?.value;
-  if (!documentId) return;
-  if (!confirm('Move this page to the selected document?')) return;
-  const resp = await fetch(window.__EDITOR_CONFIG__.urls.movePage, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({document_id: Number(documentId)}),
-  });
-  if (!resp.ok) { alert('Failed to move page'); return; }
-  window.location.href = `/documents/${documentId}`;
-}
-
-document.getElementById('pageMetaModal')?.addEventListener('show.bs.modal', populatePageMoveTargets);
-
-// Expose for onclick= handlers in HTML template
-window.pageAddWork    = pageAddWork;
-window.pageRemoveWork = pageRemoveWork;
-window.pageMoveTo     = pageMoveTo;
 
 // Auto-mount in browser
 if (typeof window !== 'undefined' && window.__EDITOR_CONFIG__) {

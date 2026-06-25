@@ -43,11 +43,11 @@ app.register_blueprint(bp_norm)
 from .bp_project import bp_project
 app.register_blueprint(bp_project)
 
+from .bp_folder import bp_folder
+app.register_blueprint(bp_folder)
+
 from .bp_document import bp_document
 app.register_blueprint(bp_document)
-
-from .bp_page import bp_page
-app.register_blueprint(bp_page)
 
 from .bp_auth import login_manager, bp_auth
 app.register_blueprint(bp_auth)
