@@ -4,6 +4,17 @@
 /* ── Override base container for the editor page ── */
 /* Prevent the page from scrolling (panels scroll internally) */
 body { overflow: hidden; }
+
+/* Hide the uncompiled Vue template until the app mounts (avoids a flash of
+   raw [[ ]] mustaches and the focus-mode overlay rendering before JS runs). */
+[v-cloak] { display: none !important; }
+/* Full-area loading overlay shown until Vue mounts. Sits to the right of the
+   60 px fixed sidebar (base.html) so the menu stays visible while it loads. */
+#editor-loading {
+  position: fixed; top: 0; right: 0; bottom: 0; left: 60px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; background: #fff; z-index: 200; color: #6c757d;
+}
 /* Remove the mt-5 / horizontal padding from the base container,
    but keep the 60 px left gap so the fixed sidebar never overlaps text. */
 .container {
@@ -207,6 +218,14 @@ body { overflow: hidden; }
   padding: 4px 6px;
   border-radius: 4px;
   transition: background .15s;
+  /* Skip layout/paint for off-screen rows (the list can be ~4600 rows). Keeps
+     every row in the DOM — so find-in-page and tab nav still work — but lets
+     the browser (Firefox especially) avoid laying out/painting what isn't
+     visible, and contains reflow to a single row on hover/select/edit. The
+     `auto` keyword makes the browser remember each row's real height after it
+     has been rendered once, so the scrollbar stays accurate. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 28px;
 }
 .annot-row:hover, .annot-row.hovered { background: #fff3cd; font-weight: bold; }
 .annot-orig {
@@ -621,7 +640,7 @@ body { overflow: hidden; }
   <a href="{{ url_for('bp_auth.profile') }}" class="alert-link">Fill in your profile</a> (nickname field) so your contributions appear correctly in TEI exports.
 </div>
 {% endif %}
-<div id="editor-root">
+<div id="editor-root" v-cloak>
 
   <!-- Toolbar -->
   <div id="editor-toolbar">
@@ -876,8 +895,10 @@ body { overflow: hidden; }
       </div>
 
       <!-- Pending annotations (shown when filter = pending) -->
-      <template v-if="annotFilter === 'pending'" v-for="annot in pendingAnnotationsSorted" :key="annot.id">
+      <template v-if="annotFilter === 'pending'">
         <div class="annot-row"
+             v-for="annot in pendingAnnotationsSorted" :key="annot.id"
+             v-memo="[annot, selectedAnnotationId === annot.id, hoveredAnnotationId === annot.id, showAnnotContext, fullText]"
              :data-annot-id="annot.id"
              :class="{ hovered: hoveredAnnotationId === annot.id, selected: selectedAnnotationId === annot.id }"
              @mousedown="onRowMousedown(annot, $event)"
@@ -906,49 +927,15 @@ body { overflow: hidden; }
           <span v-if="getSemtag(annot)" class="badge bg-info text-dark me-1" style="font-size:.65em;">[[ semtagLabels[getSemtag(annot)] ]]</span>
           <span v-if="isGapBefore(annot)" class="badge bg-dark text-white me-1" style="font-size:.65em;" title="Gap before this word">⊣gap</span>
           <span v-if="isGapAfter(annot)" class="badge bg-dark text-white me-1" style="font-size:.65em;" title="Gap after this word">gap⊢</span>
-          <div class="unclear-wrap tag-wrap">
-            <button class="unclear-btn" @mousedown.prevent.stop="e => { const r = e.currentTarget.getBoundingClientRect(); annotMenuPos = { top: r.bottom + 3, left: r.right }; annotTagOpenId = annotTagOpenId === annot.id ? null : annot.id; }" title="Tag as person/org/place/numeral">
-              Tag <span style="font-size:.8em; opacity:.7;">▾</span>
-            </button>
-            <Teleport to="body">
-            <div v-if="annotTagOpenId === annot.id" class="unclear-menu-fixed"
-                 :style="{ top: annotMenuPos.top + 'px', left: annotMenuPos.left + 'px', transform: 'translateX(-100%)' }">
-              <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'persName'); annotTagOpenId = null">Person</button>
-              <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'orgName'); annotTagOpenId = null">Organisation</button>
-              <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'placeName'); annotTagOpenId = null">Place</button>
-              <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'num'); annotTagOpenId = null">Numeral</button>
-              <button v-if="getSemtag(annot)" class="unclear-item" @mousedown.prevent="setSemtag(annot, null); annotTagOpenId = null">Clear tag</button>
-            </div>
-            </Teleport>
-          </div>
-          <div class="unclear-wrap type-wrap">
-            <button class="unclear-btn" @mousedown.prevent.stop="e => { const r = e.currentTarget.getBoundingClientRect(); annotMenuPos = { top: r.bottom + 3, left: r.right }; annotTypeOpenId = annotTypeOpenId === annot.id ? null : annot.id; }" title="Change annotation type">
-              Type <span style="font-size:.8em; opacity:.7;">▾</span>
-            </button>
-            <Teleport to="body">
-            <div v-if="annotTypeOpenId === annot.id" class="unclear-menu-fixed"
-                 :style="{ top: annotMenuPos.top + 'px', left: annotMenuPos.left + 'px', transform: 'translateX(-100%)' }">
-              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'normalizing'); annotTypeOpenId = null">Normalization</button>
-              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'insertion'); annotTypeOpenId = null">Insertion</button>
-              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'deletion'); annotTypeOpenId = null">Deletion</button>
-              <button class="unclear-item is-noise" @mousedown.prevent="changeAnnotationType(annot, 'atr_noise'); annotTypeOpenId = null">ATR Noise</button>
-              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'non_resolv_abbr'); annotTypeOpenId = null">Unresolvable Abbreviation</button>
-              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'markup'); annotTypeOpenId = null">Markup</button>
-            </div>
-            </Teleport>
-          </div>
-          <div class="unclear-wrap gap-wrap">
-            <button class="unclear-btn" @mousedown.prevent.stop="e => { const r = e.currentTarget.getBoundingClientRect(); annotMenuPos = { top: r.bottom + 3, left: r.right }; annotGapOpenId = annotGapOpenId === annot.id ? null : annot.id; }" title="Mark as cut in two (gap before/after)">
-              Gap <span style="font-size:.8em; opacity:.7;">▾</span>
-            </button>
-            <Teleport to="body">
-            <div v-if="annotGapOpenId === annot.id" class="unclear-menu-fixed"
-                 :style="{ top: annotMenuPos.top + 'px', left: annotMenuPos.left + 'px', transform: 'translateX(-100%)' }">
-              <button class="unclear-item" @mousedown.prevent="setGap(annot, 'before', !isGapBefore(annot))">[[ isGapBefore(annot) ? '✓ ' : '' ]]Gap before</button>
-              <button class="unclear-item" @mousedown.prevent="setGap(annot, 'after', !isGapAfter(annot))">[[ isGapAfter(annot) ? '✓ ' : '' ]]Gap after</button>
-            </div>
-            </Teleport>
-          </div>
+          <button class="unclear-btn tag-wrap" @mousedown.prevent.stop="openAnnotMenu('tag', annot, $event)" title="Tag as person/org/place/numeral">
+            Tag <span style="font-size:.8em; opacity:.7;">▾</span>
+          </button>
+          <button class="unclear-btn type-wrap" @mousedown.prevent.stop="openAnnotMenu('type', annot, $event)" title="Change annotation type">
+            Type <span style="font-size:.8em; opacity:.7;">▾</span>
+          </button>
+          <button class="unclear-btn gap-wrap" @mousedown.prevent.stop="openAnnotMenu('gap', annot, $event)" title="Mark as cut in two (gap before/after)">
+            Gap <span style="font-size:.8em; opacity:.7;">▾</span>
+          </button>
           <button class="btn btn-sm btn-outline-success py-0 px-1 validate-btn" title="Validate (Ctrl+Enter)"
                   @click.stop="validateAnnotation(annot)">✓<span class="validate-hint"> (Ctrl+Enter)</span></button>
           <button class="annot-del" @click.stop="removeAnnotation(annot)" title="Remove">✕</button>
@@ -1014,8 +1001,10 @@ body { overflow: hidden; }
       </div>
 
       <!-- Validated annotations (shown when filter = validated) -->
-      <template v-if="annotFilter === 'validated'" v-for="annot in validatedAnnotationsSorted" :key="annot.id">
+      <template v-if="annotFilter === 'validated'">
         <div class="annot-row validated"
+             v-for="annot in validatedAnnotationsSorted" :key="annot.id"
+             v-memo="[annot, selectedAnnotationId === annot.id, hoveredAnnotationId === annot.id, showAnnotContext, fullText]"
              :data-annot-id="annot.id"
              :class="{ hovered: hoveredAnnotationId === annot.id, selected: selectedAnnotationId === annot.id }"
              @mousedown="onRowMousedown(annot, $event)"
@@ -1043,49 +1032,15 @@ body { overflow: hidden; }
           <span v-if="getSemtag(annot)" class="badge bg-info text-dark me-1" style="font-size:.65em;">[[ semtagLabels[getSemtag(annot)] ]]</span>
           <span v-if="isGapBefore(annot)" class="badge bg-dark text-white me-1" style="font-size:.65em;" title="Gap before this word">⊣gap</span>
           <span v-if="isGapAfter(annot)" class="badge bg-dark text-white me-1" style="font-size:.65em;" title="Gap after this word">gap⊢</span>
-          <div class="unclear-wrap tag-wrap">
-            <button class="unclear-btn" @mousedown.prevent.stop="e => { const r = e.currentTarget.getBoundingClientRect(); annotMenuPos = { top: r.bottom + 3, left: r.right }; annotTagOpenId = annotTagOpenId === annot.id ? null : annot.id; }" title="Tag as person/org/place/numeral">
-              Tag <span style="font-size:.8em; opacity:.7;">▾</span>
-            </button>
-            <Teleport to="body">
-            <div v-if="annotTagOpenId === annot.id" class="unclear-menu-fixed"
-                 :style="{ top: annotMenuPos.top + 'px', left: annotMenuPos.left + 'px', transform: 'translateX(-100%)' }">
-              <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'persName'); annotTagOpenId = null">Person</button>
-              <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'orgName'); annotTagOpenId = null">Organisation</button>
-              <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'placeName'); annotTagOpenId = null">Place</button>
-              <button class="unclear-item" @mousedown.prevent="setSemtag(annot, 'num'); annotTagOpenId = null">Numeral</button>
-              <button v-if="getSemtag(annot)" class="unclear-item" @mousedown.prevent="setSemtag(annot, null); annotTagOpenId = null">Clear tag</button>
-            </div>
-            </Teleport>
-          </div>
-          <div class="unclear-wrap type-wrap">
-            <button class="unclear-btn" @mousedown.prevent.stop="e => { const r = e.currentTarget.getBoundingClientRect(); annotMenuPos = { top: r.bottom + 3, left: r.right }; annotTypeOpenId = annotTypeOpenId === annot.id ? null : annot.id; }" title="Change annotation type">
-              Type <span style="font-size:.8em; opacity:.7;">▾</span>
-            </button>
-            <Teleport to="body">
-            <div v-if="annotTypeOpenId === annot.id" class="unclear-menu-fixed"
-                 :style="{ top: annotMenuPos.top + 'px', left: annotMenuPos.left + 'px', transform: 'translateX(-100%)' }">
-              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'normalizing'); annotTypeOpenId = null">Normalization</button>
-              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'insertion'); annotTypeOpenId = null">Insertion</button>
-              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'deletion'); annotTypeOpenId = null">Deletion</button>
-              <button class="unclear-item is-noise" @mousedown.prevent="changeAnnotationType(annot, 'atr_noise'); annotTypeOpenId = null">ATR Noise</button>
-              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'non_resolv_abbr'); annotTypeOpenId = null">Unresolvable Abbreviation</button>
-              <button class="unclear-item" @mousedown.prevent="changeAnnotationType(annot, 'markup'); annotTypeOpenId = null">Markup</button>
-            </div>
-            </Teleport>
-          </div>
-          <div class="unclear-wrap gap-wrap">
-            <button class="unclear-btn" @mousedown.prevent.stop="e => { const r = e.currentTarget.getBoundingClientRect(); annotMenuPos = { top: r.bottom + 3, left: r.right }; annotGapOpenId = annotGapOpenId === annot.id ? null : annot.id; }" title="Mark as cut in two (gap before/after)">
-              Gap <span style="font-size:.8em; opacity:.7;">▾</span>
-            </button>
-            <Teleport to="body">
-            <div v-if="annotGapOpenId === annot.id" class="unclear-menu-fixed"
-                 :style="{ top: annotMenuPos.top + 'px', left: annotMenuPos.left + 'px', transform: 'translateX(-100%)' }">
-              <button class="unclear-item" @mousedown.prevent="setGap(annot, 'before', !isGapBefore(annot))">[[ isGapBefore(annot) ? '✓ ' : '' ]]Gap before</button>
-              <button class="unclear-item" @mousedown.prevent="setGap(annot, 'after', !isGapAfter(annot))">[[ isGapAfter(annot) ? '✓ ' : '' ]]Gap after</button>
-            </div>
-            </Teleport>
-          </div>
+          <button class="unclear-btn tag-wrap" @mousedown.prevent.stop="openAnnotMenu('tag', annot, $event)" title="Tag as person/org/place/numeral">
+            Tag <span style="font-size:.8em; opacity:.7;">▾</span>
+          </button>
+          <button class="unclear-btn type-wrap" @mousedown.prevent.stop="openAnnotMenu('type', annot, $event)" title="Change annotation type">
+            Type <span style="font-size:.8em; opacity:.7;">▾</span>
+          </button>
+          <button class="unclear-btn gap-wrap" @mousedown.prevent.stop="openAnnotMenu('gap', annot, $event)" title="Mark as cut in two (gap before/after)">
+            Gap <span style="font-size:.8em; opacity:.7;">▾</span>
+          </button>
           <button class="btn btn-sm btn-outline-secondary py-0 px-1" title="Un-validate"
                   @click.stop="unvalidateAnnotation(annot)">↩</button>
           <button class="annot-del" @click.stop="removeAnnotation(annot)" title="Remove">✕</button>
@@ -1107,6 +1062,31 @@ body { overflow: hidden; }
     </div>
 
   </div><!-- /#editor-panels -->
+
+  <!-- Shared annotation-row menus (Tag / Type / Gap). Rendered once and
+       positioned on demand via openAnnotMenu(), instead of 3 Teleport menus
+       per row — keeps the ~4600-row annotation list cheap to render. The
+       *-wrap classes keep the outside-click handler (_closeDropdowns) from
+       closing the menu while you interact with it. -->
+  <div v-if="annotTagOpenId && menuAnnot" class="unclear-menu-fixed tag-wrap" :style="annotMenuStyle">
+    <button class="unclear-item" @mousedown.prevent="setSemtag(menuAnnot, 'persName'); closeAnnotMenus()">Person</button>
+    <button class="unclear-item" @mousedown.prevent="setSemtag(menuAnnot, 'orgName'); closeAnnotMenus()">Organisation</button>
+    <button class="unclear-item" @mousedown.prevent="setSemtag(menuAnnot, 'placeName'); closeAnnotMenus()">Place</button>
+    <button class="unclear-item" @mousedown.prevent="setSemtag(menuAnnot, 'num'); closeAnnotMenus()">Numeral</button>
+    <button v-if="getSemtag(menuAnnot)" class="unclear-item" @mousedown.prevent="setSemtag(menuAnnot, null); closeAnnotMenus()">Clear tag</button>
+  </div>
+  <div v-if="annotTypeOpenId && menuAnnot" class="unclear-menu-fixed type-wrap" :style="annotMenuStyle">
+    <button class="unclear-item" @mousedown.prevent="changeAnnotationType(menuAnnot, 'normalizing'); closeAnnotMenus()">Normalization</button>
+    <button class="unclear-item" @mousedown.prevent="changeAnnotationType(menuAnnot, 'insertion'); closeAnnotMenus()">Insertion</button>
+    <button class="unclear-item" @mousedown.prevent="changeAnnotationType(menuAnnot, 'deletion'); closeAnnotMenus()">Deletion</button>
+    <button class="unclear-item is-noise" @mousedown.prevent="changeAnnotationType(menuAnnot, 'atr_noise'); closeAnnotMenus()">ATR Noise</button>
+    <button class="unclear-item" @mousedown.prevent="changeAnnotationType(menuAnnot, 'non_resolv_abbr'); closeAnnotMenus()">Unresolvable Abbreviation</button>
+    <button class="unclear-item" @mousedown.prevent="changeAnnotationType(menuAnnot, 'markup'); closeAnnotMenus()">Markup</button>
+  </div>
+  <div v-if="annotGapOpenId && menuAnnot" class="unclear-menu-fixed gap-wrap" :style="annotMenuStyle">
+    <button class="unclear-item" @mousedown.prevent="setGap(menuAnnot, 'before', !isGapBefore(menuAnnot))">[[ isGapBefore(menuAnnot) ? '✓ ' : '' ]]Gap before</button>
+    <button class="unclear-item" @mousedown.prevent="setGap(menuAnnot, 'after', !isGapAfter(menuAnnot))">[[ isGapAfter(menuAnnot) ? '✓ ' : '' ]]Gap after</button>
+  </div>
 
   <!-- Bulk action modal (validate or delete similar annotations) -->
   <div class="modal fade" id="bulkValidateModal" tabindex="-1" aria-hidden="true" data-bs-keyboard="true">
@@ -1486,6 +1466,13 @@ body { overflow: hidden; }
 
 </div><!-- /#editor-root -->
 
+<!-- Loading overlay: shown until the Vue app mounts (removed in editor.js'
+     mounted hook). Keeps the sidebar menu visible while the editor builds. -->
+<div id="editor-loading">
+  <div class="spinner-border" role="status"></div>
+  <div class="small">Loading {{ annotations|length }} annotations…</div>
+</div>
+
 {% include "_metadata_modal.html" %}
 
 <!-- Clear pending confirmation modal -->
@@ -1547,7 +1534,7 @@ window.__EDITOR_CONFIG__ = {
 </script>
 
 <script type="importmap">
-{ "imports": { "vue": "https://unpkg.com/vue@3/dist/vue.esm-browser.js" } }
+{ "imports": { "vue": "{{ url_for('static', filename='js/vendor/vue.esm-browser.prod.js') }}" } }
 </script>
 
 <script type="module" src="{{ url_for('static', filename='js/editor.js') }}"></script>

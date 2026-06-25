@@ -16,6 +16,18 @@ import {
 // Module-level pending annotation (raw W3C object, not reactive)
 let pendingAnnotRaw = null;
 
+// Deep-freeze loaded annotations so Vue skips making their nested W3C structure
+// reactive (a large cost at 4000+ annotations). Safe because annotations are
+// treated immutably: edits build new objects via spread and replace the array,
+// never mutating a loaded object in place.
+function deepFreeze(o) {
+  if (o && typeof o === 'object' && !Object.isFrozen(o)) {
+    Object.values(o).forEach(deepFreeze);
+    Object.freeze(o);
+  }
+  return o;
+}
+
 function _textParts(str) {
   return str.split('\n').map((t, i, a) => ({ text: t, br: i < a.length - 1 }));
 }
@@ -30,7 +42,7 @@ export function createEditorApp(config) {
       return {
         lines:               config.lines,
         fullText:            config.fullText,
-        annotations:         config.annotations,
+        annotations:         (config.annotations || []).map(deepFreeze),
         partOffsets:         config.partOffsets || [],
         partLabels:          Object.fromEntries(
           (config.partOffsets || []).map(s => [s.part_id, s.original_filename || ''])
@@ -92,6 +104,17 @@ export function createEditorApp(config) {
           ? [...list].sort((a, b) => getExact(a).localeCompare(getExact(b), undefined, { sensitivity: 'base' }))
           : list;
       },
+      annotMenuStyle() {
+        return { top: this.annotMenuPos.top + 'px', left: this.annotMenuPos.left + 'px',
+                 transform: 'translateX(-100%)' };
+      },
+      // The annotation the shared Tag/Type/Gap menu acts on, derived live from
+      // whichever menu id is open so it always reflects the latest (post-edit)
+      // object rather than a stale reference.
+      menuAnnot() {
+        const id = this.annotTagOpenId || this.annotTypeOpenId || this.annotGapOpenId;
+        return id ? (this.annotations.find(a => a.id === id) || null) : null;
+      },
       panelSourceStyle() { return { flex: `0 0 ${this.sourceWidth}%` }; },
       panelAnnotsStyle() { return { flex: `0 0 ${this.annotsWidth}%` }; },
 
@@ -105,7 +128,7 @@ export function createEditorApp(config) {
       },
 
       sourceHtml() {
-        return buildSourceHtml(this.fullText, this.allAnnotationsSorted, this.selectedAnnotationId, this.partOffsets);
+        return buildSourceHtml(this.fullText, this.allAnnotationsSorted, this.partOffsets);
       },
 
       hasMultipleParts() { return this.partOffsets.length > 1; },
@@ -118,7 +141,6 @@ export function createEditorApp(config) {
         return buildNormalizedPageHtml(
           this.normalizedPageText,
           this.allAnnotationsSorted,
-          this.selectedAnnotationId,
           this.normalizedPositions,
         );
       },
@@ -230,6 +252,17 @@ export function createEditorApp(config) {
     },
 
     watch: {
+      // Selection highlight is a direct class toggle on the matching <mark>
+      // nodes rather than a rebuild of the whole source/normalized HTML — so
+      // clicking an annotation no longer re-parses thousands of marks.
+      selectedAnnotationId(nextId, prevId) {
+        this._applySelectionClass(this.$refs.pageSource,     prevId, nextId, 'selected');
+        this._applySelectionClass(this.$refs.normalizedText, prevId, nextId, 'norm-highlight');
+      },
+      // After a *real* rebuild (annotation added/edited/deleted) the fresh
+      // marks carry no selection class, so re-apply the current one.
+      sourceHtml()         { this.$nextTick(() => this._refreshSelectionClasses()); },
+      normalizedPageHtml() { this.$nextTick(() => this._refreshSelectionClasses()); },
       fontSize(val) {
         document.getElementById('editor-root').style.setProperty('--editor-font', val + 'rem');
         localStorage.setItem('editorFontSize', val);
@@ -264,6 +297,11 @@ export function createEditorApp(config) {
       };
       document.addEventListener('click', this._closeDropdowns);
       if (this.processing.processing) this._startProcessingPoll();
+      // The initial source/normalized render has now painted — drop the
+      // loading overlay (the un-cloaked editor is already visible underneath).
+      this.$nextTick(() => requestAnimationFrame(() => {
+        document.getElementById('editor-loading')?.remove();
+      }));
     },
     beforeUnmount() {
       document.removeEventListener('keydown', this._handleKeydown);
@@ -277,6 +315,23 @@ export function createEditorApp(config) {
       isSpaceInsertion, isSpaceBeforePunct, isSpaceBeforeSpace,
       isInsertionExact(stub) { return stub?.isIns === true; },
       getSemtag, isGapBefore, isGapAfter, renderVisible,
+
+      // ── Selection highlighting (direct class toggle, no HTML rebuild) ─────────
+      // An annotation may render as several <mark> fragments (e.g. split across a
+      // part divider), so toggle the class on every node carrying its id.
+      _applySelectionClass(container, prevId, nextId, cls) {
+        if (!container) return;
+        if (prevId) container.querySelectorAll(`mark[data-annotation="${CSS.escape(prevId)}"]`)
+                             .forEach(n => n.classList.remove(cls));
+        if (nextId) container.querySelectorAll(`mark[data-annotation="${CSS.escape(nextId)}"]`)
+                             .forEach(n => n.classList.add(cls));
+      },
+      // Re-apply the current selection after a rebuild of the source/normalized
+      // HTML (the freshly injected marks start without the class).
+      _refreshSelectionClasses() {
+        this._applySelectionClass(this.$refs.pageSource,     null, this.selectedAnnotationId, 'selected');
+        this._applySelectionClass(this.$refs.normalizedText, null, this.selectedAnnotationId, 'norm-highlight');
+      },
 
       // The stored TextQuoteSelector.exact can be stale (e.g. annotations created
       // while ingesting in "dots" mode store a plain space where the live page
@@ -312,6 +367,23 @@ export function createEditorApp(config) {
         const updated = { ...annot, resp_id: CURRENT_USER_ID, body: [newBody] };
         this.annotations = this.annotations.map(a => a.id === annot.id ? updated : a);
         this.saveAnnotation(updated);
+      },
+
+      // ── Shared Tag/Type/Gap row menus ─────────────────────────────────────────
+      // Open the requested menu for `annot`, anchored under the clicked button.
+      // Clicking the same button again toggles it closed; opening one closes the
+      // others. The menu markup lives once at the app root and reads `menuAnnot`.
+      openAnnotMenu(kind, annot, e) {
+        const idField = { tag: 'annotTagOpenId', type: 'annotTypeOpenId', gap: 'annotGapOpenId' }[kind];
+        const wasOpen = this[idField] === annot.id;
+        this.annotTagOpenId = this.annotTypeOpenId = this.annotGapOpenId = null;
+        if (wasOpen) return;
+        const r = e.currentTarget.getBoundingClientRect();
+        this.annotMenuPos = { top: r.bottom + 3, left: r.right };
+        this[idField] = annot.id;
+      },
+      closeAnnotMenus() {
+        this.annotTagOpenId = this.annotTypeOpenId = this.annotGapOpenId = null;
       },
 
       // ── DOM event listeners on #page-source (registered ONCE at mount) ────────
@@ -1027,8 +1099,8 @@ export function createEditorApp(config) {
       async downloadSynoptic() {
         const sorted  = this.allAnnotationsSorted;
         const normPos = computeNormalizedPositions(this.annotations);
-        const srcHtml  = buildSourceHtml(this.fullText, sorted, null, this.partOffsets);
-        const normHtml = buildNormalizedPageHtml(this.normalizedPageText, sorted, null, normPos);
+        const srcHtml  = buildSourceHtml(this.fullText, sorted, this.partOffsets);
+        const normHtml = buildNormalizedPageHtml(this.normalizedPageText, sorted, normPos);
         const title    = escapeHtml(this.pageLabel || 'Synoptic View');
 
         let fontFace = '';
@@ -1316,7 +1388,7 @@ document.querySelectorAll('.text-col').forEach(col => {
       async _refetchAnnotations() {
         const r = await fetch(urls.documentAnnotations);
         const data = await r.json();
-        this.annotations = data.annotations;
+        this.annotations = (data.annotations || []).map(deepFreeze);
       },
     },
   });

@@ -58,18 +58,30 @@ export function renderVisibleSource(text) {
 // ── Text transformation ───────────────────────────────────────────────────────
 export function applyAnnotations(text, annotations) {
   if (!annotations?.length) return text;
-  // Sort right-to-left; for equal start, process larger-end first so that
-  // deletions/substitutions are applied before same-start insertions (end===start).
+  // Single left-to-right pass: emit each untouched gap then each annotation's
+  // replacement value, building the result in one array join — O(n + length)
+  // instead of the previous O(n × length) repeated full-string slicing (which
+  // rebuilt the whole ~400k-char string per annotation on every edit).
+  //
+  // Sort ascending by start; for equal start, ascending by end so a zero-width
+  // insertion (end === start) is emitted *before* a substitution that starts at
+  // the same offset — i.e. inserted text precedes the annotated span. This is
+  // the same ordering computeNormalizedPositions() uses (insertions first), so
+  // the produced text and the position map stay aligned.
   const sorted = [...annotations].sort((a, b) => {
-    const ds = getStart(b) - getStart(a);
-    return ds !== 0 ? ds : getEnd(b) - getEnd(a);
+    const ds = getStart(a) - getStart(b);
+    return ds !== 0 ? ds : getEnd(a) - getEnd(b);
   });
-  let result = text;
+  const out = [];
+  let cursor = 0;
   for (const a of sorted) {
     const s = getStart(a), e = getEnd(a);
-    result = result.slice(0, s) + getBodyValue(a) + result.slice(e);
+    if (s > cursor) out.push(text.slice(cursor, s));  // untouched text before it
+    out.push(getBodyValue(a));                         // its replacement/insert value
+    cursor = Math.max(cursor, e);
   }
-  return result;
+  if (cursor < text.length) out.push(text.slice(cursor));
+  return out.join('');
 }
 
 // Renders a block divider at each part boundary (after the first), so a
@@ -124,9 +136,12 @@ function _markWithDividers(text, start, end, boundaries, cls, annotId, renderTex
 }
 
 // ── Source panel HTML ─────────────────────────────────────────────────────────
-export function buildSourceHtml(fullText, annotsSorted, selectedAnnotationId, partOffsets = []) {
+// Selection highlighting is applied separately by toggling the `.selected`
+// class directly on the matching <mark> nodes (see editor.js), so this builder
+// is independent of the current selection and only rebuilds when annotations
+// actually change.
+export function buildSourceHtml(fullText, annotsSorted, partOffsets = []) {
   const text  = fullText;
-  const selId = selectedAnnotationId;
   const boundaries = partOffsets
     .filter(s => s.start > 0)
     .map(s => ({ start: s.start, part: s }))
@@ -148,7 +163,6 @@ export function buildSourceHtml(fullText, annotsSorted, selectedAnnotationId, pa
     if (s > cursor) html += _escapeWithDividers(text, cursor, s, boundaries);
 
     const cls = ['r6o-annotation',
-      selId === a.id     ? 'selected'           : '',
       a.validated_by     ? 'r6o-validated'      : '',
       isInsertion(a)     ? 'r6o-insertion'      : '',
       isAtrNoise(a)      ? 'r6o-atr-noise'      : '',
@@ -191,9 +205,11 @@ export function computeNormalizedPositions(annotations) {
 }
 
 // ── Normalized panel HTML ─────────────────────────────────────────────────────
-export function buildNormalizedPageHtml(normalizedText, annotsSorted, selectedAnnotationId, normalizedPositions) {
+// As with buildSourceHtml, the `.norm-highlight` selection class is toggled
+// directly on the matching <mark> nodes (see editor.js), so this builder is
+// independent of the current selection.
+export function buildNormalizedPageHtml(normalizedText, annotsSorted, normalizedPositions) {
   const text      = normalizedText;
-  const selId     = selectedAnnotationId;
   const positions = normalizedPositions;
 
   const annots = annotsSorted
@@ -206,7 +222,6 @@ export function buildNormalizedPageHtml(normalizedText, annotsSorted, selectedAn
     if (pos.start < cursor) continue;
     if (pos.start > cursor) html += escapeHtml(text.slice(cursor, pos.start));
     const cls = ['norm-annot',
-      a.id === selId     ? 'norm-highlight'     : '',
       a.validated_by     ? 'norm-validated'     : '',
       isAtrNoise(a)      ? 'norm-atr-noise'     : '',
       isNonResolvAbbr(a) ? 'norm-nonresolv-abbr': '',

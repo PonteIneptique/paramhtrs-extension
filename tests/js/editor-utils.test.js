@@ -185,10 +185,33 @@ describe('applyAnnotations', () => {
     expect(applyAnnotations('foobar', [ins])).toBe('foo|bar');
   });
 
-  test('multiple substitutions applied right-to-left', () => {
+  test('multiple non-overlapping substitutions', () => {
     const a1 = makeAnnot({ id: 'a1', start: 0, end: 2, exact: 'ab', value: 'X' });
     const a2 = makeAnnot({ id: 'a2', start: 3, end: 5, exact: 'de', value: 'Y' });
     expect(applyAnnotations('ab_de', [a1, a2])).toBe('X_Y');
+  });
+
+  test('passed in reverse order still applies by position', () => {
+    const a1 = makeAnnot({ id: 'a1', start: 0, end: 2, exact: 'ab', value: 'X' });
+    const a2 = makeAnnot({ id: 'a2', start: 3, end: 5, exact: 'de', value: 'Y' });
+    expect(applyAnnotations('ab_de', [a2, a1])).toBe('X_Y');
+  });
+
+  test('insertion at same start as a substitution precedes it', () => {
+    const sub = makeAnnot({ id: 'sub', start: 2, end: 4, exact: 'cd', value: 'XY' });
+    const ins = makeInsertion({ id: 'ins', pos: 2, value: '+' });
+    // pass in both orders to confirm the sort, not input order, decides
+    expect(applyAnnotations('abcdef', [sub, ins])).toBe('ab+XYef');
+    expect(applyAnnotations('abcdef', [ins, sub])).toBe('ab+XYef');
+  });
+
+  test('multiple insertions at the same offset keep document order', () => {
+    // Two zero-width insertions at the same offset are emitted in array order,
+    // matching computeNormalizedPositions() (which also keeps their order) so
+    // the normalized text and its position map stay aligned.
+    const i1 = makeInsertion({ id: 'i1', pos: 1, value: 'ab' });
+    const i2 = makeInsertion({ id: 'i2', pos: 1, value: '+' });
+    expect(applyAnnotations('ef', [i1, i2])).toBe('eab+f');
   });
 
   test('returns original text when annotations is empty', () => {
@@ -206,47 +229,39 @@ describe('applyAnnotations', () => {
 describe('buildSourceHtml', () => {
   test('wraps annotated span in mark', () => {
     const a = makeAnnot({ id: 'a1', start: 0, end: 3, exact: 'foo' });
-    const html = buildSourceHtml('foobar', [a], null);
+    const html = buildSourceHtml('foobar', [a]);
     expect(html).toContain('<mark');
     expect(html).toContain('data-annotation="a1"');
     expect(html).toContain('foo');
     expect(html).toContain('bar');
   });
 
-  test('adds selected class when annotation is selected', () => {
-    const a = makeAnnot({ id: 'a1', start: 0, end: 3 });
-    const html = buildSourceHtml('foobar', [a], 'a1');
-    expect(html).toContain('selected');
-  });
-
-  test('does not add selected class for other annotation', () => {
-    const a = makeAnnot({ id: 'a1', start: 0, end: 3 });
-    const html = buildSourceHtml('foobar', [a], 'other');
-    expect(html).not.toContain('selected');
-  });
+  // Note: the `selected` class is no longer emitted by buildSourceHtml — it's
+  // toggled directly on the matching <mark> nodes in editor.js, so the source
+  // HTML stays stable across selection changes (no full re-render).
 
   test('adds r6o-validated class for validated annotation', () => {
     const a = makeAnnot({ id: 'a1', start: 0, end: 3, validated_by: 42 });
-    const html = buildSourceHtml('foobar', [a], null);
+    const html = buildSourceHtml('foobar', [a]);
     expect(html).toContain('r6o-validated');
   });
 
   test('adds r6o-insertion class for zero-width insertion', () => {
     const ins = makeInsertion({ id: 'ins1', pos: 3 });
-    const html = buildSourceHtml('foobar', [ins], null);
+    const html = buildSourceHtml('foobar', [ins]);
     expect(html).toContain('r6o-insertion');
     // Zero-width mark has no text content
     expect(html).toMatch(/data-annotation="ins1"><\/mark>/);
   });
 
   test('escapes HTML entities in source text', () => {
-    const html = buildSourceHtml('a & b', [], null);
+    const html = buildSourceHtml('a & b', []);
     expect(html).toContain('&amp;');
     expect(html).not.toContain(' & ');
   });
 
   test('plain text with no annotations is escaped and returned', () => {
-    const html = buildSourceHtml('hello', [], null);
+    const html = buildSourceHtml('hello', []);
     expect(html).toBe('hello');
   });
 
@@ -255,7 +270,7 @@ describe('buildSourceHtml', () => {
     const sub = makeAnnot({ id: 'sub', start: 0, end: 3, exact: 'foo', value: 'bar' });
     const ins = makeInsertion({ id: 'ins', pos: 0, value: ' ' });
     // Pass in wrong order to confirm the function sorts correctly
-    const html = buildSourceHtml('foorest', [sub, ins], null);
+    const html = buildSourceHtml('foorest', [sub, ins]);
     const insPos = html.indexOf('data-annotation="ins"');
     const subPos = html.indexOf('data-annotation="sub"');
     expect(insPos).toBeLessThan(subPos);
@@ -312,23 +327,19 @@ describe('buildNormalizedPageHtml', () => {
     const a = makeAnnot({ id: 'a1', start: 0, end: 3, value: 'bar' });
     const normalizedText = 'barXYZ';
     const positions = { a1: { start: 0, end: 3 } };
-    const html = buildNormalizedPageHtml(normalizedText, [a], null, positions);
+    const html = buildNormalizedPageHtml(normalizedText, [a], positions);
     expect(html).toContain('norm-annot');
     expect(html).toContain('data-annotation="a1"');
     expect(html).toContain('bar');
   });
 
-  test('adds norm-highlight class for selected annotation', () => {
-    const a = makeAnnot({ id: 'a1', start: 0, end: 3, value: 'bar' });
-    const positions = { a1: { start: 0, end: 3 } };
-    const html = buildNormalizedPageHtml('barXYZ', [a], 'a1', positions);
-    expect(html).toContain('norm-highlight');
-  });
+  // Note: the `norm-highlight` class is no longer emitted here — like the source
+  // panel's `selected`, it's toggled directly on the matching <mark> in editor.js.
 
   test('skips annotations with zero-length span in normalized text', () => {
     const a = makeAnnot({ id: 'a1', start: 0, end: 3, value: '' });
     const positions = { a1: { start: 0, end: 0 } };
-    const html = buildNormalizedPageHtml('XYZ', [a], null, positions);
+    const html = buildNormalizedPageHtml('XYZ', [a], positions);
     expect(html).not.toContain('data-annotation="a1"');
   });
 });
