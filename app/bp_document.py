@@ -22,7 +22,7 @@ def _queue_normalization_job(document: Document, parts_lines: list, data: dict) 
     worker.py to pick up. Shared by document_create's normalize=true path
     and api_document_reprocess."""
     split_mode = data.get("split_mode", "lines")
-    min_words = int(data.get("min_words", 100))
+    min_words = int(data.get("min_words", 50))
     delimiters = list(data.get("delimiters", "¶;."))
     max_chunk_bytes = current_app.config["MAX_CHUNK_BYTES"]
     chunks, separator = build_chunks(parts_lines, split_mode, min_words, delimiters, max_chunk_bytes)
