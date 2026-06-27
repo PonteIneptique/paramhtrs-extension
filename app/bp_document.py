@@ -208,6 +208,41 @@ def document_editor(document: Document):
 
 
 # -------------------------
+# Dev-only: editor with capped annotation count for design review
+# -------------------------
+
+@bp_document.route("/dev/documents/<int:document_id>")
+@requires_access(Document, 'document_id')
+def document_editor_dev(document: Document):
+    limit = int(request.args.get("limit", 50))
+    lines_data = [
+        {
+            "id": line.id,
+            "order": line.order,
+            "original_text": line.original_text,
+            "part_id": part.id,
+        }
+        for part in document.parts
+        for line in part.lines
+    ]
+    return render_template(
+        "documents/editor.html",
+        page=document,
+        document=document.folder,
+        lines=lines_data,
+        full_text=document.full_text,
+        annotations=(document.annotations or [])[:limit],
+        part_offsets=document.part_offsets,
+        prev_page=document.prev,
+        next_page=document.next,
+        works=[{"id": w.id, "title": w.title, "genre": w.genre} for w in document.works],
+        part_works={part.id: [{"id": w.id, "title": w.title, "genre": w.genre} for w in part.works]
+                    for part in document.parts},
+        processing=_job_progress_dict(document.active_job),
+    )
+
+
+# -------------------------
 # Update a part's metadata (id/original_filename, qid)
 # -------------------------
 

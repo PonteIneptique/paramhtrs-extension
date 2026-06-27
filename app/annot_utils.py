@@ -71,7 +71,7 @@ def _alignments_to_annotations(alignments: list, reference_text: str, char_offse
     """Convert Alignment objects to W3C annotations with positions relative to reference_text."""
     annotations = []
     pos = char_offset
-    for almt in alignments:
+    for idx, almt in enumerate(alignments):
         src_len = len(almt.source)
         if almt.code == 'n' or (almt.code == 's' and almt.source == almt.target):
             pos += src_len
@@ -83,8 +83,16 @@ def _alignments_to_annotations(alignments: list, reference_text: str, char_offse
             # already ends with the character immediately following the source span.
             # Without this, reconstruction appends that character twice: once from
             # the annotation value and once from the original text gap.
+            # Only safe when the next alignment is a plain match (or there is
+            # none): if it's its own substitution/deletion/insertion, that
+            # character already gets its own annotation and stealing it here
+            # would create two overlapping annotations over the same span
+            # (e.g. "gał."→"Gal.:" then "."→":" — the trailing "." must not
+            # also be absorbed into the "gał"→"Gal." annotation).
+            next_almt = alignments[idx + 1] if idx + 1 < len(alignments) else None
             end = pos + src_len
             if (almt.target
+                    and (next_almt is None or next_almt.code == 'n')
                     and end < len(reference_text)
                     and reference_text[end] == almt.target[-1]):
                 end += 1
