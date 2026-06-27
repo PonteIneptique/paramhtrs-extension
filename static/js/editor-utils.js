@@ -27,6 +27,28 @@ export const SEMTAG_LABELS = {
   placeName: 'Place',
   num:       'Numeral',
 };
+export const SEMTAG_ABBREVS = {
+  persName:  'per',
+  orgName:   'org',
+  placeName: 'plc',
+  num:       'num',
+};
+export const ANNOT_TYPE_ICONS = {
+  normalizing:     'fa-spell-check',
+  insertion:       'fa-plus',
+  deletion:        'fa-minus',
+  atr_noise:       'fa-trash',
+  non_resolv_abbr: 'fa-circle-question',
+  markup:          'fa-code',
+};
+export const ANNOT_TYPE_TITLES = {
+  normalizing:    'Normalization',
+  insertion:      'Insertion',
+  deletion:       'Deletion',
+  atr_noise:      'ATR Noise',
+  non_resolv_abbr: 'Unresolvable Abbreviation',
+  markup:         'Markup',
+};
 export function isSpaceExact(annot) {
   return !isInsertion(annot) && !isAtrNoise(annot) && !isNonResolvAbbr(annot) && getExact(annot).trim() === '';
 }

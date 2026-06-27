@@ -306,8 +306,6 @@ body { overflow: hidden; }
 .annot-del { color: #adb5bd; cursor: pointer; flex-shrink: 0; background: none; border: none; padding: 0 2px; }
 .annot-del:hover { color: #dc3545; }
 .annot-pending .annot-target { border-color: #86b7fe; }
-.validate-hint { display: none; font-size: .65em; }
-.validate-btn:hover .validate-hint { display: inline; }
 
 /* ── Normalized panel ── */
 .normalized-text {
@@ -575,6 +573,43 @@ body { overflow: hidden; }
   font-size: 9px; border: 1px solid oklch(38% 0.01 70); color: oklch(72% 0.01 75);
   font-family: 'Inter', sans-serif;
 }
+/* ── Annotation chips (replace unclear-btn in annotation rows) ── */
+.annot-chip {
+  font-family: 'Inter', sans-serif;
+  font-size: calc(var(--editor-font, 1rem) * 0.65); font-weight: 600;
+  border-radius: 3px; padding: 1px 5px;
+  cursor: pointer; border: none;
+  white-space: nowrap; flex-shrink: 0;
+  line-height: 1.6; display: inline-flex;
+  align-items: center;
+}
+.annot-chip:hover { filter: brightness(.93); }
+.annot-chip.is-locked { cursor: default; }
+.annot-chip.is-locked:hover { filter: none; }
+/* tag */
+.annot-chip-tag.is-empty { background: #f8f9fa; color: #adb5bd; }
+.annot-chip-tag.is-set   { background: #cff4fc; color: #055160; }
+/* type */
+.annot-chip-type.type-normalizing     { background: #e9ecef; color: #6c757d; }
+.annot-chip-type.type-insertion       { background: #d1f5d3; color: #157347; }
+.annot-chip-type.type-deletion        { background: #fde8e8; color: #dc3545; }
+.annot-chip-type.type-atr_noise       { background: #dc3545; color: #fff; }
+.annot-chip-type.type-non_resolv_abbr { background: #7952b3; color: #fff; }
+.annot-chip-type.type-markup          { background: #0d6efd; color: #fff; }
+/* gap */
+.annot-chip-gap.is-empty { background: #f8f9fa; color: #adb5bd; }
+.annot-chip-gap.is-set   { background: #343a40; color: #fff; }
+/* validate/delete — icon-only, no border */
+.annot-action-btn {
+  background: none; border: none; cursor: pointer;
+  font-size: .7rem; padding: 0 2px; flex-shrink: 0; line-height: 1;
+}
+.annot-validate-btn {
+  color: #198754; font-size: .8rem; font-weight: 700;
+  background: rgba(25,135,84,.1); border-radius: 3px; padding: 0 4px;
+}
+.annot-validate-btn:hover { background: rgba(25,135,84,.22); }
+
 /* ── Unclear dropdown ── */
 .unclear-wrap { position: relative; display: inline-flex; }
 .unclear-btn {
@@ -924,20 +959,27 @@ body { overflow: hidden; }
               @keydown.enter.prevent="$event.target.blur()"
               @keydown.tab.prevent="tabToNext(annot)">
           </label>
-          <span v-if="getSemtag(annot)" class="badge bg-info text-dark me-1" style="font-size:.65em;">[[ semtagLabels[getSemtag(annot)] ]]</span>
-          <span v-if="isGapBefore(annot)" class="badge bg-dark text-white me-1" style="font-size:.65em;" title="Gap before this word">⊣gap</span>
-          <span v-if="isGapAfter(annot)" class="badge bg-dark text-white me-1" style="font-size:.65em;" title="Gap after this word">gap⊢</span>
-          <button class="unclear-btn tag-wrap" @mousedown.prevent.stop="openAnnotMenu('tag', annot, $event)" title="Tag as person/org/place/numeral">
-            Tag <span style="font-size:.8em; opacity:.7;">▾</span>
+          <button class="annot-chip annot-chip-tag tag-wrap"
+                  :class="getSemtag(annot) ? 'is-set' : 'is-empty'"
+                  @mousedown.prevent.stop="openAnnotMenu('tag', annot, $event)"
+                  :title="getSemtag(annot) ? semtagLabels[getSemtag(annot)] : 'Tag as person/org/place/numeral'">
+            <template v-if="getSemtag(annot)">[[ semtagAbbrevs[getSemtag(annot)] ]]</template>
+            <i v-else class="fa-solid fa-tag"></i>
           </button>
-          <button class="unclear-btn type-wrap" @mousedown.prevent.stop="openAnnotMenu('type', annot, $event)" title="Change annotation type">
-            Type <span style="font-size:.8em; opacity:.7;">▾</span>
+          <button class="annot-chip annot-chip-type type-wrap"
+                  :class="['type-' + (annot.body?.[0]?.purpose || 'normalizing'), { 'is-locked': isInsertion(annot) }]"
+                  @mousedown.prevent.stop="!isInsertion(annot) && openAnnotMenu('type', annot, $event)"
+                  :title="annotTypeTitles[annot.body?.[0]?.purpose || 'normalizing']">
+            <i :class="'fa-solid ' + annotTypeIcons[annot.body?.[0]?.purpose || 'normalizing']"></i>
           </button>
-          <button class="unclear-btn gap-wrap" @mousedown.prevent.stop="openAnnotMenu('gap', annot, $event)" title="Mark as cut in two (gap before/after)">
-            Gap <span style="font-size:.8em; opacity:.7;">▾</span>
+          <button class="annot-chip annot-chip-gap gap-wrap"
+                  :class="(isGapBefore(annot) || isGapAfter(annot)) ? 'is-set' : 'is-empty'"
+                  @mousedown.prevent.stop="openAnnotMenu('gap', annot, $event)"
+                  title="Gap before/after">
+            [[ isGapBefore(annot) && isGapAfter(annot) ? '⊢⊣' : isGapBefore(annot) ? '⊢' : isGapAfter(annot) ? '⊣' : 'gap' ]]
           </button>
-          <button class="btn btn-sm btn-outline-success py-0 px-1 validate-btn" title="Validate (Ctrl+Enter)"
-                  @click.stop="validateAnnotation(annot)">✓<span class="validate-hint"> (Ctrl+Enter)</span></button>
+          <button class="annot-action-btn annot-validate-btn validate-btn" title="Validate (Ctrl+Enter)"
+                  @click.stop="validateAnnotation(annot)">✓</button>
           <button class="annot-del" @click.stop="removeAnnotation(annot)" title="Remove">✕</button>
         </div>
       </template>
@@ -1029,19 +1071,26 @@ body { overflow: hidden; }
               @blur="onAnnotBlur(annot, $event)"
               @keydown.enter.prevent="$event.target.blur()">
           </label>
-          <span v-if="getSemtag(annot)" class="badge bg-info text-dark me-1" style="font-size:.65em;">[[ semtagLabels[getSemtag(annot)] ]]</span>
-          <span v-if="isGapBefore(annot)" class="badge bg-dark text-white me-1" style="font-size:.65em;" title="Gap before this word">⊣gap</span>
-          <span v-if="isGapAfter(annot)" class="badge bg-dark text-white me-1" style="font-size:.65em;" title="Gap after this word">gap⊢</span>
-          <button class="unclear-btn tag-wrap" @mousedown.prevent.stop="openAnnotMenu('tag', annot, $event)" title="Tag as person/org/place/numeral">
-            Tag <span style="font-size:.8em; opacity:.7;">▾</span>
+          <button class="annot-chip annot-chip-tag tag-wrap"
+                  :class="getSemtag(annot) ? 'is-set' : 'is-empty'"
+                  @mousedown.prevent.stop="openAnnotMenu('tag', annot, $event)"
+                  :title="getSemtag(annot) ? semtagLabels[getSemtag(annot)] : 'Tag as person/org/place/numeral'">
+            <template v-if="getSemtag(annot)">[[ semtagAbbrevs[getSemtag(annot)] ]]</template>
+            <i v-else class="fa-solid fa-tag"></i>
           </button>
-          <button class="unclear-btn type-wrap" @mousedown.prevent.stop="openAnnotMenu('type', annot, $event)" title="Change annotation type">
-            Type <span style="font-size:.8em; opacity:.7;">▾</span>
+          <button class="annot-chip annot-chip-type type-wrap"
+                  :class="['type-' + (annot.body?.[0]?.purpose || 'normalizing'), { 'is-locked': isInsertion(annot) }]"
+                  @mousedown.prevent.stop="!isInsertion(annot) && openAnnotMenu('type', annot, $event)"
+                  :title="annotTypeTitles[annot.body?.[0]?.purpose || 'normalizing']">
+            <i :class="'fa-solid ' + annotTypeIcons[annot.body?.[0]?.purpose || 'normalizing']"></i>
           </button>
-          <button class="unclear-btn gap-wrap" @mousedown.prevent.stop="openAnnotMenu('gap', annot, $event)" title="Mark as cut in two (gap before/after)">
-            Gap <span style="font-size:.8em; opacity:.7;">▾</span>
+          <button class="annot-chip annot-chip-gap gap-wrap"
+                  :class="(isGapBefore(annot) || isGapAfter(annot)) ? 'is-set' : 'is-empty'"
+                  @mousedown.prevent.stop="openAnnotMenu('gap', annot, $event)"
+                  title="Gap before/after">
+            [[ isGapBefore(annot) && isGapAfter(annot) ? '⊢⊣' : isGapBefore(annot) ? '⊢' : isGapAfter(annot) ? '⊣' : 'gap' ]]
           </button>
-          <button class="btn btn-sm btn-outline-secondary py-0 px-1" title="Un-validate"
+          <button class="annot-action-btn" style="color:#6c757d;" title="Un-validate"
                   @click.stop="unvalidateAnnotation(annot)">↩</button>
           <button class="annot-del" @click.stop="removeAnnotation(annot)" title="Remove">✕</button>
         </div>
@@ -1077,7 +1126,6 @@ body { overflow: hidden; }
   </div>
   <div v-if="annotTypeOpenId && menuAnnot" class="unclear-menu-fixed type-wrap" :style="annotMenuStyle">
     <button class="unclear-item" @mousedown.prevent="changeAnnotationType(menuAnnot, 'normalizing'); closeAnnotMenus()">Normalization</button>
-    <button class="unclear-item" @mousedown.prevent="changeAnnotationType(menuAnnot, 'insertion'); closeAnnotMenus()">Insertion</button>
     <button class="unclear-item" @mousedown.prevent="changeAnnotationType(menuAnnot, 'deletion'); closeAnnotMenus()">Deletion</button>
     <button class="unclear-item is-noise" @mousedown.prevent="changeAnnotationType(menuAnnot, 'atr_noise'); closeAnnotMenus()">ATR Noise</button>
     <button class="unclear-item" @mousedown.prevent="changeAnnotationType(menuAnnot, 'non_resolv_abbr'); closeAnnotMenus()">Unresolvable Abbreviation</button>

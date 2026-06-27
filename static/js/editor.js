@@ -2,7 +2,7 @@ import { createApp } from 'vue';
 import {
   getSelector, getStart, getEnd, getExact, getPrefix, getSuffix, getBodyValue,
   isInsertion, isAtrNoise, isNonResolvAbbr, getNonResolvReason, isSpaceExact, isMarkup,
-  getSemtag, SEMTAG_LABELS, isGapBefore, isGapAfter,
+  getSemtag, SEMTAG_LABELS, SEMTAG_ABBREVS, ANNOT_TYPE_ICONS, ANNOT_TYPE_TITLES, isGapBefore, isGapAfter,
   escapeHtml, renderVisible, applyAnnotations,
   buildSourceHtml, computeNormalizedPositions, buildNormalizedPageHtml,
   findSimilarAnnotations,
@@ -52,6 +52,9 @@ export function createEditorApp(config) {
         pageStatus:          config.pageStatus,
         processing:          config.processing || { processing: false, status: null, current: 0, total: 0, error: null },
         semtagLabels:        SEMTAG_LABELS,
+        semtagAbbrevs:       SEMTAG_ABBREVS,
+        annotTypeIcons:      ANNOT_TYPE_ICONS,
+        annotTypeTitles:     ANNOT_TYPE_TITLES,
         hoveredAnnotationId: null,
         hoverEnabled:        localStorage.getItem('editorHoverEnabled') === '1',
         selectedAnnotationId: null,
