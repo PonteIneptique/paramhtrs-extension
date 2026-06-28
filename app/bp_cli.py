@@ -14,6 +14,7 @@ from .normalize_jobs import _split_on_punct, _enforce_max_bytes
 from .char_alignment import align_words
 
 cli_group = AppGroup("align", help="Chunk & align original vs regularized text.")
+user_cli_group = AppGroup("user", help="User management commands.")
 
 _LABEL = {"n": "match", "s": "sub  ", "i": "ins  ", "d": "del  "}
 
@@ -115,6 +116,20 @@ def align_run(orig, orig_file, reg, reg_file, model, delimiters,
             all_alignments.append(a)
 
     _print_alignments(all_alignments, show_nulls=not hide_nulls)
+
+
+@user_cli_group.command("change-password")
+@click.argument("username")
+@click.password_option(prompt="New password", confirmation_prompt="Confirm new password")
+def change_password(username, password):
+    """Change the password for USERNAME."""
+    from .models import User, db
+    user = User.query.filter_by(username=username).first()
+    if user is None:
+        raise click.ClickException(f"User '{username}' not found.")
+    user.set_password(password)
+    db.session.commit()
+    click.echo(f"Password updated for '{username}'.")
 
 
 def _load_model(model_path: str):
