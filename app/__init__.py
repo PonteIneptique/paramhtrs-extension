@@ -59,8 +59,9 @@ login_manager.login_view = 'bp_auth.login'
 from .bp_comma import bp_comma
 app.register_blueprint(bp_comma)
 
-from .bp_cli import cli_group
+from .bp_cli import cli_group, user_cli_group
 app.cli.add_command(cli_group)
+app.cli.add_command(user_cli_group)
 
 from .bp_quantize import quantize_command
 app.cli.add_command(quantize_command)
