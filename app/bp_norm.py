@@ -4,6 +4,7 @@ from flask import Blueprint, render_template, request, jsonify, abort
 from flask_login import login_required, current_user
 
 from .models import db, Line, Document, Annotation
+from .annot_utils import apply_deletion_to_annotations
 from .bp_auth import requires_access
 
 bp_norm = Blueprint(
@@ -75,10 +76,43 @@ def api_page_save_annotations(document: Document):
 # Delete a line
 # -------------------------
 
-@bp_norm.route("/api/lines/<int:line_id>/delete", methods=["GET", "POST", "DELETE"])
+@bp_norm.route("/api/lines/<int:line_id>/delete", methods=["POST", "DELETE"])
 @requires_access(Line, 'line_id')
 def line_delete(line: Line):
-    document_id = line.part.document_id
+    """Delete a line and re-offset the document's annotations in one transaction.
+
+    Annotation offsets are absolute positions into Document.full_text, which is
+    derived live from the lines table — so removing a line shifts every offset
+    after it. Doing both here keeps the two in sync even if the browser goes away.
+    """
+    document = line.part.document
+    lines = document.lines
+    idx = lines.index(line)
+    old_text = document.full_text
+
+    starts = [o["start"] for o in document.line_offsets]
+    start, end = starts[idx], starts[idx] + len(line.original_text)
+    if idx < len(lines) - 1:
+        d0, d1 = start, end + 1        # the line and its trailing newline
+    elif idx > 0:
+        d0, d1 = start - 1, end        # last of several: the preceding newline
+    else:
+        d0, d1 = start, end            # only line in the document
+
+    # Derive the post-deletion text by cutting the same range, rather than
+    # re-reading document.full_text through a collection that may still hold
+    # the deleted instance.
+    full_text = old_text[:d0] + old_text[d1:]
+
     db.session.delete(line)
+    rows = Annotation.query.filter_by(document_id=document.id).all()
+    for dropped in apply_deletion_to_annotations(rows, d0, d1, full_text):
+        db.session.delete(dropped)
     db.session.commit()
-    return jsonify({"status": "ok", "document_id": document_id})
+
+    return jsonify({
+        "status": "ok",
+        "document_id": document.id,
+        "full_text": full_text,
+        "part_offsets": document.part_offsets,
+    })
