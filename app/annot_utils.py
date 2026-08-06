@@ -197,6 +197,59 @@ def apply_annotations_to_text(original_text: str, annotations: list) -> str:
     return result
 
 
+QUOTE_CONTEXT = 10  # chars of prefix/suffix kept in a TextQuoteSelector
+
+
+def remap_offsets_after_deletion(start: int, end: int, d0: int, d1: int):
+    """Map an annotation's (start, end) across a deletion of the character
+    range [d0, d1) from the document text.
+
+    Offsets before the cut are untouched, offsets inside it collapse onto d0,
+    offsets after it shift left by the deleted length. Returns None when the
+    annotation no longer covers any surviving text — i.e. its whole span was
+    inside the deleted range (including zero-length insertions anchored there).
+    """
+    delta = d1 - d0
+
+    def move(x: int) -> int:
+        if x <= d0:
+            return x
+        if x < d1:
+            return d0
+        return x - delta
+
+    new_start, new_end = move(start), move(end)
+    if start == end:
+        # Insertion point: it survives only if it was outside the cut.
+        return None if d0 < start < d1 else (new_start, new_end)
+    if new_start == new_end:
+        return None
+    return new_start, new_end
+
+
+def rebuild_quote_selector(row, full_text: str) -> None:
+    """Refresh an Annotation row's TextQuoteSelector cache from `full_text`."""
+    start, end = row.target_start, row.target_end
+    row.target_exact = full_text[start:end]
+    row.target_prefix = full_text[max(0, start - QUOTE_CONTEXT):start]
+    row.target_suffix = full_text[end:end + QUOTE_CONTEXT]
+
+
+def apply_deletion_to_annotations(rows: list, d0: int, d1: int, new_full_text: str) -> list:
+    """Remap annotation rows in place across a deletion of [d0, d1), rebuilding
+    their quote selectors against the post-deletion text. Returns the rows that
+    no longer cover any text and should be deleted."""
+    dropped = []
+    for row in rows:
+        remapped = remap_offsets_after_deletion(row.target_start, row.target_end, d0, d1)
+        if remapped is None:
+            dropped.append(row)
+            continue
+        row.target_start, row.target_end = remapped
+        rebuild_quote_selector(row, new_full_text)
+    return dropped
+
+
 def _escape_segment(text: str) -> str:
     """Escape plain text segment, replacing newlines with <lb/>."""
     result = []

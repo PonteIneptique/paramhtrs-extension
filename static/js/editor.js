@@ -1045,23 +1045,21 @@ export function createEditorApp(config) {
 
       // ── Delete line ───────────────────────────────────────────────────────────
       async deleteLine(line, idx) {
-        if (!confirm(`Delete line #${idx+1}? Annotations on this line will also be removed.`)) return;
-        const r = await fetch(urls.deleteLine.replace('__LINE_ID__', line.id), { method:'POST' });
-        if (!r.ok) return;
-        let charStart = 0;
-        for (let i = 0; i < idx; i++) charStart += this.lines[i].original_text.length + 1;
-        const lineLen      = line.original_text.length, charEnd = charStart + lineLen;
-        const removedChars = lineLen + (idx < this.lines.length - 1 ? 1 : 0);
-        this.annotations = this.annotations
-          .filter(a => !(getStart(a) >= charStart && getStart(a) <= charEnd))
-          .map(a => {
-            const pos = getSelector(a, 'TextPositionSelector');
-            if (pos && pos.start > charEnd) { pos.start -= removedChars; pos.end -= removedChars; }
-            return a;
-          });
-        this.lines.splice(idx, 1);
-        this.fullText = this.lines.map(l => l.original_text).join('\n');
-        await this.saveAnnotations();
+        if (!confirm(`Delete line #${idx+1}? Annotations on this line will be removed, and later ones will shift.`)) return;
+        try {
+          // The server deletes the line and re-offsets the annotations in one
+          // transaction; we just take the resulting text and reload them.
+          const r = await fetch(urls.deleteLine.replace('__LINE_ID__', line.id), { method:'POST' });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const data = await r.json();
+          this.lines.splice(idx, 1);
+          this.fullText = data.full_text ?? this.lines.map(l => l.original_text).join('\n');
+          if (data.part_offsets) this.partOffsets = data.part_offsets;
+          await this._refetchAnnotations();
+          this.saveError = false;
+        } catch {
+          this.saveError = true;
+        }
       },
 
       async saveAnnotation(annot) {
