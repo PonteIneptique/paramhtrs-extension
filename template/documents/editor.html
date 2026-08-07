@@ -594,6 +594,10 @@ body { overflow: hidden; }
 .annot-chip:hover { filter: brightness(.93); }
 .annot-chip.is-locked { cursor: default; }
 .annot-chip.is-locked:hover { filter: none; }
+/* A chip that does not apply to this annotation type still holds its slot, so
+   the chip columns stay aligned down the panel. Not v-if: that would reflow the
+   row and leave the remaining chips ragged. */
+.annot-chip.is-hidden { visibility: hidden; pointer-events: none; }
 /* tag */
 .annot-chip-tag.is-empty { background: #f8f9fa; color: #adb5bd; }
 .annot-chip-tag.is-set   { background: #cff4fc; color: #055160; }
@@ -609,20 +613,22 @@ body { overflow: hidden; }
 .annot-chip-gap.is-set   { background: #343a40; color: #fff; }
 /* resolution certainty — muted for the settled states, warm for the doubtful
    ones so scanning the column shows where the uncertainty is */
-.annot-chip-cert.cert-informed  { background: #f8f9fa; color: #adb5bd; }
-.annot-chip-cert.cert-ocr_fix   { background: #f8f9fa; color: #ced4da; }
-.annot-chip-cert.cert-arbitrary { background: #fff3cd; color: #997404; }
-.annot-chip-cert.cert-ambiguous { background: #f8d7da; color: #b02a37; }
+/* The three graded states run green → amber → red; the default sits on a
+   different hue entirely, because it is not a grade but the other group. */
+.annot-chip-cert.cert-ocr_fix   { background: #e3fafc; color: #0b7285; }
+.annot-chip-cert.cert-informed  { background: #d3f9d8; color: #2b8a3e; }
+.annot-chip-cert.cert-ambiguous { background: #fff3cd; color: #997404; }
+.annot-chip-cert.cert-arbitrary { background: #f8d7da; color: #b02a37; }
 /* The two-checkboxes glyph reads as noise below ~15px, so give it more room than
    the Font Awesome icons it sits beside. */
 .cert-svg { width: 16px; height: 16px; display: block; }
 .annot-chip-cert .cert-svg { width: 15px; height: 15px; margin: -2px 0; }
 /* Menu-row parts: fixed icon column, label, trailing check for the current state */
 .menu-item-icon { width: 16px; flex-shrink: 0; display: inline-flex; justify-content: center; }
-.menu-item-icon.cert-informed  { color: #adb5bd; }
-.menu-item-icon.cert-ocr_fix   { color: #ced4da; }
-.menu-item-icon.cert-arbitrary { color: #997404; }
-.menu-item-icon.cert-ambiguous { color: #b02a37; }
+.menu-item-icon.cert-ocr_fix   { color: #0b7285; }
+.menu-item-icon.cert-informed  { color: #2b8a3e; }
+.menu-item-icon.cert-ambiguous { color: #997404; }
+.menu-item-icon.cert-arbitrary { color: #b02a37; }
 .menu-item-check { margin-left: auto; color: #198754; font-weight: 700; }
 /* validate/delete — icon-only, no border */
 .annot-action-btn {
@@ -652,10 +658,10 @@ body { overflow: hidden; }
 .draft-type-btn:hover { filter: brightness(.93); }
 /* Staged certainty, shown inside the button so it reads as state, not a control */
 .draft-type-cert { display: inline-flex; align-items: center; }
-.draft-type-cert.cert-informed  { color: #adb5bd; }
-.draft-type-cert.cert-ocr_fix   { color: #ced4da; }
-.draft-type-cert.cert-arbitrary { color: #997404; }
-.draft-type-cert.cert-ambiguous { color: #b02a37; }
+.draft-type-cert.cert-ocr_fix   { color: #0b7285; }
+.draft-type-cert.cert-informed  { color: #2b8a3e; }
+.draft-type-cert.cert-ambiguous { color: #997404; }
+.draft-type-cert.cert-arbitrary { color: #b02a37; }
 .draft-type-menu {
   position: absolute; top: calc(100% + 3px); right: 0;
   background: #fff; border: 1px solid #dee2e6; border-radius: 5px;
@@ -671,6 +677,15 @@ body { overflow: hidden; }
 }
 .menu-item:hover { background: #f8f9fa; }
 .menu-item.is-noise { color: #dc3545; }
+/* Group heading inside a menu — says what the states below it apply to */
+.menu-group {
+  padding: 6px 12px 2px; font-size: .62rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .04em; color: #adb5bd;
+  font-family: 'Inter', sans-serif; white-space: nowrap;
+  border-top: 1px solid #f1f3f5;
+}
+.menu-group:first-child { border-top: none; }
+.menu-group.is-sub { padding-left: 34px; background: #fcfcfd; }
 /* A qualifier row nested under its type */
 .menu-item.is-sub { padding-left: 34px; background: #fcfcfd; }
 .menu-item.is-sub:hover { background: #f1f3f5; }
@@ -1042,7 +1057,7 @@ body { overflow: hidden; }
               <span style="font-size:.8em; opacity:.7;">▾</span>
             </button>
             <div v-if="pendingTypeOpen" class="draft-type-menu">
-              <template v-for="t in draftTypes" :key="t">
+              <template v-for="t in annotTypeMenu" :key="t">
                 <button class="menu-item" :class="{ 'is-noise': t === 'atr_noise' }"
                         @mousedown.prevent="pickDraftType(t)"
                         @mouseenter="showHelp('type', t, $event)" @mouseleave="hideHelp">
@@ -1054,16 +1069,19 @@ body { overflow: hidden; }
                 <!-- Normalization ▸ certainty: the only qualifier that doesn't
                      commit, since the value still has to be typed. -->
                 <template v-if="pendingTypeSubmenu === 'normalizing' && t === 'normalizing'">
-                  <button v-for="c in certStates" :key="c" class="menu-item is-sub"
-                          @mousedown.prevent="stageDraftCert(c)"
-                          @mouseenter="showHelp('cert', c, $event)" @mouseleave="hideHelp">
-                    <span class="menu-item-icon" :class="'cert-' + c">
-                      <i v-if="certIcons[c]" :class="'fa-solid ' + certIcons[c]"></i>
-                      <svg v-else class="cert-svg" aria-hidden="true"><use href="#icon-ambiguous"/></svg>
-                    </span>
-                    [[ certLabels[c] ]]
-                    <span v-if="pendingCert === c" class="menu-item-check">✓</span>
-                  </button>
+                  <template v-for="g in certGroups" :key="g.label">
+                    <div class="menu-group is-sub">[[ g.label ]]</div>
+                    <button v-for="c in g.states" :key="c" class="menu-item is-sub"
+                            @mousedown.prevent="stageDraftCert(c)"
+                            @mouseenter="showHelp('cert', c, $event)" @mouseleave="hideHelp">
+                      <span class="menu-item-icon" :class="'cert-' + c">
+                        <i v-if="certIcons[c]" :class="'fa-solid ' + certIcons[c]"></i>
+                        <svg v-else class="cert-svg" aria-hidden="true"><use href="#icon-ambiguous"/></svg>
+                      </span>
+                      [[ certLabels[c] ]]
+                      <span v-if="pendingCert === c" class="menu-item-check">✓</span>
+                    </button>
+                  </template>
                 </template>
                 <template v-if="pendingTypeSubmenu === 'non_resolv_abbr' && t === 'non_resolv_abbr'">
                   <button v-for="r in nonResolvReasons" :key="r" class="menu-item is-sub"
@@ -1115,14 +1133,6 @@ body { overflow: hidden; }
               @keydown.enter.prevent="$event.target.blur()"
               @keydown.tab.prevent="tabToNext(annot)">
           </label>
-          <button class="annot-chip annot-chip-tag tag-wrap"
-                  :class="getSemtag(annot) ? 'is-set' : 'is-empty'"
-                  @mousedown.prevent.stop="openAnnotMenu('tag', annot, $event)"
-                  @mouseenter="showHelp('semtag', getSemtag(annot), $event)" @mouseleave="hideHelp"
-                  :title="getSemtag(annot) ? semtagLabels[getSemtag(annot)] : 'Tag as person/org/place/numeral'">
-            <template v-if="getSemtag(annot)">[[ semtagAbbrevs[getSemtag(annot)] ]]</template>
-            <i v-else class="fa-solid fa-tag"></i>
-          </button>
           <button class="annot-chip annot-chip-type type-wrap"
                   :class="['type-' + (annot.body?.[0]?.purpose || 'normalizing'), { 'is-locked': isInsertion(annot) }]"
                   @mousedown.prevent.stop="!isInsertion(annot) && openAnnotMenu('type', annot, $event)"
@@ -1130,21 +1140,28 @@ body { overflow: hidden; }
                   :title="annotTypeTitles[annot.body?.[0]?.purpose || 'normalizing']">
             <i :class="'fa-solid ' + annotTypeIcons[annot.body?.[0]?.purpose || 'normalizing']"></i>
           </button>
-          <button class="annot-chip annot-chip-gap gap-wrap"
-                  :class="(isGapBefore(annot) || isGapAfter(annot)) ? 'is-set' : 'is-empty'"
-                  @mousedown.prevent.stop="openAnnotMenu('gap', annot, $event)"
-                  @mouseenter="showHelp('gap', null, $event)" @mouseleave="hideHelp"
-                  title="Gap before/after">
-            [[ isGapBefore(annot) && isGapAfter(annot) ? '⊢⊣' : isGapBefore(annot) ? '⊢' : isGapAfter(annot) ? '⊣' : 'gap' ]]
-          </button>
-          <button v-if="isResolution(annot)"
-                  class="annot-chip annot-chip-cert cert-wrap"
-                  :class="'cert-' + getCert(annot)"
+          <button class="annot-chip annot-chip-cert cert-wrap"
+                  :class="['cert-' + getCert(annot), { 'is-hidden': !isResolution(annot) }]"
                   @mousedown.prevent.stop="openAnnotMenu('cert', annot, $event)"
                   @mouseenter="showHelp('cert', getCert(annot), $event)" @mouseleave="hideHelp"
                   :title="'Resolution: ' + certLabels[getCert(annot)]">
             <i v-if="certIcons[getCert(annot)]" :class="'fa-solid ' + certIcons[getCert(annot)]"></i>
             <svg v-else class="cert-svg" aria-hidden="true"><use href="#icon-ambiguous"/></svg>
+          </button>
+          <button class="annot-chip annot-chip-tag tag-wrap"
+                  :class="[getSemtag(annot) ? 'is-set' : 'is-empty', { 'is-hidden': !hasQualifiers(annot) }]"
+                  @mousedown.prevent.stop="openAnnotMenu('tag', annot, $event)"
+                  @mouseenter="showHelp('semtag', getSemtag(annot), $event)" @mouseleave="hideHelp"
+                  :title="getSemtag(annot) ? semtagLabels[getSemtag(annot)] : 'Tag as person/org/place/numeral'">
+            <template v-if="getSemtag(annot)">[[ semtagAbbrevs[getSemtag(annot)] ]]</template>
+            <i v-else class="fa-solid fa-tag"></i>
+          </button>
+          <button class="annot-chip annot-chip-gap gap-wrap"
+                  :class="[(isGapBefore(annot) || isGapAfter(annot)) ? 'is-set' : 'is-empty', { 'is-hidden': !hasQualifiers(annot) }]"
+                  @mousedown.prevent.stop="openAnnotMenu('gap', annot, $event)"
+                  @mouseenter="showHelp('gap', null, $event)" @mouseleave="hideHelp"
+                  title="Gap before/after">
+            [[ isGapBefore(annot) && isGapAfter(annot) ? '⊢⊣' : isGapBefore(annot) ? '⊢' : isGapAfter(annot) ? '⊣' : 'gap' ]]
           </button>
           <button class="annot-action-btn annot-validate-btn validate-btn" title="Validate (Ctrl+Enter)"
                   @click.stop="validateAnnotation(annot)">✓</button>
@@ -1186,14 +1203,6 @@ body { overflow: hidden; }
               @blur="onAnnotBlur(annot, $event)"
               @keydown.enter.prevent="$event.target.blur()">
           </label>
-          <button class="annot-chip annot-chip-tag tag-wrap"
-                  :class="getSemtag(annot) ? 'is-set' : 'is-empty'"
-                  @mousedown.prevent.stop="openAnnotMenu('tag', annot, $event)"
-                  @mouseenter="showHelp('semtag', getSemtag(annot), $event)" @mouseleave="hideHelp"
-                  :title="getSemtag(annot) ? semtagLabels[getSemtag(annot)] : 'Tag as person/org/place/numeral'">
-            <template v-if="getSemtag(annot)">[[ semtagAbbrevs[getSemtag(annot)] ]]</template>
-            <i v-else class="fa-solid fa-tag"></i>
-          </button>
           <button class="annot-chip annot-chip-type type-wrap"
                   :class="['type-' + (annot.body?.[0]?.purpose || 'normalizing'), { 'is-locked': isInsertion(annot) }]"
                   @mousedown.prevent.stop="!isInsertion(annot) && openAnnotMenu('type', annot, $event)"
@@ -1201,21 +1210,28 @@ body { overflow: hidden; }
                   :title="annotTypeTitles[annot.body?.[0]?.purpose || 'normalizing']">
             <i :class="'fa-solid ' + annotTypeIcons[annot.body?.[0]?.purpose || 'normalizing']"></i>
           </button>
-          <button class="annot-chip annot-chip-gap gap-wrap"
-                  :class="(isGapBefore(annot) || isGapAfter(annot)) ? 'is-set' : 'is-empty'"
-                  @mousedown.prevent.stop="openAnnotMenu('gap', annot, $event)"
-                  @mouseenter="showHelp('gap', null, $event)" @mouseleave="hideHelp"
-                  title="Gap before/after">
-            [[ isGapBefore(annot) && isGapAfter(annot) ? '⊢⊣' : isGapBefore(annot) ? '⊢' : isGapAfter(annot) ? '⊣' : 'gap' ]]
-          </button>
-          <button v-if="isResolution(annot)"
-                  class="annot-chip annot-chip-cert cert-wrap"
-                  :class="'cert-' + getCert(annot)"
+          <button class="annot-chip annot-chip-cert cert-wrap"
+                  :class="['cert-' + getCert(annot), { 'is-hidden': !isResolution(annot) }]"
                   @mousedown.prevent.stop="openAnnotMenu('cert', annot, $event)"
                   @mouseenter="showHelp('cert', getCert(annot), $event)" @mouseleave="hideHelp"
                   :title="'Resolution: ' + certLabels[getCert(annot)]">
             <i v-if="certIcons[getCert(annot)]" :class="'fa-solid ' + certIcons[getCert(annot)]"></i>
             <svg v-else class="cert-svg" aria-hidden="true"><use href="#icon-ambiguous"/></svg>
+          </button>
+          <button class="annot-chip annot-chip-tag tag-wrap"
+                  :class="[getSemtag(annot) ? 'is-set' : 'is-empty', { 'is-hidden': !hasQualifiers(annot) }]"
+                  @mousedown.prevent.stop="openAnnotMenu('tag', annot, $event)"
+                  @mouseenter="showHelp('semtag', getSemtag(annot), $event)" @mouseleave="hideHelp"
+                  :title="getSemtag(annot) ? semtagLabels[getSemtag(annot)] : 'Tag as person/org/place/numeral'">
+            <template v-if="getSemtag(annot)">[[ semtagAbbrevs[getSemtag(annot)] ]]</template>
+            <i v-else class="fa-solid fa-tag"></i>
+          </button>
+          <button class="annot-chip annot-chip-gap gap-wrap"
+                  :class="[(isGapBefore(annot) || isGapAfter(annot)) ? 'is-set' : 'is-empty', { 'is-hidden': !hasQualifiers(annot) }]"
+                  @mousedown.prevent.stop="openAnnotMenu('gap', annot, $event)"
+                  @mouseenter="showHelp('gap', null, $event)" @mouseleave="hideHelp"
+                  title="Gap before/after">
+            [[ isGapBefore(annot) && isGapAfter(annot) ? '⊢⊣' : isGapBefore(annot) ? '⊢' : isGapAfter(annot) ? '⊣' : 'gap' ]]
           </button>
           <button class="annot-action-btn" style="color:#6c757d;" title="Un-validate"
                   @click.stop="unvalidateAnnotation(annot)">↩</button>
@@ -1286,16 +1302,19 @@ body { overflow: hidden; }
   </div>
 
   <div v-if="annotCertOpenId && menuAnnot" class="menu-fixed cert-wrap" :style="annotMenuStyle">
-    <button v-for="c in certStates" :key="c" class="menu-item"
-            @mousedown.prevent="setCert(menuAnnot, c); closeAnnotMenus()"
-            @mouseenter="showHelp('cert', c, $event)" @mouseleave="hideHelp">
-      <span class="menu-item-icon" :class="'cert-' + c">
-        <i v-if="certIcons[c]" :class="'fa-solid ' + certIcons[c]"></i>
-        <svg v-else class="cert-svg" aria-hidden="true"><use href="#icon-ambiguous"/></svg>
-      </span>
-      [[ certLabels[c] ]]
-      <span v-if="getCert(menuAnnot) === c" class="menu-item-check">✓</span>
-    </button>
+    <template v-for="g in certGroups" :key="g.label">
+      <div class="menu-group">[[ g.label ]]</div>
+      <button v-for="c in g.states" :key="c" class="menu-item"
+              @mousedown.prevent="setCert(menuAnnot, c); closeAnnotMenus()"
+              @mouseenter="showHelp('cert', c, $event)" @mouseleave="hideHelp">
+        <span class="menu-item-icon" :class="'cert-' + c">
+          <i v-if="certIcons[c]" :class="'fa-solid ' + certIcons[c]"></i>
+          <svg v-else class="cert-svg" aria-hidden="true"><use href="#icon-ambiguous"/></svg>
+        </span>
+        [[ certLabels[c] ]]
+        <span v-if="getCert(menuAnnot) === c" class="menu-item-check">✓</span>
+      </button>
+    </template>
   </div>
 
   <!-- Bulk action modal (validate or delete similar annotations) -->
@@ -1593,7 +1612,33 @@ body { overflow: hidden; }
                   </button>
                 </div>
               </Teleport>
-              <button ref="fmTagBtn" class="fm-menu-btn fm-tag-wrap" @click.stop="e => toggleFocusDropdown('Tag', e)" tabindex="-1">
+              <button v-if="isResolution(focusCurrent)" class="fm-menu-btn fm-cert-wrap"
+                      :class="{ 'is-active': getCert(focusCurrent) === 'arbitrary' || getCert(focusCurrent) === 'ambiguous' }"
+                      @click.stop="e => toggleFocusDropdown('Cert', e)" tabindex="-1"
+                      :title="'Resolution: ' + certLabels[getCert(focusCurrent)]">
+                <i v-if="certIcons[getCert(focusCurrent)]" :class="'fa-solid ' + certIcons[getCert(focusCurrent)]"></i>
+                <svg v-else class="cert-svg" aria-hidden="true"><use href="#icon-ambiguous"/></svg>
+                [[ certLabels[getCert(focusCurrent)] ]] <span style="font-size:.75em; opacity:.85;">▾</span>
+              </button>
+              <Teleport to="body">
+                <div v-if="focusCertOpen" class="fm-menu-fixed"
+                     :style="{ top: focusMenuPos.top + 'px', left: focusMenuPos.left + 'px', transform: 'translate(-50%, -100%)' }">
+                  <template v-for="g in certGroups" :key="g.label">
+                    <div class="menu-group">[[ g.label ]]</div>
+                    <button v-for="c in g.states" :key="c" class="fm-menu-item"
+                            @click.stop="focusSetCert(c)"
+                            @mouseenter="showHelp('cert', c, $event)" @mouseleave="hideHelp">
+                      <span class="menu-item-icon" :class="'cert-' + c">
+                        <i v-if="certIcons[c]" :class="'fa-solid ' + certIcons[c]"></i>
+                        <svg v-else class="cert-svg" aria-hidden="true"><use href="#icon-ambiguous"/></svg>
+                      </span>
+                      [[ certLabels[c] ]]
+                      <span v-if="getCert(focusCurrent) === c" class="menu-item-check">✓</span>
+                    </button>
+                  </template>
+                </div>
+              </Teleport>
+              <button v-if="hasQualifiers(focusCurrent)" ref="fmTagBtn" class="fm-menu-btn fm-tag-wrap" @click.stop="e => toggleFocusDropdown('Tag', e)" tabindex="-1">
                 Tag <span style="font-size:.75em; opacity:.85;">▾</span>
               </button>
               <Teleport to="body">
@@ -1616,30 +1661,7 @@ body { overflow: hidden; }
                   </template>
                 </div>
               </Teleport>
-              <button v-if="isResolution(focusCurrent)" class="fm-menu-btn fm-cert-wrap"
-                      :class="{ 'is-active': getCert(focusCurrent) === 'arbitrary' || getCert(focusCurrent) === 'ambiguous' }"
-                      @click.stop="e => toggleFocusDropdown('Cert', e)" tabindex="-1"
-                      :title="'Resolution: ' + certLabels[getCert(focusCurrent)]">
-                <i v-if="certIcons[getCert(focusCurrent)]" :class="'fa-solid ' + certIcons[getCert(focusCurrent)]"></i>
-                <svg v-else class="cert-svg" aria-hidden="true"><use href="#icon-ambiguous"/></svg>
-                [[ certLabels[getCert(focusCurrent)] ]] <span style="font-size:.75em; opacity:.85;">▾</span>
-              </button>
-              <Teleport to="body">
-                <div v-if="focusCertOpen" class="fm-menu-fixed"
-                     :style="{ top: focusMenuPos.top + 'px', left: focusMenuPos.left + 'px', transform: 'translate(-50%, -100%)' }">
-                  <button v-for="c in certStates" :key="c" class="fm-menu-item"
-                          @click.stop="focusSetCert(c)"
-                          @mouseenter="showHelp('cert', c, $event)" @mouseleave="hideHelp">
-                    <span class="menu-item-icon" :class="'cert-' + c">
-                      <i v-if="certIcons[c]" :class="'fa-solid ' + certIcons[c]"></i>
-                      <svg v-else class="cert-svg" aria-hidden="true"><use href="#icon-ambiguous"/></svg>
-                    </span>
-                    [[ certLabels[c] ]]
-                    <span v-if="getCert(focusCurrent) === c" class="menu-item-check">✓</span>
-                  </button>
-                </div>
-              </Teleport>
-              <button class="fm-menu-btn fm-gap-wrap" :class="{ 'is-active': isGapBefore(focusCurrent) || isGapAfter(focusCurrent) }" @click.stop="e => toggleFocusDropdown('Gap', e)" tabindex="-1">
+              <button v-if="hasQualifiers(focusCurrent)" class="fm-menu-btn fm-gap-wrap" :class="{ 'is-active': isGapBefore(focusCurrent) || isGapAfter(focusCurrent) }" @click.stop="e => toggleFocusDropdown('Gap', e)" tabindex="-1">
                 <span v-if="isGapBefore(focusCurrent)">◂</span> Gap <span v-if="isGapAfter(focusCurrent)">▸</span> <span style="font-size:.75em; opacity:.85;">▾</span>
               </button>
               <Teleport to="body">

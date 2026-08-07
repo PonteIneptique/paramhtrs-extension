@@ -35,8 +35,11 @@ export const SEMTAG_ABBREVS = {
 };
 export const ANNOT_TYPE_ICONS = {
   normalizing:     'fa-spell-check',
-  insertion:       'fa-plus',
-  deletion:        'fa-minus',
+  insertion:       'fa-square-plus',
+  // Strikethrough, not a minus: a deletion removes source text, which is what
+  // the editorial mark means — and it stays distinct from ATR noise's trash,
+  // which discards text as unreadable rather than deleting it deliberately.
+  deletion:        'fa-strikethrough',
   atr_noise:       'fa-trash',
   non_resolv_abbr: 'fa-circle-question',
   markup:          'fa-code',
@@ -53,18 +56,39 @@ export function isSpaceExact(annot) {
   return !isInsertion(annot) && !isAtrNoise(annot) && !isNonResolvAbbr(annot) && getExact(annot).trim() === '';
 }
 
-// ── Resolution certainty ──────────────────────────────────────────────────────
-// A "resolution" is a plain substitution — the annotation type that expands an
-// abbreviation or normalizes a form. Defined negatively, the same way
-// stats_report.py:_is_substitution does, so the two stay in sync.
-export function isResolution(annot) {
-  return !isInsertion(annot) && !isAtrNoise(annot) && !isNonResolvAbbr(annot) && !isMarkup(annot);
+// ── What an annotation can carry ──────────────────────────────────────────────
+// An empty value is a deletion. Checked on the value rather than the purpose so
+// rows written before derivePurpose existed are classified correctly too.
+export function isDeletion(annot) {
+  return !isInsertion(annot) && !getBodyValue(annot);
 }
-// Absent value means the default, 'informed'.
-export function getCert(annot) { return annot?.body?.[0]?.cert || 'informed'; }
+// Tag, Gap and Certainty describe the *output* text of an annotation, so they
+// only apply where there is output to describe: a deletion emits no tokens at
+// all, an insertion has no source, and ATR noise is passed through verbatim
+// inside <unclear>. Those three carry no qualifier chips.
+export function hasQualifiers(annot) {
+  return !isInsertion(annot) && !isAtrNoise(annot) && !isDeletion(annot);
+}
+// A "resolution" is a substitution that produced a form someone chose — the only
+// thing certainty can grade. Narrower than hasQualifiers: an unresolvable
+// abbreviation resolves nothing, and markup changes no text.
+export function isResolution(annot) {
+  return hasQualifiers(annot) && !isNonResolvAbbr(annot) && !isMarkup(annot);
+}
+// Most annotations are plain normalisations or ATR fixes, where certainty is not
+// a question — so that is the default, stored as the absence of a value.
+export const CERT_DEFAULT = 'ocr_fix';
+export function getCert(annot) { return annot?.body?.[0]?.cert || CERT_DEFAULT; }
 
-// Menu order, most-confident first.
-export const CERT_STATES = ['informed', 'arbitrary', 'ambiguous', 'ocr_fix'];
+// The states split by what they can describe: only an abbreviation *resolution*
+// can be more or less certain — a mechanical normalisation resolves nothing.
+// Menus render these groups so the distinction is visible at the point of choice.
+export const CERT_GROUPS = [
+  { label: 'Normalisation & ATR correction', states: ['ocr_fix'] },
+  // Ordered by descending certainty, which is also the TEI ramp: high, medium, low.
+  { label: 'Abbreviation resolution',        states: ['informed', 'ambiguous', 'arbitrary'] },
+];
+export const CERT_STATES = CERT_GROUPS.flatMap(g => g.states);
 
 export const CERT_LABELS = {
   informed:  'Informed spelling',
@@ -115,7 +139,8 @@ export const TYPE_HELP = {
 };
 export const CERT_HELP = {
   informed:  { anchor: 'g13', text:
-    'Context, the rest of the manuscript, or standard usage justifies the form you wrote.' },
+    'Resolving an abbreviation: context, the rest of the manuscript, or standard usage ' +
+    'justifies the expansion you wrote.' },
   arbitrary: { anchor: 'g13', text:
     'You are sure what the word is, but the spelling you picked is one of several ' +
     'defensible ones and nothing in the source settles it.' },
@@ -123,8 +148,8 @@ export const CERT_HELP = {
     'The source genuinely supports more than one reading and you committed to one. ' +
     'Unlike an Unresolvable Abbreviation, you did resolve it.' },
   ocr_fix:   { anchor: 'g13', text:
-    'Nothing was resolved — the change is mechanical (v→u, or a plain ATR misreading), ' +
-    'so certainty does not apply.' },
+    'The default. No abbreviation was resolved — the change is a spelling normalisation ' +
+    '(v→u) or an ATR correction, so certainty does not apply.' },
 };
 export const SEMTAG_HELP = {
   persName:  { anchor: 'entity-tagging', text: 'A person. Tagged independently of any text change.' },
@@ -160,13 +185,11 @@ export function helpFor(kind, key) {
   return HELP_MAPS[kind]?.[key] ?? null;
 }
 
-// Every annotation type, in menu order — offerable on a *committed* row, where
-// an annotation can also be turned into an insertion.
-export const ANNOT_TYPE_MENU = ['normalizing', 'insertion', 'deletion', 'atr_noise', 'non_resolv_abbr', 'markup'];
-// Types offerable on a *draft* annotation, in menu order. 'insertion' is absent
-// on purpose: it is structural (start === end), derived in commitPending, never
-// chosen.
-export const DRAFT_TYPES = ['normalizing', 'deletion', 'atr_noise', 'non_resolv_abbr', 'markup'];
+// The types a menu may offer, in menu order. 'insertion' is absent on purpose:
+// it requires a null source (start === end), so it cannot be chosen — only
+// created by insert mode and derived by derivePurpose. Offering it would leave
+// purpose:'insertion' on an annotation that still spans text.
+export const ANNOT_TYPE_MENU = ['normalizing', 'deletion', 'atr_noise', 'non_resolv_abbr', 'markup'];
 // Reasons for an unresolvable abbreviation. Same four entities as SEMTAG_LABELS
 // minus 'num', plus a catch-all.
 export const NON_RESOLV_REASONS = ['persName', 'orgName', 'placeName', 'other'];

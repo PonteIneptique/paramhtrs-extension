@@ -30,10 +30,13 @@
     <p><strong>Rule:</strong> Only spaces get inserted or deleted as a deliberate normalization choice — never
     letters.</p>
     <p><strong>Details:</strong> <strong>Insertion</strong> applies to a missing word space, or to merging a
-    line-break hyphen into the next line. <strong>Deletion</strong> is not a normalization choice you make
-    deliberately on spaces or letters; where it appears it is almost always an alignment artifact, except to remove
-    a space before punctuation (see 6.) or when marking <strong>ATR Noise</strong> (see 9.). If a token is genuinely
-    split across a page or column break, use the <strong>Gap</strong> toggle instead of merging text across pages.</p>
+    line-break hyphen into the next line. It is not offered in the Type menu, because an insertion has no source
+    text to replace: create one with <strong>insert mode</strong>, by clicking the point in the source where the
+    text belongs. <strong>Deletion</strong> is not a normalization choice you make deliberately on spaces or
+    letters; where it appears it is almost always an alignment artifact, except to remove a space before punctuation
+    (see 7.) or when marking <strong>ATR Noise</strong> (see 10.). An annotation whose normalized form you leave
+    empty becomes a deletion automatically. If a token is genuinely split across a page or column break, use the
+    <strong>Gap</strong> toggle instead of merging text across pages.</p>
     <p><strong>TEI Equivalent:</strong> Insertions appear inline with no standoff record. A Gap renders as a nested
     <code>&lt;gap/&gt;</code> inside the token at the page/column boundary.</p>
     <div class="example">
@@ -130,30 +133,39 @@
     <h3 id="g13">13. How certain is the resolution?</h3>
     <p><strong>Rule:</strong> When you do resolve something, record how sure you are of the form you chose.</p>
     <p><strong>Details:</strong> Every Normalization annotation carries a certainty chip, set with one click from the
-    annotation row (or from focus mode). Four states:</p>
+    annotation row (or from focus mode). Only an <em>abbreviation resolution</em> can be more or less certain — a
+    mechanical normalisation resolves nothing — so the four states fall into two groups, and the menus show them that
+    way.</p>
+    <p><strong>Normalisation &amp; ATR correction</strong> — the default; leave it alone unless you expanded an
+    abbreviation:</p>
     <ul>
-        <li><strong>Informed spelling</strong> — the default. Context, the rest of the manuscript, or standard usage
-        justifies the form you wrote.</li>
+        <li><strong>Normalisation / OCR&nbsp;Fix</strong> — no abbreviation was resolved: the change is a spelling
+        normalisation (a <em>v</em>&nbsp;→&nbsp;<em>u</em>, see 1.) or a straightforward correction of an ATR
+        misreading (see 3.), so certainty doesn't apply.</li>
+    </ul>
+    <p><strong>Abbreviation resolution</strong> — how sure you are of the expansion you wrote:</p>
+    <ul>
+        <li><strong>Informed spelling</strong> — context, the rest of the manuscript, or standard usage justifies the
+        expansion.</li>
+        <li><strong>Ambiguous spelling</strong> — the source genuinely supports more than one reading, and you picked
+        one. Unlike an <strong>Unresolvable Abbreviation</strong> (see 12.), you did commit to a resolution.</li>
         <li><strong>Arbitrary spelling</strong> — you are sure <em>what</em> the word is, but the spelling you picked is
         one of several defensible ones and nothing in the source settles it.</li>
-        <li><strong>Ambiguous spelling</strong> — the source genuinely supports more than one reading, and you picked
-        one. Unlike an <strong>Unresolvable Abbreviation</strong>, you did commit to a resolution.</li>
-        <li><strong>Normalisation / OCR&nbsp;Fix</strong> — nothing was resolved: the change is mechanical (a
-        <em>v</em>&nbsp;→&nbsp;<em>u</em> normalisation, or a straightforward correction of an ATR misreading), so
-        certainty doesn't apply.</li>
     </ul>
     <p>Recording this is what will later let us separate resolutions that can be trusted as training data from those
     that only reflect an editorial convention.</p>
     <p><strong>TEI Equivalent:</strong> A <code>cert</code> attribute on the word's standoff span —
-    <code>cert="high"</code> for an informed spelling, <code>cert="low"</code> for an arbitrary spelling,
-    <code>cert="medium"</code> for an ambiguous one. <em>Normalisation / OCR&nbsp;Fix</em> emits no attribute.</p>
+    <code>cert="high"</code> for an informed spelling, <code>cert="medium"</code> for an ambiguous one, and
+    <code>cert="low"</code> for an arbitrary spelling. The default <em>Normalisation / OCR&nbsp;Fix</em> emits no
+    attribute at all, so only a deliberate resolution is ever graded in the export.</p>
 
     <h2 id="entity-tagging">Entity tagging</h2>
     <p><strong>Rule:</strong> Tag persons, organisations, places, and numerals independently of any text change.</p>
     <p><strong>Details:</strong> Use <strong>Markup</strong> with the appropriate semtag (<strong>Person</strong>/
     <em>persName</em>, <strong>Organisation</strong>/<em>orgName</em>, <strong>Place</strong>/<em>placeName</em>,
-    <strong>Numeral</strong>/<em>num</em>); semtags can also be attached to a Normalization/Insertion annotation when
-    the entity itself needed correction (e.g. an expanded name). It matters, on the long term, to keep a
+    <strong>Numeral</strong>/<em>num</em>); a semtag can also be attached to a Normalization when the entity itself
+    needed correction (e.g. an expanded name). Deletions, insertions and ATR Noise carry no Tag, Gap or Certainty:
+    they produce no output text for those to describe. It matters, on the long term, to keep a
     confidently-resolved <strong>persName</strong> (full name given, or tagged Markup once spelled out) distinct from
     one left as an <strong>Unresolvable Abbreviation</strong> for lack of context — that distinction is what will let
     us study, over time, which abbreviation patterns are reliably resolvable and which genuinely require external

@@ -2,7 +2,8 @@ import { describe, test, expect } from '@jest/globals';
 import {
   getSelector, getStart, getEnd, getExact, getPrefix, getSuffix, getBodyValue,
   isInsertion, isAtrNoise, isNonResolvAbbr, getNonResolvReason, isSpaceExact,
-  isResolution, getCert, derivePurpose,
+  isResolution, hasQualifiers, isDeletion, getCert, derivePurpose,
+  CERT_DEFAULT, CERT_GROUPS, CERT_STATES, CERT_LABELS,
   escapeHtml, applyAnnotations,
   buildSourceHtml, computeNormalizedPositions, buildNormalizedPageHtml,
   findSimilarAnnotations,
@@ -647,8 +648,8 @@ describe('isResolution', () => {
     expect(isResolution(makeAnnot({}))).toBe(true);
   });
 
-  test('deletion is a resolution', () => {
-    expect(isResolution(makeAnnot({ value: '', purpose: 'deletion' }))).toBe(true);
+  test('deletion is not a resolution — it produces no form to grade', () => {
+    expect(isResolution(makeAnnot({ value: '', purpose: 'deletion' }))).toBe(false);
   });
 
   test('insertion is not a resolution', () => {
@@ -669,6 +670,44 @@ describe('isResolution', () => {
 
   test('markup is not a resolution', () => {
     expect(isResolution(makeAnnot({ purpose: 'markup' }))).toBe(false);
+  });
+});
+
+describe('isDeletion', () => {
+  test('an empty value is a deletion whatever the stored purpose', () => {
+    expect(isDeletion(makeAnnot({ value: '', purpose: 'deletion' }))).toBe(true);
+    // rows written before derivePurpose existed
+    expect(isDeletion(makeAnnot({ value: '', purpose: 'normalizing' }))).toBe(true);
+  });
+
+  test('a non-empty value is not a deletion', () => {
+    expect(isDeletion(makeAnnot({ value: 'bar' }))).toBe(false);
+  });
+
+  test('an empty insertion is not a deletion', () => {
+    expect(isDeletion(makeAnnot({ start: 3, end: 3, exact: '', value: '' }))).toBe(false);
+  });
+});
+
+describe('hasQualifiers', () => {
+  test('normalizations, unresolvable abbreviations and markup carry qualifiers', () => {
+    expect(hasQualifiers(makeAnnot({}))).toBe(true);
+    expect(hasQualifiers(makeNonResolvAnnot({}))).toBe(true);
+    expect(hasQualifiers(makeAnnot({ purpose: 'markup' }))).toBe(true);
+  });
+
+  test('deletion, ATR noise and insertion do not', () => {
+    expect(hasQualifiers(makeAnnot({ value: '', purpose: 'deletion' }))).toBe(false);
+    expect(hasQualifiers(makeAnnot({ purpose: 'atr_noise' }))).toBe(false);
+    expect(hasQualifiers(makeInsertion({}))).toBe(false);
+  });
+
+  test('a resolution is always a subset of what carries qualifiers', () => {
+    for (const a of [makeAnnot({}), makeNonResolvAnnot({}), makeInsertion({}),
+                     makeAnnot({ purpose: 'markup' }), makeAnnot({ purpose: 'atr_noise' }),
+                     makeAnnot({ value: '', purpose: 'deletion' })]) {
+      if (isResolution(a)) expect(hasQualifiers(a)).toBe(true);
+    }
   });
 });
 
@@ -712,8 +751,8 @@ describe('derivePurpose', () => {
 });
 
 describe('getCert', () => {
-  test('defaults to informed when absent', () => {
-    expect(getCert(makeAnnot({}))).toBe('informed');
+  test('defaults to ocr_fix when absent', () => {
+    expect(getCert(makeAnnot({}))).toBe('ocr_fix');
   });
 
   test('returns the stored value', () => {
@@ -722,13 +761,28 @@ describe('getCert', () => {
     expect(getCert(a)).toBe('ambiguous');
   });
 
-  test('empty string falls back to informed', () => {
+  test('empty string falls back to the default', () => {
     const a = makeAnnot({});
     a.body[0].cert = '';
-    expect(getCert(a)).toBe('informed');
+    expect(getCert(a)).toBe(CERT_DEFAULT);
   });
 
-  test('null annotation falls back to informed', () => {
-    expect(getCert(null)).toBe('informed');
+  test('null annotation falls back to the default', () => {
+    expect(getCert(null)).toBe(CERT_DEFAULT);
+  });
+});
+
+describe('CERT_GROUPS', () => {
+  test('the default state is the one that is not an abbreviation resolution', () => {
+    const [normalisation, resolution] = CERT_GROUPS;
+    expect(normalisation.states).toEqual([CERT_DEFAULT]);
+    // descending certainty, matching the TEI ramp high / medium / low
+    expect(resolution.states).toEqual(['informed', 'ambiguous', 'arbitrary']);
+  });
+
+  test('the groups cover every state exactly once', () => {
+    expect(CERT_STATES).toEqual(['ocr_fix', 'informed', 'ambiguous', 'arbitrary']);
+    expect(new Set(CERT_STATES).size).toBe(CERT_STATES.length);
+    expect(Object.keys(CERT_LABELS).sort()).toEqual([...CERT_STATES].sort());
   });
 });

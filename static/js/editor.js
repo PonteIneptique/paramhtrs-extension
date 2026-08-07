@@ -3,8 +3,8 @@ import {
   getSelector, getStart, getEnd, getExact, getPrefix, getSuffix, getBodyValue,
   isInsertion, isAtrNoise, isNonResolvAbbr, getNonResolvReason, isSpaceExact, isMarkup,
   getSemtag, SEMTAG_LABELS, SEMTAG_ABBREVS, ANNOT_TYPE_ICONS, ANNOT_TYPE_TITLES, isGapBefore, isGapAfter,
-  isResolution, getCert, CERT_STATES, CERT_LABELS, CERT_ICONS,
-  ANNOT_TYPE_MENU, DRAFT_TYPES, NON_RESOLV_REASONS, NON_RESOLV_REASON_LABELS, helpFor, anchorLabel,
+  isResolution, hasQualifiers, isDeletion, getCert, CERT_DEFAULT, CERT_GROUPS, CERT_LABELS, CERT_ICONS,
+  ANNOT_TYPE_MENU, NON_RESOLV_REASONS, NON_RESOLV_REASON_LABELS, helpFor, anchorLabel,
   derivePurpose,
   escapeHtml, renderVisible, applyAnnotations,
   buildSourceHtml, computeNormalizedPositions, buildNormalizedPageHtml,
@@ -66,11 +66,10 @@ export function createEditorApp(config) {
         semtagAbbrevs:       SEMTAG_ABBREVS,
         annotTypeIcons:      ANNOT_TYPE_ICONS,
         annotTypeTitles:     ANNOT_TYPE_TITLES,
-        certStates:          CERT_STATES,
+        certGroups:          CERT_GROUPS,
         certLabels:          CERT_LABELS,
         certIcons:           CERT_ICONS,
         annotTypeMenu:       ANNOT_TYPE_MENU,
-        draftTypes:          DRAFT_TYPES,
         draftTypeSubmenus:   DRAFT_TYPE_SUBMENUS,
         nonResolvReasons:    NON_RESOLV_REASONS,
         nonResolvReasonLabels: NON_RESOLV_REASON_LABELS,
@@ -89,7 +88,7 @@ export function createEditorApp(config) {
         // qualifier list is expanded inside the draft Type menu.
         pendingTypeSubmenu:  null,
         // Certainty staged on the draft; applied by commitPending.
-        pendingCert:         'informed',
+        pendingCert:         CERT_DEFAULT,
         annotTagOpenId:      null,
         annotTypeOpenId:     null,
         annotGapOpenId:      null,
@@ -348,7 +347,7 @@ export function createEditorApp(config) {
       isSpaceInsertion, isSpaceBeforePunct, isSpaceBeforeSpace,
       isInsertionExact(stub) { return stub?.isIns === true; },
       getSemtag, isGapBefore, isGapAfter, renderVisible,
-      isResolution, getCert,
+      isResolution, hasQualifiers, isDeletion, getCert,
 
       // ── Selection highlighting (direct class toggle, no HTML rebuild) ─────────
       // An annotation may render as several <mark> fragments (e.g. split across a
@@ -395,11 +394,11 @@ export function createEditorApp(config) {
 
       // ── Mark an annotation's token as cut in two (gap before/after) ────────────
       // ── Set how certain the resolution is ─────────────────────────────────────
-      // 'informed' is the default, so it is stored as the absence of a value —
+      // The default state is stored as the absence of a value —
       // existing annotations and payloads stay untouched.
       setCert(annot, cert) {
         const newBody = { ...annot.body[0] };
-        if (cert && cert !== 'informed') newBody.cert = cert; else delete newBody.cert;
+        if (cert && cert !== CERT_DEFAULT) newBody.cert = cert; else delete newBody.cert;
         const updated = { ...annot, resp_id: CURRENT_USER_ID, body: [newBody] };
         this.annotations = this.annotations.map(a => a.id === annot.id ? updated : a);
         this.saveAnnotation(updated);
@@ -742,7 +741,7 @@ export function createEditorApp(config) {
         this.pendingAnnot       = null;
         this.pendingTypeOpen    = false;
         this.pendingTypeSubmenu = null;
-        this.pendingCert        = 'informed';
+        this.pendingCert        = CERT_DEFAULT;
       },
 
       commitPending(value) {
@@ -750,7 +749,7 @@ export function createEditorApp(config) {
         this._commitDraft((exact, annot) => {
           const body = { type: 'TextualBody', value: value ?? '',
                          purpose: derivePurpose(annot, value) };
-          if (cert !== 'informed') body.cert = cert;
+          if (cert !== CERT_DEFAULT) body.cert = cert;
           return body;
         });
       },

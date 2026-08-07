@@ -71,11 +71,51 @@ def test_cert_chip_present_in_both_rows(editor_page):
     assert editor_page.count('class="annot-chip annot-chip-cert cert-wrap"') == 2
 
 
-def test_cert_menus_iterate_the_shared_state_list(editor_page):
-    """Both menus render from certStates, so labels and icons cannot drift apart."""
-    assert 'v-for="c in certStates"' in editor_page
+def test_chip_order_is_type_certainty_tag_gap(editor_page):
+    """Chips read outwards from what the annotation *is*: its type, then how sure
+    the resolution is, then the entity tag, then the gap. Same order in the rows
+    and in the focus-mode toolbar."""
+    for chips in ("annot-chip-type", "annot-chip-cert", "annot-chip-tag", "annot-chip-gap"):
+        assert editor_page.count(f'class="annot-chip {chips}') == 2
+
+    # Match the full class attribute: the bare names also appear in the
+    # stylesheet above the markup, in a different order.
+    def order(names, prefix):
+        return [n for _, n in sorted((editor_page.index(prefix + n), n) for n in names)]
+
+    wanted = ["type", "cert", "tag", "gap"]
+    assert order(wanted, 'class="annot-chip annot-chip-') == wanted
+    assert order(wanted, 'class="fm-menu-btn fm-') == wanted
+
+
+def test_qualifier_chips_are_gated(editor_page):
+    """Tag, Gap and Certainty describe an annotation's output text, so they are
+    hidden on the types that have none: deletion, ATR noise and insertion."""
+    # In the rows they keep their slot (is-hidden), so the chip columns stay
+    # aligned: Tag + Gap on both rows, and Certainty via isResolution.
+    assert editor_page.count("'is-hidden': !hasQualifiers(annot)") == 4
+    assert editor_page.count("'is-hidden': !isResolution(annot)") == 2
+    assert 'v-if="hasQualifiers(annot)"' not in editor_page   # would reflow the row
+    # Focus mode is a centred toolbar, not a column, so there it is a real v-if
+    assert editor_page.count('v-if="hasQualifiers(focusCurrent)"') == 2
+    assert 'v-if="isResolution(focusCurrent)"' in editor_page
+
+
+def test_cert_menus_iterate_the_shared_groups(editor_page):
+    """Every certainty menu renders from certGroups, so the labels, the icons and
+    the abbreviation-only grouping cannot drift apart between menus."""
+    assert editor_page.count('v-for="g in certGroups"') == 3   # row, focus, draft
+    assert editor_page.count('v-for="c in g.states"') == 3
     assert "setCert(menuAnnot, c)" in editor_page
     assert "focusSetCert(c)" in editor_page
+    assert "stageDraftCert(c)" in editor_page
+
+
+def test_cert_group_headings_are_rendered(editor_page):
+    """The grouping is what tells an annotator the graded states are for
+    abbreviation resolutions only."""
+    assert editor_page.count('class="menu-group"') == 2        # row + focus menus
+    assert editor_page.count('class="menu-group is-sub"') == 1  # draft submenu
 
 
 def test_menu_items_show_their_icon(editor_page):
@@ -102,12 +142,12 @@ def test_focus_mode_has_a_cert_button(editor_page):
     assert "fm-cert-wrap" in editor_page
 
 
-# ── Draft-row Type menu ───────────────────────────────────────────────────────
+# ── Type menus ────────────────────────────────────────────────────────────────
 
-def test_draft_menu_uses_the_deployed_type_vocabulary(editor_page):
-    """The draft menu renders from ANNOT_TYPE_TITLES rather than its own strings,
-    so it cannot drift from the Type chip on a committed row."""
-    assert 'v-for="t in draftTypes"' in editor_page
+def test_type_menus_use_the_deployed_vocabulary(editor_page):
+    """Every Type menu renders from ANNOT_TYPE_TITLES rather than its own
+    strings, so they cannot drift from the Type chip on a committed row."""
+    assert editor_page.count('v-for="t in annotTypeMenu"') == 3  # row, focus, draft
     assert "annotTypeTitles[t]" in editor_page
     assert "annotTypeIcons[t]" in editor_page
     # The old bespoke labels are gone
@@ -120,14 +160,15 @@ def test_no_unclear_vocabulary_remains(editor_page):
     assert "unclear" not in editor_page.lower()
 
 
-def test_draft_type_list_matches_the_js_constant():
-    """DRAFT_TYPES in editor-utils.js is the single source of the menu order.
-    Insertion is structural (start == end) and must never appear there."""
+def test_type_menu_never_offers_insertion():
+    """An insertion requires a null source (start == end), so it can only be
+    created by insert mode — offering it would leave purpose:'insertion' on an
+    annotation that still spans text."""
     import re
     from pathlib import Path
     src = Path(__file__).resolve().parents[1] / "static" / "js" / "editor-utils.js"
-    m = re.search(r"export const DRAFT_TYPES = \[(.*?)\];", src.read_text(), re.DOTALL)
-    assert m, "DRAFT_TYPES not found in editor-utils.js"
+    m = re.search(r"export const ANNOT_TYPE_MENU = \[(.*?)\];", src.read_text(), re.DOTALL)
+    assert m, "ANNOT_TYPE_MENU not found in editor-utils.js"
     types = re.findall(r"'([^']+)'", m.group(1))
     assert types == ["normalizing", "deletion", "atr_noise", "non_resolv_abbr", "markup"]
     assert "insertion" not in types

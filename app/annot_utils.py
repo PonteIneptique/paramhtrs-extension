@@ -38,9 +38,10 @@ SEMTAG_TAGS = {
     "num":       "num",
 }
 
-# Certainty of a resolution → TEI @cert. 'ocr_fix' (a mechanical normalisation,
-# where certainty is meaningless) and anything unknown emit no attribute; a
-# missing value defaults to 'informed'.
+# Certainty of an abbreviation resolution → TEI @cert. The default, 'ocr_fix'
+# (a spelling normalisation or ATR correction, which resolves nothing), and
+# anything unknown emit no attribute — only a deliberate resolution is graded.
+CERT_DEFAULT = "ocr_fix"
 CERT_TEI = {
     "informed":  "high",
     "arbitrary": "low",
@@ -585,7 +586,7 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
             # insertions have no source form to be uncertain about. Mirrors
             # isResolution() in static/js/editor-utils.js.
             purpose = body.get("purpose") or "normalizing"
-            cert = (body.get("cert") or "informed") if purpose not in ("markup", "insertion") else None
+            cert = (body.get("cert") or CERT_DEFAULT) if purpose not in ("markup", "insertion") else None
             if semtag in SEMTAG_TAGS:
                 pre_len = len(body_parts)
                 process_segment(body.get("value", ""), orig_label=original_text[start:end], abs_start=start,

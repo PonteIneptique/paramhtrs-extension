@@ -160,10 +160,18 @@ def _span(tei: str) -> str:
     return m.group(0) if m else ""
 
 
-def test_cert_defaults_to_high():
-    """A resolution with no stored cert is an informed choice → cert="high"."""
+def test_cert_defaults_to_no_attribute():
+    """No stored cert means the default — a normalisation or ATR fix, which
+    resolves no abbreviation and so is never graded."""
     text = "abbr full"
     a = _make_annot(text, 0, 4, "abbreviation", "normalizing")
+    assert "cert=" not in _span(build_tei_from_annotations(text, [a]))
+
+
+def test_cert_informed_is_high():
+    text = "abbr full"
+    a = _make_annot(text, 0, 4, "abbreviation", "normalizing")
+    a["body"][0]["cert"] = "informed"
     assert 'cert="high"' in _span(build_tei_from_annotations(text, [a]))
 
 
