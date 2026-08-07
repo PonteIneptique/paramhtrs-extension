@@ -151,6 +151,76 @@ def test_atr_noise_unchanged():
     assert '<unclear reason="illegible"' in result
 
 
+# ── Resolution certainty (@cert on the standoff span) ─────────────────────────
+
+def _span(tei: str) -> str:
+    """Extract the first <span> element of the standoff spanGrp."""
+    import re
+    m = re.search(r'<span target=.*?</span>', tei, re.DOTALL)
+    return m.group(0) if m else ""
+
+
+def test_cert_defaults_to_high():
+    """A resolution with no stored cert is an informed choice → cert="high"."""
+    text = "abbr full"
+    a = _make_annot(text, 0, 4, "abbreviation", "normalizing")
+    assert 'cert="high"' in _span(build_tei_from_annotations(text, [a]))
+
+
+def test_cert_arbitrary_is_low():
+    text = "abbr full"
+    a = _make_annot(text, 0, 4, "abbreviation", "normalizing")
+    a["body"][0]["cert"] = "arbitrary"
+    assert 'cert="low"' in _span(build_tei_from_annotations(text, [a]))
+
+
+def test_cert_ambiguous_is_medium():
+    text = "abbr full"
+    a = _make_annot(text, 0, 4, "abbreviation", "normalizing")
+    a["body"][0]["cert"] = "ambiguous"
+    assert 'cert="medium"' in _span(build_tei_from_annotations(text, [a]))
+
+
+def test_cert_ocr_fix_emits_no_attribute():
+    """A mechanical normalisation / OCR fix carries no certainty."""
+    text = "abbr full"
+    a = _make_annot(text, 0, 4, "abbreviation", "normalizing")
+    a["body"][0]["cert"] = "ocr_fix"
+    assert "cert=" not in _span(build_tei_from_annotations(text, [a]))
+
+
+def test_cert_unknown_value_emits_no_attribute():
+    text = "abbr full"
+    a = _make_annot(text, 0, 4, "abbreviation", "normalizing")
+    a["body"][0]["cert"] = "nonsense"
+    assert "cert=" not in _span(build_tei_from_annotations(text, [a]))
+
+
+def test_cert_survives_semtag_wrapper():
+    """The semtag branch carries the cert through to the standoff span too."""
+    text = "Joh de Paris"
+    a = _make_annot(text, 0, 3, "Johannes", "normalizing")
+    a["body"][0]["semtag"] = "persName"
+    a["body"][0]["cert"] = "ambiguous"
+    result = build_tei_from_annotations(text, [a])
+    assert '<persName>' in _body(result)
+    assert 'cert="medium"' in _span(result)
+
+
+def test_markup_gets_no_cert():
+    """Markup changes nothing, so it carries no certainty."""
+    text = "Joh de Paris"
+    a = _make_annot(text, 0, 3, "Joh", "markup")
+    assert "cert=" not in _span(build_tei_from_annotations(text, [a]))
+
+
+def test_non_resolv_abbr_gets_no_cert():
+    """The unresolvable-abbreviation branch is untouched by cert."""
+    text = "Joh de Paris"
+    a = _make_annot(text, 0, 3, "Joh", "non_resolv_abbr", reason="persName")
+    assert "cert=" not in _span(build_tei_from_annotations(text, [a]))
+
+
 # ── Gap before/after (word cut in two) ─────────────────────────────────────────
 
 def test_gap_before_nested_inside_w():
