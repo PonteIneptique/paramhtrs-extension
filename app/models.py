@@ -208,6 +208,9 @@ class Annotation(db.Model):
     body_purpose  = db.Column(db.String(50),  nullable=True)
     body_reason   = db.Column(db.String(50),  nullable=True)
     body_semtag   = db.Column(db.String(50),  nullable=True)
+    # Certainty of a resolution: 'arbitrary' | 'ambiguous' | 'na'.
+    # NULL means the default, 'informed' — see CERT_TEI in annot_utils.py.
+    body_cert     = db.Column(db.String(20),  nullable=True)
     target_start  = db.Column(db.Integer,     nullable=False, default=0)
     target_end    = db.Column(db.Integer,     nullable=False, default=0)
     target_exact  = db.Column(db.Text,        nullable=True)
@@ -228,6 +231,8 @@ class Annotation(db.Model):
             body_entry["reason"] = self.body_reason
         if self.body_semtag:
             body_entry["semtag"] = self.body_semtag
+        if self.body_cert:
+            body_entry["cert"] = self.body_cert
         if self.body_gap_before:
             body_entry["gap_before"] = True
         if self.body_gap_after:
@@ -265,6 +270,7 @@ class Annotation(db.Model):
             body_purpose = body.get("purpose"),
             body_reason  = body.get("reason"),
             body_semtag  = body.get("semtag"),
+            body_cert    = body.get("cert"),
             target_start = pos.get("start", 0),
             target_end   = pos.get("end",   0),
             target_exact = quo.get("exact"),
@@ -289,6 +295,7 @@ class Annotation(db.Model):
             existing.body_purpose = body.get("purpose")
             existing.body_reason  = body.get("reason")
             existing.body_semtag  = body.get("semtag")
+            existing.body_cert    = body.get("cert")
             existing.target_start = pos.get("start", 0)
             existing.target_end   = pos.get("end",   0)
             existing.target_exact = quo.get("exact")
@@ -633,6 +640,7 @@ def db_upgrade():
             ("users",       "institution",        "VARCHAR(200)"),
             ("annotations", "body_reason",        "VARCHAR(50)"),
             ("annotations", "body_semtag",        "VARCHAR(50)"),
+            ("annotations", "body_cert",          "VARCHAR(20)"),
         ]
         for table, col, col_def in new_columns:
             existing = [c["name"] for c in inspector.get_columns(table)]

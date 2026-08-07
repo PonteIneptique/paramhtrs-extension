@@ -2,6 +2,7 @@ import { describe, test, expect } from '@jest/globals';
 import {
   getSelector, getStart, getEnd, getExact, getPrefix, getSuffix, getBodyValue,
   isInsertion, isAtrNoise, isNonResolvAbbr, getNonResolvReason, isSpaceExact,
+  isResolution, getCert, derivePurpose,
   escapeHtml, applyAnnotations,
   buildSourceHtml, computeNormalizedPositions, buildNormalizedPageHtml,
   findSimilarAnnotations,
@@ -636,5 +637,98 @@ describe('findUnannotatedOccurrences', () => {
 
   test('exact not present in text: returns []', () => {
     expect(findUnannotatedOccurrences(text, 'xyz', [])).toEqual([]);
+  });
+});
+
+// ── Resolution certainty ──────────────────────────────────────────────────────
+
+describe('isResolution', () => {
+  test('plain normalizing annotation is a resolution', () => {
+    expect(isResolution(makeAnnot({}))).toBe(true);
+  });
+
+  test('deletion is a resolution', () => {
+    expect(isResolution(makeAnnot({ value: '', purpose: 'deletion' }))).toBe(true);
+  });
+
+  test('insertion is not a resolution', () => {
+    expect(isResolution(makeInsertion({}))).toBe(false);
+  });
+
+  test('zero-width span is not a resolution', () => {
+    expect(isResolution(makeAnnot({ start: 3, end: 3, exact: '' }))).toBe(false);
+  });
+
+  test('ATR noise is not a resolution', () => {
+    expect(isResolution(makeAnnot({ purpose: 'atr_noise' }))).toBe(false);
+  });
+
+  test('unresolvable abbreviation is not a resolution', () => {
+    expect(isResolution(makeNonResolvAnnot({}))).toBe(false);
+  });
+
+  test('markup is not a resolution', () => {
+    expect(isResolution(makeAnnot({ purpose: 'markup' }))).toBe(false);
+  });
+});
+
+describe('derivePurpose', () => {
+  test('an empty value on a range is a deletion', () => {
+    expect(derivePurpose(makeAnnot({ start: 0, end: 3 }), '')).toBe('deletion');
+  });
+
+  test('a non-empty value on a range is a normalization', () => {
+    expect(derivePurpose(makeAnnot({ start: 0, end: 3 }), 'bar')).toBe('normalizing');
+  });
+
+  test('clearing an existing normalization flips it to deletion', () => {
+    const a = makeAnnot({ start: 0, end: 3, purpose: 'normalizing', value: 'bar' });
+    expect(derivePurpose(a, '')).toBe('deletion');
+  });
+
+  test('typing into an existing deletion flips it back to normalizing', () => {
+    const a = makeAnnot({ start: 0, end: 3, purpose: 'deletion', value: '' });
+    expect(derivePurpose(a, 'bar')).toBe('normalizing');
+  });
+
+  test('a whitespace-only value is a normalization, not a deletion', () => {
+    // A space substitution is a real value; only a truly empty one deletes.
+    expect(derivePurpose(makeAnnot({ start: 0, end: 3 }), ' ')).toBe('normalizing');
+  });
+
+  test('a zero-width target is an insertion whatever the value', () => {
+    const a = makeAnnot({ start: 3, end: 3, exact: '' });
+    expect(derivePurpose(a, 'X')).toBe('insertion');
+    expect(derivePurpose(a, '')).toBe('insertion');
+  });
+
+  test('deliberate types are never overridden', () => {
+    for (const purpose of ['atr_noise', 'non_resolv_abbr', 'markup']) {
+      const a = makeAnnot({ start: 0, end: 3, purpose, value: 'foo' });
+      expect(derivePurpose(a, 'foo')).toBe(purpose);
+      expect(derivePurpose(a, '')).toBe(purpose);
+    }
+  });
+});
+
+describe('getCert', () => {
+  test('defaults to informed when absent', () => {
+    expect(getCert(makeAnnot({}))).toBe('informed');
+  });
+
+  test('returns the stored value', () => {
+    const a = makeAnnot({});
+    a.body[0].cert = 'ambiguous';
+    expect(getCert(a)).toBe('ambiguous');
+  });
+
+  test('empty string falls back to informed', () => {
+    const a = makeAnnot({});
+    a.body[0].cert = '';
+    expect(getCert(a)).toBe('informed');
+  });
+
+  test('null annotation falls back to informed', () => {
+    expect(getCert(null)).toBe('informed');
   });
 });

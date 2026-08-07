@@ -38,6 +38,15 @@ SEMTAG_TAGS = {
     "num":       "num",
 }
 
+# Certainty of a resolution → TEI @cert. 'ocr_fix' (a mechanical normalisation,
+# where certainty is meaningless) and anything unknown emit no attribute; a
+# missing value defaults to 'informed'.
+CERT_TEI = {
+    "informed":  "high",
+    "arbitrary": "low",
+    "ambiguous": "medium",
+}
+
 
 def _get_selector(annot: dict, selector_type: str) -> dict:
     for sel in annot.get("target", {}).get("selector", []):
@@ -436,7 +445,7 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
         body_parts.append(f'<lb n="{escape(lines[0]["alto_id"])}"/>\n        ')
 
     def process_segment(text, orig_label=None, span_type=None, span_subtype=None, abs_start=0,
-                         gap_before=False, gap_after=False):
+                         gap_before=False, gap_after=False, cert=None):
         nonlocal word_count, tokens_on_line, annot_resp_id
         local_ids = []
         has_internal_lb = orig_label and '\n' in orig_label
@@ -512,6 +521,7 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
                 resp_attr = f' resp="#{escape(users_by_id[annot_resp_id])}"'
             type_attr    = f' type="{escape(span_type)}"'    if span_type    else ''
             subtype_attr = f' subtype="{escape(span_subtype)}"' if span_subtype else ''
+            cert_attr    = f' cert="{CERT_TEI[cert]}"' if cert in CERT_TEI else ''
             if '\n' in orig_label:
                 # Render embedded line breaks (word split across original lines) as <lb/>
                 # instead of a raw newline character, mirroring the main token rendering above.
@@ -528,7 +538,7 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
                 orig_label_xml = "".join(rendered_parts)
             else:
                 orig_label_xml = escape(orig_label)
-            span_entries.append(f'      <span target="{" ".join(local_ids)}"{resp_attr}{type_attr}{subtype_attr}>{orig_label_xml}</span>')
+            span_entries.append(f'      <span target="{" ".join(local_ids)}"{resp_attr}{type_attr}{subtype_attr}{cert_attr}>{orig_label_xml}</span>')
 
     # Main Loop
     for annot in sorted_annots:
@@ -571,17 +581,22 @@ def build_tei_from_annotations(original_text: str, annotations: list, users_by_i
         else:
             annot_resp_id = annot.get("resp_id")
             semtag = body.get("semtag")
+            # Certainty only qualifies resolutions; markup changes nothing and
+            # insertions have no source form to be uncertain about. Mirrors
+            # isResolution() in static/js/editor-utils.js.
+            purpose = body.get("purpose") or "normalizing"
+            cert = (body.get("cert") or "informed") if purpose not in ("markup", "insertion") else None
             if semtag in SEMTAG_TAGS:
                 pre_len = len(body_parts)
                 process_segment(body.get("value", ""), orig_label=original_text[start:end], abs_start=start,
-                                 gap_before=gap_before, gap_after=gap_after)
+                                 gap_before=gap_before, gap_after=gap_after, cert=cert)
                 new_parts = body_parts[pre_len:]
                 del body_parts[pre_len:]
                 tag = SEMTAG_TAGS[semtag]
                 body_parts.append(f'<{tag}>' + "".join(new_parts) + f'</{tag}>')
             else:
                 process_segment(body.get("value", ""), orig_label=original_text[start:end], abs_start=start,
-                                 gap_before=gap_before, gap_after=gap_after)
+                                 gap_before=gap_before, gap_after=gap_after, cert=cert)
         cursor = end
 
     if cursor < len(original_text):

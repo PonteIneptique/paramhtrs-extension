@@ -53,6 +53,134 @@ export function isSpaceExact(annot) {
   return !isInsertion(annot) && !isAtrNoise(annot) && !isNonResolvAbbr(annot) && getExact(annot).trim() === '';
 }
 
+// ── Resolution certainty ──────────────────────────────────────────────────────
+// A "resolution" is a plain substitution — the annotation type that expands an
+// abbreviation or normalizes a form. Defined negatively, the same way
+// stats_report.py:_is_substitution does, so the two stay in sync.
+export function isResolution(annot) {
+  return !isInsertion(annot) && !isAtrNoise(annot) && !isNonResolvAbbr(annot) && !isMarkup(annot);
+}
+// Absent value means the default, 'informed'.
+export function getCert(annot) { return annot?.body?.[0]?.cert || 'informed'; }
+
+// Menu order, most-confident first.
+export const CERT_STATES = ['informed', 'arbitrary', 'ambiguous', 'ocr_fix'];
+
+export const CERT_LABELS = {
+  informed:  'Informed spelling',
+  ambiguous: 'Ambiguous spelling',
+  arbitrary: 'Arbitrary spelling',
+  ocr_fix:   'Normalisation / OCR Fix',
+};
+
+// ── Purpose derived from the value ────────────────────────────────────────────
+// Three purposes are not really a choice — they are what the annotation *is*:
+// a zero-width target is an insertion, an empty value is a deletion, anything
+// else is a normalization. The other three (atr_noise, non_resolv_abbr, markup)
+// are deliberate and set the value themselves, so they are never overridden.
+// Called at every point a value is written, so the Type chip can never disagree
+// with the "deleted" label the row already derives from the value.
+const VALUE_DRIVEN_PURPOSES = ['normalizing', 'deletion', 'insertion'];
+export function derivePurpose(annot, value) {
+  const current = annot?.body?.[0]?.purpose;
+  if (current && !VALUE_DRIVEN_PURPOSES.includes(current)) return current;
+  if (getStart(annot) === getEnd(annot)) return 'insertion';
+  return value ? 'normalizing' : 'deletion';
+}
+
+// ── Guideline help ────────────────────────────────────────────────────────────
+// One short blurb per category, condensed from the matching section of
+// template/guidelines.html, plus the anchor to jump to the full text. Shown as a
+// hover popover wherever a category is named (chips and menus).
+// `anchor` must match an id in guidelines.html — tests/test_editor_render.py
+// checks every one of them still resolves.
+export const TYPE_HELP = {
+  normalizing: { anchor: 'what-to-normalize', text:
+    'Rewrite the whole token to its normalized form: ramist u/v and i/j, HTR letter errors, ' +
+    'abbreviation expansions, capitalization, apostrophes and accents. Never edit single letters.' },
+  insertion: { anchor: 'g2', text:
+    'A missing word space, or a line-break hyphen merged into the next line. ' +
+    'Only spaces are ever inserted — never letters.' },
+  deletion: { anchor: 'g7', text:
+    'Removing a space before punctuation — the one case where deletion is a deliberate choice. ' +
+    'Anywhere else it is usually an alignment artifact.' },
+  atr_noise: { anchor: 'g10', text:
+    'Text too degraded to read confidently. Marking it as noise avoids hallucinating ' +
+    'content that is not on the page.' },
+  non_resolv_abbr: { anchor: 'g12', text:
+    'An abbreviation you cannot justify expanding from context. Keep the initial as ' +
+    'written and record which kind of name it stands for.' },
+  markup: { anchor: 'entity-tagging', text:
+    'Tag the token without changing its text — persons, organisations, places and numerals.' },
+};
+export const CERT_HELP = {
+  informed:  { anchor: 'g13', text:
+    'Context, the rest of the manuscript, or standard usage justifies the form you wrote.' },
+  arbitrary: { anchor: 'g13', text:
+    'You are sure what the word is, but the spelling you picked is one of several ' +
+    'defensible ones and nothing in the source settles it.' },
+  ambiguous: { anchor: 'g13', text:
+    'The source genuinely supports more than one reading and you committed to one. ' +
+    'Unlike an Unresolvable Abbreviation, you did resolve it.' },
+  ocr_fix:   { anchor: 'g13', text:
+    'Nothing was resolved — the change is mechanical (v→u, or a plain ATR misreading), ' +
+    'so certainty does not apply.' },
+};
+export const SEMTAG_HELP = {
+  persName:  { anchor: 'entity-tagging', text: 'A person. Tagged independently of any text change.' },
+  orgName:   { anchor: 'entity-tagging', text: 'An organisation. Tagged independently of any text change.' },
+  placeName: { anchor: 'entity-tagging', text: 'A place. Tagged independently of any text change.' },
+  num:       { anchor: 'g9', text:
+    'A numeral. Leave it exactly as written — no conversion between Roman, Arabic or ' +
+    'fractional systems, and no correction of cardinal/ordinal form.' },
+};
+// Shown on an untagged Tag chip, where there is no semtag to describe yet.
+export const TAG_HELP = { anchor: 'entity-tagging', text:
+  'Tag the token as a person, organisation, place or numeral — independently of any ' +
+  'text change. A semtag can sit on a Normalization as well as on a Markup.' };
+export const GAP_HELP = { anchor: 'g2', text:
+  'The token is split across a page or column break. Toggle a gap on that side instead ' +
+  'of merging text across pages.' };
+
+const HELP_MAPS = { type: TYPE_HELP, cert: CERT_HELP, semtag: SEMTAG_HELP };
+// Human label for each anchor, shown as the popover's footer reference.
+const ANCHOR_LABELS = {
+  'what-to-normalize': 'What to normalize',
+  'entity-tagging':    'Entity tagging',
+};
+/** Display label for a guidelines anchor: 'g13' → '§ 13', section ids → their title. */
+export function anchorLabel(anchor) {
+  const m = /^g(\d+)$/.exec(anchor);
+  return m ? `§ ${m[1]}` : (ANCHOR_LABELS[anchor] ?? anchor);
+}
+/** Look up the guideline blurb for a category, e.g. helpFor('cert', 'arbitrary'). */
+export function helpFor(kind, key) {
+  if (kind === 'gap') return GAP_HELP;
+  if (kind === 'semtag' && !key) return TAG_HELP;
+  return HELP_MAPS[kind]?.[key] ?? null;
+}
+
+// Every annotation type, in menu order — offerable on a *committed* row, where
+// an annotation can also be turned into an insertion.
+export const ANNOT_TYPE_MENU = ['normalizing', 'insertion', 'deletion', 'atr_noise', 'non_resolv_abbr', 'markup'];
+// Types offerable on a *draft* annotation, in menu order. 'insertion' is absent
+// on purpose: it is structural (start === end), derived in commitPending, never
+// chosen.
+export const DRAFT_TYPES = ['normalizing', 'deletion', 'atr_noise', 'non_resolv_abbr', 'markup'];
+// Reasons for an unresolvable abbreviation. Same four entities as SEMTAG_LABELS
+// minus 'num', plus a catch-all.
+export const NON_RESOLV_REASONS = ['persName', 'orgName', 'placeName', 'other'];
+export const NON_RESOLV_REASON_LABELS = { ...SEMTAG_LABELS, other: 'Other' };
+
+// Font Awesome class, or null when the state is drawn with the inline SVG
+// (the two-checkboxes-one-ticked glyph) in editor.html.
+export const CERT_ICONS = {
+  informed:  'fa-lightbulb',
+  arbitrary: 'fa-puzzle-piece',
+  ambiguous: null,
+  ocr_fix:   'fa-wrench',
+};
+
 // ── HTML escaping ─────────────────────────────────────────────────────────────
 export function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

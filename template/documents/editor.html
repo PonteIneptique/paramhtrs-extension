@@ -306,6 +306,14 @@ body { overflow: hidden; }
 .annot-del { color: #adb5bd; cursor: pointer; flex-shrink: 0; background: none; border: none; padding: 0 2px; }
 .annot-del:hover { color: #dc3545; }
 .annot-pending .annot-target { border-color: #86b7fe; }
+/* The draft row sits above the list — separate it from the first real row, and
+   opt out of content-visibility so its dropdown is never skipped for paint. */
+.annot-pending {
+  content-visibility: visible;
+  border-bottom: 1px solid #dee2e6;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+}
 
 /* ── Normalized panel ── */
 .normalized-text {
@@ -573,7 +581,7 @@ body { overflow: hidden; }
   font-size: 9px; border: 1px solid oklch(38% 0.01 70); color: oklch(72% 0.01 75);
   font-family: 'Inter', sans-serif;
 }
-/* ── Annotation chips (replace unclear-btn in annotation rows) ── */
+/* ── Annotation chips (Tag / Type / Gap / Certainty on each annotation row) ── */
 .annot-chip {
   font-family: 'Inter', sans-serif;
   font-size: calc(var(--editor-font, 1rem) * 0.65); font-weight: 600;
@@ -599,6 +607,23 @@ body { overflow: hidden; }
 /* gap */
 .annot-chip-gap.is-empty { background: #f8f9fa; color: #adb5bd; }
 .annot-chip-gap.is-set   { background: #343a40; color: #fff; }
+/* resolution certainty — muted for the settled states, warm for the doubtful
+   ones so scanning the column shows where the uncertainty is */
+.annot-chip-cert.cert-informed  { background: #f8f9fa; color: #adb5bd; }
+.annot-chip-cert.cert-ocr_fix   { background: #f8f9fa; color: #ced4da; }
+.annot-chip-cert.cert-arbitrary { background: #fff3cd; color: #997404; }
+.annot-chip-cert.cert-ambiguous { background: #f8d7da; color: #b02a37; }
+/* The two-checkboxes glyph reads as noise below ~15px, so give it more room than
+   the Font Awesome icons it sits beside. */
+.cert-svg { width: 16px; height: 16px; display: block; }
+.annot-chip-cert .cert-svg { width: 15px; height: 15px; margin: -2px 0; }
+/* Menu-row parts: fixed icon column, label, trailing check for the current state */
+.menu-item-icon { width: 16px; flex-shrink: 0; display: inline-flex; justify-content: center; }
+.menu-item-icon.cert-informed  { color: #adb5bd; }
+.menu-item-icon.cert-ocr_fix   { color: #ced4da; }
+.menu-item-icon.cert-arbitrary { color: #997404; }
+.menu-item-icon.cert-ambiguous { color: #b02a37; }
+.menu-item-check { margin-left: auto; color: #198754; font-weight: 700; }
 /* validate/delete — icon-only, no border */
 .annot-action-btn {
   background: none; border: none; cursor: pointer;
@@ -610,60 +635,95 @@ body { overflow: hidden; }
 }
 .annot-validate-btn:hover { background: rgba(25,135,84,.22); }
 
-/* ── Unclear dropdown ── */
-.unclear-wrap { position: relative; display: inline-flex; }
-.unclear-btn {
-  background: #fff; border: 1px solid #dee2e6; border-radius: 4px;
-  cursor: pointer; font-size: .7em; padding: 2px 8px; white-space: nowrap;
-  color: #495057; display: flex; align-items: center; gap: 4px;
+/* ── Draft-row Type dropdown ── */
+.draft-type-wrap { position: relative; display: inline-flex; flex-shrink: 0; }
+/* Sits inline with the input, so it matches the committed rows' chip metrics
+   exactly (see .annot-chip / .annot-chip-type.type-normalizing) rather than
+   spending width on a text label — the labels live in the menu. */
+.draft-type-btn {
+  background: #e9ecef; color: #6c757d;
+  border: none; border-radius: 3px; cursor: pointer;
   font-family: 'Inter', sans-serif;
+  font-size: calc(var(--editor-font, 1rem) * 0.65); font-weight: 600;
+  padding: 1px 5px; line-height: 1.6;
+  display: inline-flex; align-items: center; gap: 3px;
+  white-space: nowrap;
 }
-.unclear-btn:hover { background: #f8f9fa; border-color: #adb5bd; }
-.unclear-menu {
+.draft-type-btn:hover { filter: brightness(.93); }
+/* Staged certainty, shown inside the button so it reads as state, not a control */
+.draft-type-cert { display: inline-flex; align-items: center; }
+.draft-type-cert.cert-informed  { color: #adb5bd; }
+.draft-type-cert.cert-ocr_fix   { color: #ced4da; }
+.draft-type-cert.cert-arbitrary { color: #997404; }
+.draft-type-cert.cert-ambiguous { color: #b02a37; }
+.draft-type-menu {
   position: absolute; top: calc(100% + 3px); right: 0;
   background: #fff; border: 1px solid #dee2e6; border-radius: 5px;
   box-shadow: 0 4px 12px rgba(0,0,0,.12);
   min-width: 220px; z-index: 200; overflow: hidden;
 }
-.unclear-item {
-  display: block; width: 100%; text-align: left; background: none; border: none;
+/* ── Shared dropdown menu styling (Tag/Type/Gap/Cert popups + draft menu) ── */
+.menu-item {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; text-align: left; background: none; border: none;
   padding: 6px 12px; font-size: .75em; cursor: pointer; color: #212529;
   font-family: 'Inter', sans-serif; white-space: nowrap;
 }
-.unclear-item:hover { background: #f8f9fa; }
-.unclear-item.is-noise { color: #dc3545; }
+.menu-item:hover { background: #f8f9fa; }
+.menu-item.is-noise { color: #dc3545; }
+/* A qualifier row nested under its type */
+.menu-item.is-sub { padding-left: 34px; background: #fcfcfd; }
+.menu-item.is-sub:hover { background: #f1f3f5; }
+.menu-item-more { margin-left: auto; opacity: .5; font-size: .9em; }
+/* ── Guideline legend popover ── */
+/* Width is mirrored by HELP_POP_WIDTH in editor.js, which uses it to decide
+   whether to flip the popover to the other side of its anchor. */
+.help-pop {
+  position: fixed; width: 280px; z-index: 10000;
+  background: #212529; color: #f8f9fa; border-radius: 6px;
+  padding: 9px 11px; font-family: 'Inter', sans-serif;
+  box-shadow: 0 6px 20px rgba(0,0,0,.28);
+  pointer-events: none;   /* never eats the hover that opened it */
+}
+.help-pop-title { font-size: .72rem; font-weight: 700; margin-bottom: 3px; }
+.help-pop-text  { font-size: .7rem; line-height: 1.45; color: #dee2e6; }
+.help-pop-ref {
+  display: block; margin-top: 6px;
+  font-size: .62rem; color: #adb5bd; letter-spacing: .02em;
+}
 /* Teleported fixed menu (avoids clipping inside scrollable .panel-annots) */
-.unclear-menu-fixed {
+.menu-fixed {
   position: fixed;
   background: #fff; border: 1px solid #dee2e6; border-radius: 5px;
   box-shadow: 0 4px 12px rgba(0,0,0,.12);
   min-width: 220px; z-index: 9999; overflow: hidden;
 }
-/* Focus-mode unclear button */
-.fm-unclear-btn {
+/* Focus-mode menu button */
+.fm-menu-btn {
   background: #7952b3; border: 1px solid #6741a5;
   border-radius: 5px; cursor: pointer; font-size: 11px; padding: 4px 12px;
   white-space: nowrap; color: #fff;
   display: flex; align-items: center; gap: 5px; font-family: 'Inter', sans-serif;
   transition: background .15s;
 }
-.fm-unclear-btn:hover { background: #6741a5; }
-.fm-unclear-btn.is-active { background: oklch(70% 0.16 55); border-color: oklch(55% 0.16 55); }
-.fm-unclear-btn.is-active:hover { background: oklch(63% 0.16 55); }
+.fm-menu-btn:hover { background: #6741a5; }
+.fm-menu-btn.is-active { background: oklch(70% 0.16 55); border-color: oklch(55% 0.16 55); }
+.fm-menu-btn.is-active:hover { background: oklch(63% 0.16 55); }
 /* Teleported fixed menu */
-.fm-unclear-menu-fixed {
+.fm-menu-fixed {
   position: fixed;
   background: #fff; border: 1px solid #dee2e6; border-radius: 5px;
   box-shadow: 0 4px 16px rgba(0,0,0,.18);
   min-width: 230px; z-index: 9999; overflow: hidden;
 }
-.fm-unclear-item {
-  display: block; width: 100%; text-align: left; background: none; border: none;
+.fm-menu-item {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; text-align: left; background: none; border: none;
   padding: 7px 14px; font-size: 12px; cursor: pointer; color: #212529;
   font-family: 'Inter', sans-serif; white-space: nowrap;
 }
-.fm-unclear-item:hover { background: #f8f9fa; }
-.fm-unclear-item.is-noise { color: #dc3545; }
+.fm-menu-item:hover { background: #f8f9fa; }
+.fm-menu-item.is-noise { color: #dc3545; }
 </style>
 {% endblock %}
 
@@ -676,6 +736,28 @@ body { overflow: hidden; }
 </div>
 {% endif %}
 <div id="editor-root" v-cloak>
+
+  <!-- Icon sprite. The "ambiguous" certainty state has no Font Awesome
+       equivalent — two checkboxes with only one ticked — so it is drawn once
+       here and referenced with <use> from the chips and menus. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="icon-ambiguous" viewBox="0 0 16 16">
+      <!-- The ticked box is solid with the tick punched out, not a stroked tick
+           inside a stroked box — at ~7px the latter collapses into a blob. The
+           punch-out is a mask rather than a white overlay so the glyph also
+           works on the coloured focus-mode button. -->
+      <mask id="cert-tick-mask">
+        <rect x="8.8" y="4.3" width="6.4" height="6.4" rx="1.3" fill="#fff"/>
+        <path d="M10.3 7.5 11.6 8.8 13.7 6.3" fill="none" stroke="#000"
+              stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </mask>
+      <rect x="0.8" y="4.3" width="6.4" height="6.4" rx="1.3"
+            fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <rect x="8.8" y="4.3" width="6.4" height="6.4" rx="1.3"
+            fill="currentColor" mask="url(#cert-tick-mask)"/>
+    </symbol>
+  </svg>
+
 
   <!-- Toolbar -->
   <div id="editor-toolbar">
@@ -929,6 +1011,80 @@ body { overflow: hidden; }
         </div>
       </div>
 
+      <!-- Pending new annotation (always shown). Rendered *before* the list so a
+           new annotation lands at the top of the column: on a page with hundreds
+           of pending annotations a bottom-anchored draft row pushed its
+           Type menu out of the scrolling panel. -->
+      <div v-if="pendingAnnot" class="annot-row annot-pending">
+        <span v-if="isInsertionExact(pendingAnnot)" class="annot-ins-chip" title="insertion">[+]</span>
+        <span v-else-if="!pendingAnnot.exact.trim()" class="annot-orig-sp" title="space">[SPACE]</span>
+        <span v-else class="annot-orig" :title="pendingAnnot.exact" v-html="renderVisible(pendingAnnot.exact)"></span>
+        <span class="annot-arrow">→</span>
+        <input type="text" class="annot-target" ref="pendingInput"
+          placeholder="Normalized form"
+          title="Leave empty to treat as a deletion [e.g. space deletion]"
+          @keydown.enter.prevent="commitPending($event.target.value)"
+          @keydown.esc="cancelPending"
+          @blur="onPendingBlur($event)">
+        <!-- Type menu, inline before the cancel button. Compact like the chips on
+             a committed row — the labels live in the menu, not on the button, so
+             the input keeps its width. Vocabulary comes from the shared
+             ANNOT_TYPE_* / CERT_* / SEMTAG_LABELS maps, never re-typed here. -->
+        <div v-if="!pendingAnnot?.isIns" class="draft-type-wrap">
+            <button class="draft-type-btn" @mousedown.prevent="pendingTypeOpen = !pendingTypeOpen"
+                    @mouseenter="showHelp('type', 'normalizing', $event)" @mouseleave="hideHelp"
+                    :title="'Type: ' + annotTypeTitles.normalizing + ' · ' + certLabels[pendingCert]">
+              <i :class="'fa-solid ' + annotTypeIcons.normalizing"></i>
+              <span class="draft-type-cert" :class="'cert-' + pendingCert">
+                <i v-if="certIcons[pendingCert]" :class="'fa-solid ' + certIcons[pendingCert]"></i>
+                <svg v-else class="cert-svg" aria-hidden="true"><use href="#icon-ambiguous"/></svg>
+              </span>
+              <span style="font-size:.8em; opacity:.7;">▾</span>
+            </button>
+            <div v-if="pendingTypeOpen" class="draft-type-menu">
+              <template v-for="t in draftTypes" :key="t">
+                <button class="menu-item" :class="{ 'is-noise': t === 'atr_noise' }"
+                        @mousedown.prevent="pickDraftType(t)"
+                        @mouseenter="showHelp('type', t, $event)" @mouseleave="hideHelp">
+                  <span class="menu-item-icon"><i :class="'fa-solid ' + annotTypeIcons[t]"></i></span>
+                  [[ annotTypeTitles[t] ]]
+                  <span v-if="draftTypeSubmenus.includes(t)"
+                        class="menu-item-more">[[ pendingTypeSubmenu === t ? '▾' : '▸' ]]</span>
+                </button>
+                <!-- Normalization ▸ certainty: the only qualifier that doesn't
+                     commit, since the value still has to be typed. -->
+                <template v-if="pendingTypeSubmenu === 'normalizing' && t === 'normalizing'">
+                  <button v-for="c in certStates" :key="c" class="menu-item is-sub"
+                          @mousedown.prevent="stageDraftCert(c)"
+                          @mouseenter="showHelp('cert', c, $event)" @mouseleave="hideHelp">
+                    <span class="menu-item-icon" :class="'cert-' + c">
+                      <i v-if="certIcons[c]" :class="'fa-solid ' + certIcons[c]"></i>
+                      <svg v-else class="cert-svg" aria-hidden="true"><use href="#icon-ambiguous"/></svg>
+                    </span>
+                    [[ certLabels[c] ]]
+                    <span v-if="pendingCert === c" class="menu-item-check">✓</span>
+                  </button>
+                </template>
+                <template v-if="pendingTypeSubmenu === 'non_resolv_abbr' && t === 'non_resolv_abbr'">
+                  <button v-for="r in nonResolvReasons" :key="r" class="menu-item is-sub"
+                          @mousedown.prevent="markNonResolvAbbr(r)"
+                          @mouseenter="showHelp('semtag', r, $event)" @mouseleave="hideHelp">
+                    [[ nonResolvReasonLabels[r] ]]
+                  </button>
+                </template>
+                <template v-if="pendingTypeSubmenu === 'markup' && t === 'markup'">
+                  <button v-for="(label, tag) in semtagLabels" :key="tag" class="menu-item is-sub"
+                          @mousedown.prevent="markMarkup(tag)"
+                          @mouseenter="showHelp('semtag', tag, $event)" @mouseleave="hideHelp">
+                    [[ label ]]
+                  </button>
+                </template>
+              </template>
+            </div>
+        </div>
+        <button class="annot-del" @mousedown.prevent="cancelPending" title="Cancel">✕</button>
+      </div>
+
       <!-- Pending annotations (shown when filter = pending) -->
       <template v-if="annotFilter === 'pending'">
         <div class="annot-row"
@@ -962,6 +1118,7 @@ body { overflow: hidden; }
           <button class="annot-chip annot-chip-tag tag-wrap"
                   :class="getSemtag(annot) ? 'is-set' : 'is-empty'"
                   @mousedown.prevent.stop="openAnnotMenu('tag', annot, $event)"
+                  @mouseenter="showHelp('semtag', getSemtag(annot), $event)" @mouseleave="hideHelp"
                   :title="getSemtag(annot) ? semtagLabels[getSemtag(annot)] : 'Tag as person/org/place/numeral'">
             <template v-if="getSemtag(annot)">[[ semtagAbbrevs[getSemtag(annot)] ]]</template>
             <i v-else class="fa-solid fa-tag"></i>
@@ -969,73 +1126,31 @@ body { overflow: hidden; }
           <button class="annot-chip annot-chip-type type-wrap"
                   :class="['type-' + (annot.body?.[0]?.purpose || 'normalizing'), { 'is-locked': isInsertion(annot) }]"
                   @mousedown.prevent.stop="!isInsertion(annot) && openAnnotMenu('type', annot, $event)"
+                  @mouseenter="showHelp('type', annot.body?.[0]?.purpose || 'normalizing', $event)" @mouseleave="hideHelp"
                   :title="annotTypeTitles[annot.body?.[0]?.purpose || 'normalizing']">
             <i :class="'fa-solid ' + annotTypeIcons[annot.body?.[0]?.purpose || 'normalizing']"></i>
           </button>
           <button class="annot-chip annot-chip-gap gap-wrap"
                   :class="(isGapBefore(annot) || isGapAfter(annot)) ? 'is-set' : 'is-empty'"
                   @mousedown.prevent.stop="openAnnotMenu('gap', annot, $event)"
+                  @mouseenter="showHelp('gap', null, $event)" @mouseleave="hideHelp"
                   title="Gap before/after">
             [[ isGapBefore(annot) && isGapAfter(annot) ? '⊢⊣' : isGapBefore(annot) ? '⊢' : isGapAfter(annot) ? '⊣' : 'gap' ]]
+          </button>
+          <button v-if="isResolution(annot)"
+                  class="annot-chip annot-chip-cert cert-wrap"
+                  :class="'cert-' + getCert(annot)"
+                  @mousedown.prevent.stop="openAnnotMenu('cert', annot, $event)"
+                  @mouseenter="showHelp('cert', getCert(annot), $event)" @mouseleave="hideHelp"
+                  :title="'Resolution: ' + certLabels[getCert(annot)]">
+            <i v-if="certIcons[getCert(annot)]" :class="'fa-solid ' + certIcons[getCert(annot)]"></i>
+            <svg v-else class="cert-svg" aria-hidden="true"><use href="#icon-ambiguous"/></svg>
           </button>
           <button class="annot-action-btn annot-validate-btn validate-btn" title="Validate (Ctrl+Enter)"
                   @click.stop="validateAnnotation(annot)">✓</button>
           <button class="annot-del" @click.stop="removeAnnotation(annot)" title="Remove">✕</button>
         </div>
       </template>
-
-      <!-- Pending new annotation (always shown) -->
-      <div v-if="pendingAnnot" class="annot-row annot-pending" style="flex-direction:column; align-items:stretch; gap:4px;">
-        <!-- Row 1: orig → input + cancel -->
-        <div style="display:flex; align-items:center; gap:4px;">
-          <span v-if="isInsertionExact(pendingAnnot)" class="annot-ins-chip" title="insertion">[+]</span>
-          <span v-else-if="!pendingAnnot.exact.trim()" class="annot-orig-sp" title="space">[SPACE]</span>
-          <span v-else class="annot-orig" :title="pendingAnnot.exact" v-html="renderVisible(pendingAnnot.exact)"></span>
-          <span class="annot-arrow">→</span>
-          <input type="text" class="annot-target" ref="pendingInput"
-            placeholder="Normalized form"
-            title="Leave empty to treat as a deletion [e.g. space deletion]"
-            @keydown.enter.prevent="commitPending($event.target.value)"
-            @keydown.esc="cancelPending"
-            @blur="onPendingBlur($event)">
-          <button class="annot-del" @mousedown.prevent="cancelPending" title="Cancel">✕</button>
-        </div>
-        <!-- Row 2: unclear dropdown, right-aligned -->
-        <div v-if="!pendingAnnot?.isIns" style="display:flex; justify-content:flex-end;">
-          <div class="unclear-wrap">
-            <button class="unclear-btn" @mousedown.prevent="pendingUnclearOpen = !pendingUnclearOpen"
-                    title="Mark as unclear">
-              Mark as unclear <span style="font-size:.8em; opacity:.7;">▾</span>
-            </button>
-            <div v-if="pendingUnclearOpen" class="unclear-menu">
-              <button class="unclear-item is-noise" @mousedown.prevent="markAtrNoise()">
-                Mark as ATR Noise
-              </button>
-              <button class="unclear-item" @mousedown.prevent="markNonResolvAbbr('persName')">
-                Ambiguous person name
-              </button>
-              <button class="unclear-item" @mousedown.prevent="markNonResolvAbbr('orgName')">
-                Ambiguous organisation name
-              </button>
-              <button class="unclear-item" @mousedown.prevent="markNonResolvAbbr('placeName')">
-                Ambiguous place name
-              </button>
-              <button class="unclear-item" @mousedown.prevent="markNonResolvAbbr('other')">
-                Other ambiguous abbreviation
-              </button>
-              <button v-if="!pendingMarkupOpen" class="unclear-item" @mousedown.prevent="pendingMarkupOpen = true">
-                Markup (tag only, no change) <span style="font-size:.8em; opacity:.7;">▸</span>
-              </button>
-              <template v-else>
-                <button class="unclear-item" @mousedown.prevent="markMarkup('persName')">↳ Person</button>
-                <button class="unclear-item" @mousedown.prevent="markMarkup('orgName')">↳ Organisation</button>
-                <button class="unclear-item" @mousedown.prevent="markMarkup('placeName')">↳ Place</button>
-                <button class="unclear-item" @mousedown.prevent="markMarkup('num')">↳ Numeral</button>
-              </template>
-            </div>
-          </div>
-        </div>
-      </div>
 
       <div v-if="annotFilter==='pending' && !pendingAnnotationsSorted.length && !pendingAnnot"
            class="text-muted small px-2 py-1">
@@ -1074,6 +1189,7 @@ body { overflow: hidden; }
           <button class="annot-chip annot-chip-tag tag-wrap"
                   :class="getSemtag(annot) ? 'is-set' : 'is-empty'"
                   @mousedown.prevent.stop="openAnnotMenu('tag', annot, $event)"
+                  @mouseenter="showHelp('semtag', getSemtag(annot), $event)" @mouseleave="hideHelp"
                   :title="getSemtag(annot) ? semtagLabels[getSemtag(annot)] : 'Tag as person/org/place/numeral'">
             <template v-if="getSemtag(annot)">[[ semtagAbbrevs[getSemtag(annot)] ]]</template>
             <i v-else class="fa-solid fa-tag"></i>
@@ -1081,14 +1197,25 @@ body { overflow: hidden; }
           <button class="annot-chip annot-chip-type type-wrap"
                   :class="['type-' + (annot.body?.[0]?.purpose || 'normalizing'), { 'is-locked': isInsertion(annot) }]"
                   @mousedown.prevent.stop="!isInsertion(annot) && openAnnotMenu('type', annot, $event)"
+                  @mouseenter="showHelp('type', annot.body?.[0]?.purpose || 'normalizing', $event)" @mouseleave="hideHelp"
                   :title="annotTypeTitles[annot.body?.[0]?.purpose || 'normalizing']">
             <i :class="'fa-solid ' + annotTypeIcons[annot.body?.[0]?.purpose || 'normalizing']"></i>
           </button>
           <button class="annot-chip annot-chip-gap gap-wrap"
                   :class="(isGapBefore(annot) || isGapAfter(annot)) ? 'is-set' : 'is-empty'"
                   @mousedown.prevent.stop="openAnnotMenu('gap', annot, $event)"
+                  @mouseenter="showHelp('gap', null, $event)" @mouseleave="hideHelp"
                   title="Gap before/after">
             [[ isGapBefore(annot) && isGapAfter(annot) ? '⊢⊣' : isGapBefore(annot) ? '⊢' : isGapAfter(annot) ? '⊣' : 'gap' ]]
+          </button>
+          <button v-if="isResolution(annot)"
+                  class="annot-chip annot-chip-cert cert-wrap"
+                  :class="'cert-' + getCert(annot)"
+                  @mousedown.prevent.stop="openAnnotMenu('cert', annot, $event)"
+                  @mouseenter="showHelp('cert', getCert(annot), $event)" @mouseleave="hideHelp"
+                  :title="'Resolution: ' + certLabels[getCert(annot)]">
+            <i v-if="certIcons[getCert(annot)]" :class="'fa-solid ' + certIcons[getCert(annot)]"></i>
+            <svg v-else class="cert-svg" aria-hidden="true"><use href="#icon-ambiguous"/></svg>
           </button>
           <button class="annot-action-btn" style="color:#6c757d;" title="Un-validate"
                   @click.stop="unvalidateAnnotation(annot)">↩</button>
@@ -1117,23 +1244,58 @@ body { overflow: hidden; }
        per row — keeps the ~4600-row annotation list cheap to render. The
        *-wrap classes keep the outside-click handler (_closeDropdowns) from
        closing the menu while you interact with it. -->
-  <div v-if="annotTagOpenId && menuAnnot" class="unclear-menu-fixed tag-wrap" :style="annotMenuStyle">
-    <button class="unclear-item" @mousedown.prevent="setSemtag(menuAnnot, 'persName'); closeAnnotMenus()">Person</button>
-    <button class="unclear-item" @mousedown.prevent="setSemtag(menuAnnot, 'orgName'); closeAnnotMenus()">Organisation</button>
-    <button class="unclear-item" @mousedown.prevent="setSemtag(menuAnnot, 'placeName'); closeAnnotMenus()">Place</button>
-    <button class="unclear-item" @mousedown.prevent="setSemtag(menuAnnot, 'num'); closeAnnotMenus()">Numeral</button>
-    <button v-if="getSemtag(menuAnnot)" class="unclear-item" @mousedown.prevent="setSemtag(menuAnnot, null); closeAnnotMenus()">Clear tag</button>
+  <div v-if="annotTagOpenId && menuAnnot" class="menu-fixed tag-wrap" :style="annotMenuStyle">
+    <button v-for="(label, tag) in semtagLabels" :key="tag" class="menu-item"
+            @mousedown.prevent="setSemtag(menuAnnot, tag); closeAnnotMenus()"
+            @mouseenter="showHelp('semtag', tag, $event)" @mouseleave="hideHelp">
+      <span class="menu-item-icon"><i class="fa-solid fa-tag"></i></span>
+      [[ label ]]
+      <span v-if="getSemtag(menuAnnot) === tag" class="menu-item-check">✓</span>
+    </button>
+    <button v-if="getSemtag(menuAnnot)" class="menu-item" @mousedown.prevent="setSemtag(menuAnnot, null); closeAnnotMenus()">
+      <span class="menu-item-icon"></span>Clear tag
+    </button>
   </div>
-  <div v-if="annotTypeOpenId && menuAnnot" class="unclear-menu-fixed type-wrap" :style="annotMenuStyle">
-    <button class="unclear-item" @mousedown.prevent="changeAnnotationType(menuAnnot, 'normalizing'); closeAnnotMenus()">Normalization</button>
-    <button class="unclear-item" @mousedown.prevent="changeAnnotationType(menuAnnot, 'deletion'); closeAnnotMenus()">Deletion</button>
-    <button class="unclear-item is-noise" @mousedown.prevent="changeAnnotationType(menuAnnot, 'atr_noise'); closeAnnotMenus()">ATR Noise</button>
-    <button class="unclear-item" @mousedown.prevent="changeAnnotationType(menuAnnot, 'non_resolv_abbr'); closeAnnotMenus()">Unresolvable Abbreviation</button>
-    <button class="unclear-item" @mousedown.prevent="changeAnnotationType(menuAnnot, 'markup'); closeAnnotMenus()">Markup</button>
+  <div v-if="annotTypeOpenId && menuAnnot" class="menu-fixed type-wrap" :style="annotMenuStyle">
+    <button v-for="t in annotTypeMenu" :key="t" class="menu-item" :class="{ 'is-noise': t === 'atr_noise' }"
+            @mousedown.prevent="changeAnnotationType(menuAnnot, t); closeAnnotMenus()"
+            @mouseenter="showHelp('type', t, $event)" @mouseleave="hideHelp">
+      <span class="menu-item-icon"><i :class="'fa-solid ' + annotTypeIcons[t]"></i></span>
+      [[ annotTypeTitles[t] ]]
+      <span v-if="(menuAnnot.body?.[0]?.purpose || 'normalizing') === t" class="menu-item-check">✓</span>
+    </button>
   </div>
-  <div v-if="annotGapOpenId && menuAnnot" class="unclear-menu-fixed gap-wrap" :style="annotMenuStyle">
-    <button class="unclear-item" @mousedown.prevent="setGap(menuAnnot, 'before', !isGapBefore(menuAnnot))">[[ isGapBefore(menuAnnot) ? '✓ ' : '' ]]Gap before</button>
-    <button class="unclear-item" @mousedown.prevent="setGap(menuAnnot, 'after', !isGapAfter(menuAnnot))">[[ isGapAfter(menuAnnot) ? '✓ ' : '' ]]Gap after</button>
+  <div v-if="annotGapOpenId && menuAnnot" class="menu-fixed gap-wrap" :style="annotMenuStyle">
+    <button class="menu-item" @mousedown.prevent="setGap(menuAnnot, 'before', !isGapBefore(menuAnnot))"
+            @mouseenter="showHelp('gap', 'before', $event)" @mouseleave="hideHelp">
+      [[ isGapBefore(menuAnnot) ? '✓ ' : '' ]]Gap before
+    </button>
+    <button class="menu-item" @mousedown.prevent="setGap(menuAnnot, 'after', !isGapAfter(menuAnnot))"
+            @mouseenter="showHelp('gap', 'after', $event)" @mouseleave="hideHelp">
+      [[ isGapAfter(menuAnnot) ? '✓ ' : '' ]]Gap after
+    </button>
+  </div>
+  <!-- Guideline legend. One element for the whole editor; anything naming a
+       category (chip or menu row) drives it via showHelp/hideHelp. -->
+  <div v-if="helpPop" class="help-pop"
+       :style="{ top: helpPop.top + 'px', left: helpPop.left + 'px',
+                 transform: helpPop.flip ? 'none' : 'translateX(-100%)' }">
+    <div class="help-pop-title">[[ helpPop.title ]]</div>
+    <div class="help-pop-text">[[ helpPop.text ]]</div>
+    <span class="help-pop-ref"><i class="fa-solid fa-book"></i> Guidelines · [[ helpPop.ref ]]</span>
+  </div>
+
+  <div v-if="annotCertOpenId && menuAnnot" class="menu-fixed cert-wrap" :style="annotMenuStyle">
+    <button v-for="c in certStates" :key="c" class="menu-item"
+            @mousedown.prevent="setCert(menuAnnot, c); closeAnnotMenus()"
+            @mouseenter="showHelp('cert', c, $event)" @mouseleave="hideHelp">
+      <span class="menu-item-icon" :class="'cert-' + c">
+        <i v-if="certIcons[c]" :class="'fa-solid ' + certIcons[c]"></i>
+        <svg v-else class="cert-svg" aria-hidden="true"><use href="#icon-ambiguous"/></svg>
+      </span>
+      [[ certLabels[c] ]]
+      <span v-if="getCert(menuAnnot) === c" class="menu-item-check">✓</span>
+    </button>
   </div>
 
   <!-- Bulk action modal (validate or delete similar annotations) -->
@@ -1415,49 +1577,76 @@ body { overflow: hidden; }
                 </svg>
                 Delete
               </button>
-              <button class="fm-unclear-btn fm-type-wrap" @click.stop="e => toggleFocusDropdown('Type', e)" tabindex="-1">
+              <button class="fm-menu-btn fm-type-wrap" @click.stop="e => toggleFocusDropdown('Type', e)" tabindex="-1">
                 Type <span style="font-size:.75em; opacity:.85;">▾</span>
               </button>
               <Teleport to="body">
-                <div v-if="focusTypeOpen" class="fm-unclear-menu-fixed"
+                <div v-if="focusTypeOpen" class="fm-menu-fixed"
                      :style="{ top: focusMenuPos.top + 'px', left: focusMenuPos.left + 'px', transform: 'translate(-50%, -100%)' }">
-                  <button class="fm-unclear-item" @click.stop="focusChangeType('normalizing')">Normalization</button>
-                  <button class="fm-unclear-item" @click.stop="focusChangeType('insertion')">Insertion</button>
-                  <button class="fm-unclear-item" @click.stop="focusChangeType('deletion')">Deletion</button>
-                  <button class="fm-unclear-item is-noise" @click.stop="focusChangeType('atr_noise')">ATR Noise</button>
-                  <button class="fm-unclear-item" @click.stop="focusChangeType('non_resolv_abbr')">Unresolvable Abbreviation</button>
-                  <button class="fm-unclear-item" @click.stop="focusChangeType('markup')">Markup</button>
+                  <button v-for="t in annotTypeMenu" :key="t" class="fm-menu-item"
+                          :class="{ 'is-noise': t === 'atr_noise' }"
+                          @click.stop="focusChangeType(t)"
+                          @mouseenter="showHelp('type', t, $event)" @mouseleave="hideHelp">
+                    <span class="menu-item-icon"><i :class="'fa-solid ' + annotTypeIcons[t]"></i></span>
+                    [[ annotTypeTitles[t] ]]
+                    <span v-if="(focusCurrent.body?.[0]?.purpose || 'normalizing') === t" class="menu-item-check">✓</span>
+                  </button>
                 </div>
               </Teleport>
-              <button ref="fmTagBtn" class="fm-unclear-btn fm-tag-wrap" @click.stop="e => toggleFocusDropdown('Tag', e)" tabindex="-1">
+              <button ref="fmTagBtn" class="fm-menu-btn fm-tag-wrap" @click.stop="e => toggleFocusDropdown('Tag', e)" tabindex="-1">
                 Tag <span style="font-size:.75em; opacity:.85;">▾</span>
               </button>
               <Teleport to="body">
-                <div v-if="focusTagOpen" class="fm-unclear-menu-fixed"
+                <div v-if="focusTagOpen" class="fm-menu-fixed"
                      :style="{ top: focusMenuPos.top + 'px', left: focusMenuPos.left + 'px', transform: 'translate(-50%, -100%)' }">
                   <template v-if="isNonResolvAbbr(focusCurrent)">
-                    <button class="fm-unclear-item" @click.stop="focusSetReason('persName')">[[ getNonResolvReason(focusCurrent) === 'persName' ? '✓ ' : '' ]]Person</button>
-                    <button class="fm-unclear-item" @click.stop="focusSetReason('orgName')">[[ getNonResolvReason(focusCurrent) === 'orgName' ? '✓ ' : '' ]]Organisation</button>
-                    <button class="fm-unclear-item" @click.stop="focusSetReason('placeName')">[[ getNonResolvReason(focusCurrent) === 'placeName' ? '✓ ' : '' ]]Place</button>
-                    <button class="fm-unclear-item" @click.stop="focusSetReason('other')">[[ getNonResolvReason(focusCurrent) === 'other' ? '✓ ' : '' ]]Other</button>
+                    <button v-for="r in nonResolvReasons" :key="r" class="fm-menu-item"
+                            @click.stop="focusSetReason(r)"
+                            @mouseenter="showHelp('semtag', r, $event)" @mouseleave="hideHelp">
+                      [[ getNonResolvReason(focusCurrent) === r ? '✓ ' : '' ]][[ nonResolvReasonLabels[r] ]]
+                    </button>
                   </template>
                   <template v-else>
-                    <button class="fm-unclear-item" @click.stop="focusSetSemtag('persName')">[[ getSemtag(focusCurrent) === 'persName' ? '✓ ' : '' ]]Person</button>
-                    <button class="fm-unclear-item" @click.stop="focusSetSemtag('orgName')">[[ getSemtag(focusCurrent) === 'orgName' ? '✓ ' : '' ]]Organisation</button>
-                    <button class="fm-unclear-item" @click.stop="focusSetSemtag('placeName')">[[ getSemtag(focusCurrent) === 'placeName' ? '✓ ' : '' ]]Place</button>
-                    <button class="fm-unclear-item" @click.stop="focusSetSemtag('num')">[[ getSemtag(focusCurrent) === 'num' ? '✓ ' : '' ]]Numeral</button>
-                    <button v-if="getSemtag(focusCurrent)" class="fm-unclear-item" @click.stop="focusSetSemtag(null)">Clear tag</button>
+                    <button v-for="(label, tag) in semtagLabels" :key="tag" class="fm-menu-item"
+                            @click.stop="focusSetSemtag(tag)"
+                            @mouseenter="showHelp('semtag', tag, $event)" @mouseleave="hideHelp">
+                      [[ getSemtag(focusCurrent) === tag ? '✓ ' : '' ]][[ label ]]
+                    </button>
+                    <button v-if="getSemtag(focusCurrent)" class="fm-menu-item" @click.stop="focusSetSemtag(null)">Clear tag</button>
                   </template>
                 </div>
               </Teleport>
-              <button class="fm-unclear-btn fm-gap-wrap" :class="{ 'is-active': isGapBefore(focusCurrent) || isGapAfter(focusCurrent) }" @click.stop="e => toggleFocusDropdown('Gap', e)" tabindex="-1">
+              <button v-if="isResolution(focusCurrent)" class="fm-menu-btn fm-cert-wrap"
+                      :class="{ 'is-active': getCert(focusCurrent) === 'arbitrary' || getCert(focusCurrent) === 'ambiguous' }"
+                      @click.stop="e => toggleFocusDropdown('Cert', e)" tabindex="-1"
+                      :title="'Resolution: ' + certLabels[getCert(focusCurrent)]">
+                <i v-if="certIcons[getCert(focusCurrent)]" :class="'fa-solid ' + certIcons[getCert(focusCurrent)]"></i>
+                <svg v-else class="cert-svg" aria-hidden="true"><use href="#icon-ambiguous"/></svg>
+                [[ certLabels[getCert(focusCurrent)] ]] <span style="font-size:.75em; opacity:.85;">▾</span>
+              </button>
+              <Teleport to="body">
+                <div v-if="focusCertOpen" class="fm-menu-fixed"
+                     :style="{ top: focusMenuPos.top + 'px', left: focusMenuPos.left + 'px', transform: 'translate(-50%, -100%)' }">
+                  <button v-for="c in certStates" :key="c" class="fm-menu-item"
+                          @click.stop="focusSetCert(c)"
+                          @mouseenter="showHelp('cert', c, $event)" @mouseleave="hideHelp">
+                    <span class="menu-item-icon" :class="'cert-' + c">
+                      <i v-if="certIcons[c]" :class="'fa-solid ' + certIcons[c]"></i>
+                      <svg v-else class="cert-svg" aria-hidden="true"><use href="#icon-ambiguous"/></svg>
+                    </span>
+                    [[ certLabels[c] ]]
+                    <span v-if="getCert(focusCurrent) === c" class="menu-item-check">✓</span>
+                  </button>
+                </div>
+              </Teleport>
+              <button class="fm-menu-btn fm-gap-wrap" :class="{ 'is-active': isGapBefore(focusCurrent) || isGapAfter(focusCurrent) }" @click.stop="e => toggleFocusDropdown('Gap', e)" tabindex="-1">
                 <span v-if="isGapBefore(focusCurrent)">◂</span> Gap <span v-if="isGapAfter(focusCurrent)">▸</span> <span style="font-size:.75em; opacity:.85;">▾</span>
               </button>
               <Teleport to="body">
-                <div v-if="focusGapOpen" class="fm-unclear-menu-fixed"
+                <div v-if="focusGapOpen" class="fm-menu-fixed"
                      :style="{ top: focusMenuPos.top + 'px', left: focusMenuPos.left + 'px', transform: 'translate(-50%, -100%)' }">
-                  <button class="fm-unclear-item" @click.stop="focusSetGap('before')">[[ isGapBefore(focusCurrent) ? '✓ ' : '' ]]Gap before</button>
-                  <button class="fm-unclear-item" @click.stop="focusSetGap('after')">[[ isGapAfter(focusCurrent) ? '✓ ' : '' ]]Gap after</button>
+                  <button class="fm-menu-item" @click.stop="focusSetGap('before')">[[ isGapBefore(focusCurrent) ? '✓ ' : '' ]]Gap before</button>
+                  <button class="fm-menu-item" @click.stop="focusSetGap('after')">[[ isGapAfter(focusCurrent) ? '✓ ' : '' ]]Gap after</button>
                 </div>
               </Teleport>
             </div>

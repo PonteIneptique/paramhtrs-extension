@@ -3,6 +3,9 @@ import {
   getSelector, getStart, getEnd, getExact, getPrefix, getSuffix, getBodyValue,
   isInsertion, isAtrNoise, isNonResolvAbbr, getNonResolvReason, isSpaceExact, isMarkup,
   getSemtag, SEMTAG_LABELS, SEMTAG_ABBREVS, ANNOT_TYPE_ICONS, ANNOT_TYPE_TITLES, isGapBefore, isGapAfter,
+  isResolution, getCert, CERT_STATES, CERT_LABELS, CERT_ICONS,
+  ANNOT_TYPE_MENU, DRAFT_TYPES, NON_RESOLV_REASONS, NON_RESOLV_REASON_LABELS, helpFor, anchorLabel,
+  derivePurpose,
   escapeHtml, renderVisible, applyAnnotations,
   buildSourceHtml, computeNormalizedPositions, buildNormalizedPageHtml,
   findSimilarAnnotations,
@@ -15,6 +18,14 @@ import {
 
 // Module-level pending annotation (raw W3C object, not reactive)
 let pendingAnnotRaw = null;
+
+// Draft types that open a qualifier step instead of committing on click.
+const DRAFT_TYPE_SUBMENUS = ['normalizing', 'non_resolv_abbr', 'markup'];
+
+// Guideline popover: how long to hover before it appears, and its width — kept
+// in sync with .help-pop in editor.html so the flip test knows the real size.
+const HELP_POP_DELAY = 400;
+const HELP_POP_WIDTH = 280;
 
 // Deep-freeze loaded annotations so Vue skips making their nested W3C structure
 // reactive (a large cost at 4000+ annotations). Safe because annotations are
@@ -55,6 +66,16 @@ export function createEditorApp(config) {
         semtagAbbrevs:       SEMTAG_ABBREVS,
         annotTypeIcons:      ANNOT_TYPE_ICONS,
         annotTypeTitles:     ANNOT_TYPE_TITLES,
+        certStates:          CERT_STATES,
+        certLabels:          CERT_LABELS,
+        certIcons:           CERT_ICONS,
+        annotTypeMenu:       ANNOT_TYPE_MENU,
+        draftTypes:          DRAFT_TYPES,
+        draftTypeSubmenus:   DRAFT_TYPE_SUBMENUS,
+        nonResolvReasons:    NON_RESOLV_REASONS,
+        nonResolvReasonLabels: NON_RESOLV_REASON_LABELS,
+        // Guideline popover: { title, text, anchor, top, left, flip } or null
+        helpPop:             null,
         hoveredAnnotationId: null,
         hoverEnabled:        localStorage.getItem('editorHoverEnabled') === '1',
         selectedAnnotationId: null,
@@ -63,14 +84,20 @@ export function createEditorApp(config) {
         refineMode:          false,
         annotFilter:         'pending',
         annotSort:           'position',
-        pendingUnclearOpen:  false,
-        pendingMarkupOpen:   false,
+        pendingTypeOpen:     false,
+        // null | 'normalizing' | 'non_resolv_abbr' | 'markup' — which type's
+        // qualifier list is expanded inside the draft Type menu.
+        pendingTypeSubmenu:  null,
+        // Certainty staged on the draft; applied by commitPending.
+        pendingCert:         'informed',
         annotTagOpenId:      null,
         annotTypeOpenId:     null,
         annotGapOpenId:      null,
+        annotCertOpenId:     null,
         focusTagOpen:        false,
         focusTypeOpen:       false,
         focusGapOpen:        false,
+        focusCertOpen:       false,
         focusMenuPos:        { top: 0, left: 0 },
         annotMenuPos:        { top: 0, left: 0 },
         fontSize:            parseFloat(localStorage.getItem('editorFontSize')) || 1,
@@ -115,7 +142,7 @@ export function createEditorApp(config) {
       // whichever menu id is open so it always reflects the latest (post-edit)
       // object rather than a stale reference.
       menuAnnot() {
-        const id = this.annotTagOpenId || this.annotTypeOpenId || this.annotGapOpenId;
+        const id = this.annotTagOpenId || this.annotTypeOpenId || this.annotGapOpenId || this.annotCertOpenId;
         return id ? (this.annotations.find(a => a.id === id) || null) : null;
       },
       panelSourceStyle() { return { flex: `0 0 ${this.sourceWidth}%` }; },
@@ -287,16 +314,18 @@ export function createEditorApp(config) {
       this._registerNormalizedListeners(this.$refs.normalizedText);
       document.addEventListener('keydown', this._handleKeydown);
       this._closeDropdowns = (e) => {
-        if (!e.target.closest('.unclear-wrap')) {
-          this.pendingUnclearOpen = false;
-          this.pendingMarkupOpen  = false;
+        if (!e.target.closest('.draft-type-wrap')) {
+          this.pendingTypeOpen    = false;
+          this.pendingTypeSubmenu = null;
         }
         if (!e.target.closest('.tag-wrap'))  this.annotTagOpenId  = null;
         if (!e.target.closest('.type-wrap')) this.annotTypeOpenId = null;
         if (!e.target.closest('.gap-wrap'))  this.annotGapOpenId  = null;
+        if (!e.target.closest('.cert-wrap')) this.annotCertOpenId = null;
         if (!e.target.closest('.fm-tag-wrap'))  this.focusTagOpen  = false;
         if (!e.target.closest('.fm-type-wrap')) this.focusTypeOpen = false;
         if (!e.target.closest('.fm-gap-wrap'))  this.focusGapOpen  = false;
+        if (!e.target.closest('.fm-cert-wrap')) this.focusCertOpen = false;
       };
       document.addEventListener('click', this._closeDropdowns);
       if (this.processing.processing) this._startProcessingPoll();
@@ -310,6 +339,7 @@ export function createEditorApp(config) {
       document.removeEventListener('keydown', this._handleKeydown);
       document.removeEventListener('click', this._closeDropdowns);
       clearTimeout(this._processingPollTimer);
+      clearTimeout(this._helpTimer);
     },
 
     methods: {
@@ -318,6 +348,7 @@ export function createEditorApp(config) {
       isSpaceInsertion, isSpaceBeforePunct, isSpaceBeforeSpace,
       isInsertionExact(stub) { return stub?.isIns === true; },
       getSemtag, isGapBefore, isGapAfter, renderVisible,
+      isResolution, getCert,
 
       // ── Selection highlighting (direct class toggle, no HTML rebuild) ─────────
       // An annotation may render as several <mark> fragments (e.g. split across a
@@ -363,6 +394,17 @@ export function createEditorApp(config) {
       },
 
       // ── Mark an annotation's token as cut in two (gap before/after) ────────────
+      // ── Set how certain the resolution is ─────────────────────────────────────
+      // 'informed' is the default, so it is stored as the absence of a value —
+      // existing annotations and payloads stay untouched.
+      setCert(annot, cert) {
+        const newBody = { ...annot.body[0] };
+        if (cert && cert !== 'informed') newBody.cert = cert; else delete newBody.cert;
+        const updated = { ...annot, resp_id: CURRENT_USER_ID, body: [newBody] };
+        this.annotations = this.annotations.map(a => a.id === annot.id ? updated : a);
+        this.saveAnnotation(updated);
+      },
+
       setGap(annot, which, value) {
         const newBody = { ...annot.body[0] };
         const key = which === 'before' ? 'gap_before' : 'gap_after';
@@ -372,21 +414,47 @@ export function createEditorApp(config) {
         this.saveAnnotation(updated);
       },
 
+      // ── Guideline popover ─────────────────────────────────────────────────────
+      // Hovering anything that names a category — a chip or a menu row — shows the
+      // matching guideline blurb after a short delay, with a link into the full
+      // section. Position is fixed so it escapes the panel's overflow, and it
+      // opens to the *left* of the anchor since the menus already sit right-aligned
+      // in a narrow column; it flips right when there isn't room.
+      showHelp(kind, key, e) {
+        const help = helpFor(kind, key);
+        if (!help) return;
+        const title = { type: this.annotTypeTitles[key], cert: this.certLabels[key],
+                        semtag: this.semtagLabels[key] || this.nonResolvReasonLabels[key] || 'Entity tag',
+                        gap: 'Gap' }[kind];
+        const r = e.currentTarget.getBoundingClientRect();
+        clearTimeout(this._helpTimer);
+        this._helpTimer = setTimeout(() => {
+          const flip = r.left < HELP_POP_WIDTH + 24;
+          this.helpPop = { title, text: help.text, ref: anchorLabel(help.anchor),
+                           top: r.top, left: flip ? r.right + 8 : r.left - 8, flip };
+        }, HELP_POP_DELAY);
+      },
+      hideHelp() {
+        clearTimeout(this._helpTimer);
+        this.helpPop = null;
+      },
+
       // ── Shared Tag/Type/Gap row menus ─────────────────────────────────────────
       // Open the requested menu for `annot`, anchored under the clicked button.
       // Clicking the same button again toggles it closed; opening one closes the
       // others. The menu markup lives once at the app root and reads `menuAnnot`.
       openAnnotMenu(kind, annot, e) {
-        const idField = { tag: 'annotTagOpenId', type: 'annotTypeOpenId', gap: 'annotGapOpenId' }[kind];
+        const idField = { tag: 'annotTagOpenId', type: 'annotTypeOpenId',
+                          gap: 'annotGapOpenId', cert: 'annotCertOpenId' }[kind];
         const wasOpen = this[idField] === annot.id;
-        this.annotTagOpenId = this.annotTypeOpenId = this.annotGapOpenId = null;
+        this.annotTagOpenId = this.annotTypeOpenId = this.annotGapOpenId = this.annotCertOpenId = null;
         if (wasOpen) return;
         const r = e.currentTarget.getBoundingClientRect();
         this.annotMenuPos = { top: r.bottom + 3, left: r.right };
         this[idField] = annot.id;
       },
       closeAnnotMenus() {
-        this.annotTagOpenId = this.annotTypeOpenId = this.annotGapOpenId = null;
+        this.annotTagOpenId = this.annotTypeOpenId = this.annotGapOpenId = this.annotCertOpenId = null;
       },
 
       // ── DOM event listeners on #page-source (registered ONCE at mount) ────────
@@ -645,26 +713,49 @@ export function createEditorApp(config) {
         // folded the value into validateAnnotation, then focus moves to the next
         // annotation and this input blurs a second time.
         if (domValue === (annot.body[0].value ?? '')) return;
-        const updated = { ...annot, resp_id: CURRENT_USER_ID, body: [{ ...annot.body[0], value: domValue }] };
+        const updated = { ...annot, resp_id: CURRENT_USER_ID,
+                          body: [{ ...annot.body[0], value: domValue,
+                                   purpose: derivePurpose(annot, domValue) }] };
         this.annotations = this.annotations.map(a => a.id !== annot.id ? a : updated);
         this.saveAnnotation(updated);
       },
 
-      // ── Commit pending annotation ─────────────────────────────────────────────
-      commitPending(value) {
+      // ── Commit the draft annotation ───────────────────────────────────────────
+      // Every way of committing a draft differs only in the body it produces, so
+      // `buildBody` receives the draft's exact text and the draft itself and
+      // returns that body; everything else — clearing the draft state, stamping
+      // the author, appending, saving, offering the bulk follow-up — is shared.
+      _commitDraft(buildBody) {
         if (!pendingAnnotRaw) return;
-        const annot = pendingAnnotRaw; pendingAnnotRaw = null; this.pendingAnnot = null;
-        this.pendingUnclearOpen = false;
-        const posSel = getSelector(annot, 'TextPositionSelector');
-        annot.body   = [{ type:'TextualBody', value: value ?? '',
-                          purpose: posSel.start === posSel.end ? 'insertion' : 'normalizing' }];
+        const annot = pendingAnnotRaw;
+        const exact = getSelector(annot, 'TextQuoteSelector').exact ?? '';
+        this._resetDraftState();
+        annot.body    = [buildBody(exact, annot)];
         annot.resp_id = CURRENT_USER_ID;
         this.annotations = [...this.annotations, annot];
         this.saveAnnotation(annot);
         this._offerBulkAnnotation(annot);
       },
 
-      cancelPending() { pendingAnnotRaw = null; this.pendingAnnot = null; this.pendingUnclearOpen = false; this.pendingMarkupOpen = false; },
+      _resetDraftState() {
+        pendingAnnotRaw = null;
+        this.pendingAnnot       = null;
+        this.pendingTypeOpen    = false;
+        this.pendingTypeSubmenu = null;
+        this.pendingCert        = 'informed';
+      },
+
+      commitPending(value) {
+        const cert = this.pendingCert;
+        this._commitDraft((exact, annot) => {
+          const body = { type: 'TextualBody', value: value ?? '',
+                         purpose: derivePurpose(annot, value) };
+          if (cert !== 'informed') body.cert = cert;
+          return body;
+        });
+      },
+
+      cancelPending() { this._resetDraftState(); },
 
       onPendingBlur(evt) {
         const row = evt.currentTarget.closest('.annot-pending');
@@ -672,43 +763,38 @@ export function createEditorApp(config) {
         this.commitPending(evt.target.value);
       },
 
-      // ── Mark selection as ATR noise ───────────────────────────────────────────
-      markAtrNoise() {
-        if (!pendingAnnotRaw) return;
-        const annot = pendingAnnotRaw; pendingAnnotRaw = null; this.pendingAnnot = null;
-        const exact = getSelector(annot, 'TextQuoteSelector').exact ?? '';
-        annot.body = [{ type: 'TextualBody', value: exact, purpose: 'atr_noise' }];
-        annot.resp_id = CURRENT_USER_ID;
-        this.annotations = [...this.annotations, annot];
-        this.saveAnnotation(annot);
-        this._offerBulkAnnotation(annot);
-      },
-
-      // ── Mark selection as Mark-Up (tag-only, no text change) ─────────────────
+      // ── Commit the draft directly as a given type ─────────────────────────────
+      // These types replace the value with the source text, so there is nothing
+      // left to type: picking one commits straight away.
+      markDeletion()  { this._commitDraft(() => ({ type: 'TextualBody', value: '', purpose: 'deletion' })); },
+      markAtrNoise()  { this._commitDraft(exact => ({ type: 'TextualBody', value: exact, purpose: 'atr_noise' })); },
       markMarkup(semtag) {
-        if (!pendingAnnotRaw) return;
-        const annot = pendingAnnotRaw; pendingAnnotRaw = null; this.pendingAnnot = null;
-        this.pendingUnclearOpen = false;
-        this.pendingMarkupOpen = false;
-        const exact = getSelector(annot, 'TextQuoteSelector').exact ?? '';
-        annot.body = [{ type: 'TextualBody', value: exact, purpose: 'markup', semtag }];
-        annot.resp_id = CURRENT_USER_ID;
-        this.annotations = [...this.annotations, annot];
-        this.saveAnnotation(annot);
-        this._offerBulkAnnotation(annot);
+        this._commitDraft(exact => ({ type: 'TextualBody', value: exact, purpose: 'markup', semtag }));
+      },
+      markNonResolvAbbr(reason) {
+        this._commitDraft(exact => ({ type: 'TextualBody', value: exact, purpose: 'non_resolv_abbr', reason }));
       },
 
-      // ── Mark selection as non-resolvable abbreviation ────────────────────────
-      markNonResolvAbbr(reason) {
-        if (!pendingAnnotRaw) return;
-        const annot = pendingAnnotRaw; pendingAnnotRaw = null; this.pendingAnnot = null;
-        this.pendingUnclearOpen = false;
-        const exact = getSelector(annot, 'TextQuoteSelector').exact ?? '';
-        annot.body = [{ type: 'TextualBody', value: exact, purpose: 'non_resolv_abbr', reason }];
-        annot.resp_id = CURRENT_USER_ID;
-        this.annotations = [...this.annotations, annot];
-        this.saveAnnotation(annot);
-        this._offerBulkAnnotation(annot);
+      // ── Draft Type menu ───────────────────────────────────────────────────────
+      // Types with a qualifier expand a second step in place; the rest commit.
+      pickDraftType(purpose) {
+        if (DRAFT_TYPE_SUBMENUS.includes(purpose)) {
+          this.pendingTypeSubmenu = this.pendingTypeSubmenu === purpose ? null : purpose;
+          return;
+        }
+        if (purpose === 'deletion') this.markDeletion();
+        if (purpose === 'atr_noise') this.markAtrNoise();
+      },
+      // Certainty is the one qualifier that doesn't commit — the value still has
+      // to be typed — so stage it and hand focus back to the input.
+      stageDraftCert(cert) {
+        this.pendingCert        = cert;
+        this.pendingTypeOpen    = false;
+        this.pendingTypeSubmenu = null;
+        this.$nextTick(() => {
+          const inp = this.$refs.pendingInput;
+          if (inp) (Array.isArray(inp) ? inp[0] : inp).focus();
+        });
       },
 
       // ── Bulk annotation offer ─────────────────────────────────────────────────
@@ -757,6 +843,11 @@ export function createEditorApp(config) {
         const cur = this.focusCurrent; if (!cur) return;
         this.setReason(cur, reason);
         this.focusTagOpen = false;
+      },
+      focusSetCert(cert) {
+        const cur = this.focusCurrent; if (!cur) return;
+        this.setCert(cur, cert);
+        this.focusCertOpen = false;
       },
       focusSetGap(which) {
         const cur = this.focusCurrent; if (!cur) return;
@@ -808,6 +899,11 @@ export function createEditorApp(config) {
             break;
           default:
             newBody = { type: 'TextualBody', value: currentValue, purpose: 'normalizing' };
+        }
+        // Certainty only means something on a resolution — carry it over when the
+        // annotation stays one, drop it otherwise.
+        if (annot.body?.[0]?.cert && isResolution({ ...annot, body: [newBody] })) {
+          newBody.cert = annot.body[0].cert;
         }
         if (annot.body?.[0]?.semtag) newBody.semtag = annot.body[0].semtag;
         if (annot.body?.[0]?.gap_before) newBody.gap_before = true;
@@ -1228,6 +1324,7 @@ document.querySelectorAll('.text-col').forEach(col => {
         this.focusTagOpen  = false;
         this.focusTypeOpen = false;
         this.focusGapOpen  = false;
+        this.focusCertOpen = false;
       },
       toggleFocusDropdown(name, e) {
         const key = `focus${name}Open`;
@@ -1265,7 +1362,9 @@ document.querySelectorAll('.text-col').forEach(col => {
         // Combine pending edit + validation into one PUT
         let updated = cur;
         if (cur.body?.[0] && getBodyValue(cur) !== this.focusEditValue) {
-          updated = { ...updated, resp_id: CURRENT_USER_ID, body: [{ ...cur.body[0], value: this.focusEditValue }] };
+          updated = { ...updated, resp_id: CURRENT_USER_ID,
+                      body: [{ ...cur.body[0], value: this.focusEditValue,
+                               purpose: derivePurpose(cur, this.focusEditValue) }] };
         }
         updated = { ...updated, validated_by: CURRENT_USER_ID };
         this.annotations = this.annotations.map(a => a.id === cur.id ? updated : a);
@@ -1295,7 +1394,9 @@ document.querySelectorAll('.text-col').forEach(col => {
       saveFocusEdit() {
         const cur = this.focusCurrent;
         if (!cur || !cur.body?.[0] || getBodyValue(cur) === this.focusEditValue) return;
-        const updated = { ...cur, resp_id: CURRENT_USER_ID, body: [{ ...cur.body[0], value: this.focusEditValue }] };
+        const updated = { ...cur, resp_id: CURRENT_USER_ID,
+                          body: [{ ...cur.body[0], value: this.focusEditValue,
+                                   purpose: derivePurpose(cur, this.focusEditValue) }] };
         this.annotations = this.annotations.map(a => a.id !== cur.id ? a : updated);
         this.saveAnnotation(updated);
       },
