@@ -1,8 +1,28 @@
-from uuid import uuid4
+"""TEI export and annotation-offset bookkeeping — the parts of the old
+alignment stack that are specific to this app.
+
+The alignment engine and the W3C Open Annotation builders were extracted into
+penelopy (penelopy.aligner) and are re-exported below so existing call sites
+keep working. What stays here is what penelopy has no concept of:
+
+  * the TEI builder, which is deliberately kept local until `cert` support
+    (CERT_TEI, emitted as @cert on <span>) is upstreamed into
+    penelopy.aligner.tei — penelopy's copy is otherwise identical;
+  * `document_metadata`, which reads the Document/Folder/Part ORM graph;
+  * the offset-remapping helpers, which mutate Annotation ORM rows in place
+    after a line deletion.
+"""
 import re
+import unicodedata
 from xml.sax.saxutils import escape
-import re
-from xml.sax.saxutils import escape
+
+from penelopy.aligner.types import MAP_RE_ABBR_SIMPLIFICATION
+from penelopy.aligner import (
+    align_to_annotations,
+    align_one_chunk,
+    align_to_annotations_from_chunks,
+    apply_annotations_to_text,
+)
 
 # Use cdifflib for speed if available, fallback to standard difflib
 try:
@@ -56,155 +76,102 @@ def _get_selector(annot: dict, selector_type: str) -> dict:
     return {}
 
 
-def _make_annot(text: str, start: int, end: int, value: str, purpose: str) -> dict:
-    annot_id = str(uuid4())
-    return {
-        "id": annot_id,
-        "type": "Annotation",
-        "body": [{"type": "TextualBody", "value": value, "purpose": purpose}],
-        "target": {
-            "annotation": annot_id,   # Recogito requires this back-reference
-            "selector": [
-                {"type": "TextPositionSelector", "start": start, "end": end},
-                {
-                    "type": "TextQuoteSelector",
-                    "exact": text[start:end],
-                    "prefix": text[max(0, start - 10):start],
-                    "suffix": text[end:end + 10],
-                },
-            ],
-        },
-    }
+# ── deterministic over-normalization filter ──────────────────────────────────
+#
+# Ported from penelopy's scripts/clean_overnormalization.py (step 2), which is a
+# repo-only offline tool for cleaning the pen-alignment-pairs training corpus and
+# is NOT part of the installed penelopy package — so it has to live here to run
+# at inference time.
+#
+# The PEN task definition requires punctuation to be preserved exactly as in the
+# source, so a model edit that *adds* or *modernizes* punctuation is
+# over-normalization by definition and can be discarded without any judgement
+# call. Punctuation *deletions* are not — see is_pure_punctuation_annotation.
+# The rest of that script (spelling modernization) needs an LLM judge and is
+# deliberately not ported.
+
+_NOT_ABBR_GLYPHS = {"m", "ti"}
+#: Every character appearing in a recognized abbreviation glyph. "m"/"ti" are
+#: excluded because they are ordinary letters that the simplification map only
+#: lists as *targets* of a normalisation, not as abbreviation marks.
+ABBR_CHARS = {
+    ch
+    for key in MAP_RE_ABBR_SIMPLIFICATION
+    if key not in _NOT_ABBR_GLYPHS
+    for ch in key
+    if not ch.isspace()  # see is_pure_punctuation_annotation
+}
 
 
-def _alignments_to_annotations(alignments: list, reference_text: str, char_offset: int = 0) -> list:
-    """Convert Alignment objects to W3C annotations with positions relative to reference_text."""
-    annotations = []
-    pos = char_offset
-    for idx, almt in enumerate(alignments):
-        src_len = len(almt.source)
-        if almt.code == 'n' or (almt.code == 's' and almt.source == almt.target):
-            pos += src_len
-        elif almt.code == 's':
-            if not almt.source.strip() and not almt.target.strip():
-                pos += src_len
-                continue
-            # Extend the annotation span by one character when the target value
-            # already ends with the character immediately following the source span.
-            # Without this, reconstruction appends that character twice: once from
-            # the annotation value and once from the original text gap.
-            # Only safe when the next alignment is a plain match (or there is
-            # none): if it's its own substitution/deletion/insertion, that
-            # character already gets its own annotation and stealing it here
-            # would create two overlapping annotations over the same span
-            # (e.g. "gał."→"Gal.:" then "."→":" — the trailing "." must not
-            # also be absorbed into the "gał"→"Gal." annotation).
-            next_almt = alignments[idx + 1] if idx + 1 < len(alignments) else None
-            end = pos + src_len
-            if (almt.target
-                    and (next_almt is None or next_almt.code == 'n')
-                    and end < len(reference_text)
-                    and reference_text[end] == almt.target[-1]):
-                end += 1
-            annotations.append(_make_annot(reference_text, pos, end, almt.target, "normalizing"))
-            pos += src_len
-        elif almt.code == 'd':
-            if not almt.source.strip():
-                pos += src_len
-                continue
-            annotations.append(_make_annot(reference_text, pos, pos + src_len, "", "deletion"))
-            pos += src_len
-        elif almt.code == 'i':
-            annotations.append(_make_annot(reference_text, pos, pos, almt.target, "insertion"))
-    return annotations
+def has_abbreviation_marker(text: str) -> bool:
+    """True if `text` contains an abbreviation glyph or any combining mark."""
+    return any(ch in ABBR_CHARS or unicodedata.combining(ch) for ch in text)
 
 
-def align_to_annotations(original_text: str, regularized_text: str) -> list:
-    """Convert align_words() output to W3C Web Annotation JSON."""
-    from .char_alignment import align_words
-    alignments = align_words(original_text, regularized_text)
-    return _alignments_to_annotations(alignments, original_text)
+def _annotation_texts(annot: dict) -> list[str]:
+    """The text(s) an annotation introduces or removes: the inserted value for
+    an insertion, the deleted source text for a deletion, both sides for a
+    substitution."""
+    body = annot["body"][0] if annot.get("body") else {}
+    purpose = body.get("purpose")
+    if purpose == "insertion":
+        return [body.get("value", "")]
+    exact = _get_selector(annot, "TextQuoteSelector").get("exact", "")
+    if purpose == "deletion":
+        return [exact]
+    if purpose == "normalizing":
+        return [exact, body.get("value", "")]
+    return []
 
 
-def align_one_chunk(orig: str, reg: str, full_text: str, char_offset: int) -> list:
-    """Align a single (orig, reg) chunk pair and return annotations positioned
-    against `full_text` starting at `char_offset`.
+def is_pure_punctuation_annotation(annot: dict) -> bool:
+    """True for an edit whose every side is punctuation — no alphanumerics and
+    no abbreviation glyph — i.e. over-normalization under PEN rule 5.
 
-    `full_text` must be the real underlying document text (e.g.
-    Document.full_text), NOT a separator-joined reconstruction of the chunks
-    fed to the model. In punctuation/dots mode, a chunk's `orig` can span
-    several original lines joined with a plain space — but the document's
-    real text has a newline there. Both are 1 character, so char_offset math
-    (purely additive over len(orig)/len(separator)) still lands on the right
-    *position* either way, but if an edit happens to fall exactly on that
-    joint, slicing a synthetic separator-joined string for the annotation's
-    exact/prefix/suffix would grab the wrong character at that one spot.
-    Slicing the real full_text instead is correct regardless.
+    Two deliberate departures from penelopy's script:
 
-    Factored out of align_to_annotations_from_chunks so the background
-    normalization worker (worker.py) can call it one chunk at a time, as each
-    chunk's `reg` comes back from the model, and persist that chunk's
-    annotations immediately — without waiting for the rest of the document.
+    *Deletions are exempt.* The script discards insertions, substitutions and
+    deletions alike. Backtested against this corpus, that is right for the first
+    two (2474 edits, 1.0% of them ever validated by an annotator) but wrong for
+    deletions: 147 of 415 (35%) were deliberately approved. Those are the scribal
+    punctus being resolved away — "…nqe il sot[.] ⁊ pot…" — which the PEN
+    definition explicitly sanctions ("a period, colon, or point that is itself
+    part of an abbreviation mark … is consumed by resolving that abbreviation").
+    Whether a given point ends a clause or marks a suspension is exactly the
+    judgement call the script's LLM judge exists for, so it cannot be settled
+    deterministically and the edit is left for the annotator.
+
+    *Whitespace-only edits are never "pure punctuation".* Inserting a space is
+    word segmentation, a genuine resolution of unspaced ATR output. The script
+    reaches the same outcome by accident — U+0020 lands in its ABBR_CHARS via
+    the " ͣ"-style space+combining keys of MAP_RE_ABBR_SIMPLIFICATION, so
+    has_abbreviation_marker(" ") is True there. Here the space keys are stripped
+    out of ABBR_CHARS and the case is stated outright, which also makes
+    ". " -> ", " get caught (the script keeps it, since the trailing space alone
+    makes it look abbreviated).
     """
-    if not reg:
-        return []
-    from .char_alignment import align_words
-    alignments = align_words(orig, reg)
-    return _alignments_to_annotations(alignments, full_text, char_offset)
-
-
-def align_to_annotations_from_chunks(chunks: list[dict], separator: str = "\n", full_text: str | None = None) -> list:
-    """Align each (orig, reg) chunk pair independently and return consolidated annotations.
-
-    Aligning per-chunk keeps each sub-problem small and scoped to what the
-    normalisation model actually saw, so the edit-distance DP is more accurate
-    than aligning the entire page at once.
-
-    Args:
-        chunks:    list of {"orig": str, "reg": str} dicts (in document order)
-        separator: string that was placed between consecutive orig chunks when
-                   the full page text was assembled.  Typically "\n" (lines
-                   mode) or " " (dots mode).  Pilcrow chunks already carry
-                   their own delimiter so separator="" is correct there.
-        full_text: the real underlying document text to slice annotation
-                   context from (see align_one_chunk's docstring for why this
-                   must NOT be the separator-joined chunk text in general).
-                   Defaults to the separator-joined reconstruction for
-                   backward compatibility when no real text is available,
-                   but callers that have one (document_create, worker.py)
-                   should always pass it.
-    """
-    if full_text is None:
-        full_text = separator.join(c["orig"] for c in chunks)
-    all_annotations = []
-    char_offset = 0
-    for idx, chunk in enumerate(chunks):
-        orig, reg = chunk["orig"], chunk.get("reg", "")
-        all_annotations.extend(align_one_chunk(orig, reg, full_text, char_offset))
-        char_offset += len(orig)
-        if idx < len(chunks) - 1:
-            char_offset += len(separator)
-    return all_annotations
-
-
-def apply_annotations_to_text(original_text: str, annotations: list) -> str:
-    """Produce normalized plaintext by applying annotations right-to-left."""
-    if not annotations:
-        return original_text
-    sorted_annots = sorted(
-        annotations,
-        key=lambda a: _get_selector(a, "TextPositionSelector").get("start", 0),
-        reverse=True,
+    body = annot["body"][0] if annot.get("body") else {}
+    if body.get("purpose") == "deletion":
+        return False
+    texts = _annotation_texts(annot)
+    if not texts:
+        return False
+    if all(not text.strip() for text in texts):
+        return False  # whitespace-only: word segmentation, not punctuation
+    return all(
+        text
+        and not any(ch.isalnum() for ch in text)
+        and not has_abbreviation_marker(text)
+        for text in texts
     )
-    result = original_text
-    for annot in sorted_annots:
-        pos = _get_selector(annot, "TextPositionSelector")
-        start = pos.get("start", 0)
-        end = pos.get("end", 0)
-        body = annot.get("body", [{}])[0] if annot.get("body") else {}
-        value = body.get("value", "")
-        result = result[:start] + value + result[end:]
-    return result
+
+
+def discard_punctuation_changes(annotations: list) -> tuple[list, list]:
+    """Split annotations into (kept, discarded-as-pure-punctuation)."""
+    kept, discarded = [], []
+    for annot in annotations:
+        (discarded if is_pure_punctuation_annotation(annot) else kept).append(annot)
+    return kept, discarded
 
 
 QUOTE_CONTEXT = 10  # chars of prefix/suffix kept in a TextQuoteSelector
@@ -258,18 +225,6 @@ def apply_deletion_to_annotations(rows: list, d0: int, d1: int, new_full_text: s
         row.target_start, row.target_end = remapped
         rebuild_quote_selector(row, new_full_text)
     return dropped
-
-
-def _escape_segment(text: str) -> str:
-    """Escape plain text segment, replacing newlines with <lb/>."""
-    result = []
-    for segment in text.split("\n"):
-        if result:
-            result.append("<lb/>")
-        result.append(escape(segment))
-    return "".join(result)
-
-
 
 
 def document_metadata(document) -> dict:

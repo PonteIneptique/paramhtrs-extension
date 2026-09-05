@@ -1,38 +1,28 @@
-import unicodedata
-from typing import List, Tuple, Optional, Literal
 import os
 
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-from flask import current_app, Response
+from flask import current_app
 
-from .normalize_jobs import normalize_whitespace
-
-def normalize_line(input_text: str, model, tokenizer: AutoTokenizer) -> str:
-    input_text = unicodedata.normalize("NFD", input_text)
-    inputs = tokenizer(input_text, return_tensors="pt", padding=True)
-    outputs = model.generate(**inputs, max_length=1024)
-    decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
-    return normalize_whitespace(decoded)
+from penelopy import Backend
+from penelopy.models import load_model
 
 
-def get_model_and_tokenizer() -> Tuple[object, AutoTokenizer]:
-    """Loads the normalization model, preferring the ONNX-quantized export
+def get_model():
+    """Load the normalization model, preferring the ONNX-quantized export
     produced by `flask quantize` (app/bp_quantize.py) when present at
-    MODEL_QUANTIZED_PATH. ORTModelForSeq2SeqLM exposes the same .generate()
-    API as AutoModelForSeq2SeqLM, so normalize_line() above needs no changes
-    either way. Falls back to the original HuggingFace checkpoint if
-    `flask quantize` has never been run."""
+    MODEL_QUANTIZED_PATH. Falls back to the original HuggingFace checkpoint if
+    `flask quantize` has never been run.
+
+    Both backends are penelopy NormalizerModel instances, so callers just use
+    `.normalize([...]) -> [...]` either way.
+    """
     quantized_path = current_app.config["MODEL_QUANTIZED_PATH"]
     if os.path.isdir(quantized_path) and os.listdir(quantized_path):
-        from optimum.onnxruntime import ORTModelForSeq2SeqLM
-        return (
-            ORTModelForSeq2SeqLM.from_pretrained(quantized_path),
-            AutoTokenizer.from_pretrained(quantized_path),
+        return load_model(
+            current_app.config["SEQ2SEQ_MODEL"],
+            backend=Backend.ONNX,
+            quantized_path=quantized_path,
         )
-    return (
-        AutoModelForSeq2SeqLM.from_pretrained(current_app.config["SEQ2SEQ_MODEL"]),
-        AutoTokenizer.from_pretrained(current_app.config["SEQ2SEQ_MODEL"])
-    )
+    return load_model(current_app.config["SEQ2SEQ_MODEL"])
 
 
 def from_xml_to_tei(xml_string: str, plaintext: bool=False) -> str:

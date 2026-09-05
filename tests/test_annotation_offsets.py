@@ -11,13 +11,13 @@ A failure means Recogito will highlight the wrong characters in the source panel
 """
 
 import pytest
-from app.annot_utils import (
+from penelopy.aligner import (
     align_to_annotations,
     align_to_annotations_from_chunks,
     align_one_chunk,
     apply_annotations_to_text,
 )
-from app.normalize_jobs import normalize_whitespace
+from penelopy.chunking.chunker import normalize_whitespace
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -265,10 +265,10 @@ def test_split_on_punct_no_spurious_space():
     in the original, so splitting there would inject a phantom space into reference_text
     and shift all subsequent annotation offsets by +1.
     """
-    from app.normalize_jobs import _split_on_punct
+    from penelopy.chunking.chunker import _split_on_punct
 
     text = "iot par nombre .li sairz. leur femes"
-    chunks = _split_on_punct(text, ["."], min_words=2)
+    chunks = _split_on_punct(text, (".",), min_tokens=2)
 
     # Rejoin exactly as align_to_annotations_from_chunks does
     reference = " ".join(chunks)
@@ -282,11 +282,11 @@ def test_split_on_punct_no_spurious_space():
 
 def test_split_on_punct_still_splits_at_sentence_boundary():
     """A delimiter followed by a real space (sentence boundary) must still split."""
-    from app.normalize_jobs import _split_on_punct
+    from penelopy.chunking.chunker import _split_on_punct
 
     # min_words=3 so it flushes after the first sentence
     text = "abc def ghi. jkl mno pqr"
-    chunks = _split_on_punct(text, ["."], min_words=3)
+    chunks = _split_on_punct(text, (".",), min_tokens=3)
     assert len(chunks) == 2, f"Expected 2 chunks, got {chunks}"
     assert chunks[0] == "abc def ghi."
     assert chunks[1] == "jkl mno pqr"
@@ -295,7 +295,7 @@ def test_split_on_punct_still_splits_at_sentence_boundary():
 def test_split_on_punct_offsets_with_chunks():
     """End-to-end: annotations produced from punctuation-mode chunks must have
     correct TextPositionSelector offsets against the newline-joined full_text."""
-    from app.annot_utils import align_to_annotations_from_chunks
+    from penelopy.aligner import align_to_annotations_from_chunks
 
     # Simulate two lines where 'nombre .li' straddles a potential split point
     lines = [
@@ -377,21 +377,17 @@ def test_align_one_chunk_matches_bulk_alignment():
 def test_api_normalize_batches_stay_within_part():
     """api_normalize's per-part batching (the actual fix) must never merge
     lines from two different parts into the same punctuation-mode chunk."""
-    from app.normalize_jobs import _split_on_punct, _enforce_max_bytes
+    from app.normalize_jobs import build_chunks
 
-    delimiters = ["."]
-    min_words = 5
     parts_lines = [
         ["Hello world.", "This is part one.", "Second line."],
         ["Part two starts here.", "More words to reach the threshold here."],
     ]
 
-    batches = []
-    for part_index, orig_lines in enumerate(parts_lines):
-        part_chunks = _split_on_punct(" ".join(orig_lines), delimiters, min_words)
-        part_chunks = _enforce_max_bytes(part_chunks, 512)
-        for chunk in part_chunks:
-            batches.append({"part_index": part_index, "chunk": chunk})
+    chunks, separator = build_chunks(parts_lines, "punctuation", min_words=5,
+                                     delimiters=["."], max_chunk_bytes=512)
+    assert separator == " "
+    batches = [{"part_index": c["part_index"], "chunk": c["orig"]} for c in chunks]
 
     # No chunk should contain text from both parts.
     for batch in batches:

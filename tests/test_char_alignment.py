@@ -1,10 +1,9 @@
-"""Mirror of test_alignment.py, importing from the new char_alignment module.
+"""Mirror of test_alignment.py, importing the alignment engine from penelopy.
 
 All 9 test cases from the original must pass with the same expected values,
 confirming that the character-level pipeline produces compatible output.
 """
-from app.alignment_types import Alignment
-from app.char_alignment import align_words
+from penelopy.aligner import Alignment, align_words
 
 
 # There are four kind of alignment: null / match, substitution, insertion, deletion.

@@ -18,8 +18,8 @@ from datetime import datetime, timezone
 
 from app import app
 from app.models import db, NormalizationJob, NormalizationJobChunk, Annotation, Document
-from app.process import get_model_and_tokenizer, normalize_line
-from app.annot_utils import align_one_chunk
+from app.process import get_model
+from app.annot_utils import align_one_chunk, discard_punctuation_changes
 
 POLL_INTERVAL_SECONDS = 2
 
@@ -52,7 +52,7 @@ def claim_next_queued_job():
     )
 
 
-def process_job(job: NormalizationJob, model, tokenizer) -> None:
+def process_job(job: NormalizationJob, model) -> None:
     chunks = (
         NormalizationJobChunk.query
         .filter_by(job_id=job.id)
@@ -63,15 +63,23 @@ def process_job(job: NormalizationJob, model, tokenizer) -> None:
     # separator-joined reconstruction of the chunks — in punctuation mode a
     # chunk can span several original lines joined with a plain space, while
     # the document's real text has a newline there; see align_one_chunk's
-    # docstring in app/annot_utils.py for why that matters.
+    # docstring in penelopy.aligner.annotations for why that matters.
     full_text = db.session.get(Document, job.document_id).full_text
     char_offset = 0
+    punct_dropped = 0
     for idx, chunk in enumerate(chunks):
         if chunk.reg is None:  # resume support: skip chunks already done by a prior (crashed) run
-            reg = normalize_line(chunk.orig, model, tokenizer)
+            reg = model.normalize([chunk.orig])[0]
             chunk.reg = reg
             chunk.processed_at = utcnow()
             annots = align_one_chunk(chunk.orig, reg, full_text, char_offset)
+            # Punctuation must be preserved exactly as in the source, so an edit
+            # that is punctuation on every side is over-normalization by
+            # definition — drop it rather than make an annotator reject it by
+            # hand. Only applied here, on model output: the synchronous import
+            # paths in bp_document carry human-supplied abbr/expan pairs.
+            annots, dropped = discard_punctuation_changes(annots)
+            punct_dropped += len(dropped)
             for a in annots:
                 db.session.add(Annotation.from_dict(job.document_id, a))
             db.session.commit()  # this chunk's annotations are now visible immediately
@@ -82,12 +90,15 @@ def process_job(job: NormalizationJob, model, tokenizer) -> None:
     job.status = "done"
     job.finished_at = utcnow()
     db.session.commit()
+    if punct_dropped:
+        print(f"worker: job {job.id} dropped {punct_dropped} pure-punctuation edits",
+              file=sys.stderr, flush=True)
 
 
 def run():
     with app.app_context():
         print("worker: loading model…", file=sys.stderr, flush=True)
-        model, tokenizer = get_model_and_tokenizer()
+        model = get_model()
         print("worker: model loaded, polling for jobs", file=sys.stderr, flush=True)
 
         while True:
@@ -99,7 +110,7 @@ def run():
             print(f"worker: processing job {job.id} (document {job.document_id})",
                   file=sys.stderr, flush=True)
             try:
-                process_job(job, model, tokenizer)
+                process_job(job, model)
                 print(f"worker: job {job.id} done", file=sys.stderr, flush=True)
             except Exception as e:
                 db.session.rollback()

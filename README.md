@@ -8,7 +8,7 @@ A seq2seq transformer model suggests modern expansions line by line. Human annot
 
 - Page-by-page HTR output editor with source / annotations / normalised-text panels
 - Seq2seq normalisation via a HuggingFace Transformers model (streaming progress)
-- Character-level alignment engine mapping abbreviations to their expansions
+- Character-level alignment engine (via penelopy) mapping abbreviations to their expansions
 - Bulk annotation validation: one Ctrl+Enter validates all identical source→target pairs
 - Import lines from [CoMMA](https://comma.inria.fr) via Biblissima resource URI
 - Export per-page TEI XML (with manuscript metadata) and plain-text zips
@@ -18,7 +18,9 @@ A seq2seq transformer model suggests modern expansions line by line. Human annot
 ## Tech stack
 
 - **Backend**: Python 3.13 · Flask 3 · SQLAlchemy · Flask-Login
-- **ML**: PyTorch · HuggingFace Transformers (seq2seq / ByT5)
+- **ML**: [penelopy](https://github.com/PonteIneptique/penelopy) — normalisation model
+  loading/inference (PyTorch or ONNX), chunking and the character-level alignment
+  engine; wraps HuggingFace Transformers (seq2seq / ByT5)
 - **Frontend**: Vue 3 (CDN, Options API) · Bootstrap 5 · Font Awesome
 - **XML**: lxml · SaxonC-HE
 

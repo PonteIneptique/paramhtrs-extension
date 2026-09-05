@@ -10,8 +10,9 @@ import sys
 import click
 from flask.cli import AppGroup
 
-from .normalize_jobs import _split_on_punct, _enforce_max_bytes
-from .char_alignment import align_words
+from penelopy.aligner import align_words
+from penelopy.chunking.chunker import ChunkingStrategy, build_chunks
+from penelopy.models import load_model
 
 cli_group = AppGroup("align", help="Chunk & align original vs regularized text.")
 user_cli_group = AppGroup("user", help="User management commands.")
@@ -23,9 +24,10 @@ _LABEL = {"n": "match", "s": "sub  ", "i": "ins  ", "d": "del  "}
 
 def _chunk_text(text: str, delimiters: list[str], min_words: int, max_bytes: int) -> list[str]:
     lines = [l.strip() for l in text.splitlines() if l.strip()]
-    full_text = " ".join(lines)
-    chunks = _split_on_punct(full_text, delimiters, min_words)
-    return _enforce_max_bytes(chunks, max_bytes)
+    return build_chunks(
+        "\n".join(lines), ChunkingStrategy.PUNCTUATION,
+        min_tokens=min_words, delimiters=tuple(delimiters), max_chunk_bytes=max_bytes,
+    ).chunks
 
 
 def _print_alignments(alignments: list, show_nulls: bool) -> None:
@@ -91,16 +93,17 @@ def align_run(orig, orig_file, reg, reg_file, model, delimiters,
         reg_text = reg if reg else open(reg_file, encoding="utf-8").read()
         reg_chunks = _chunk_text(reg_text, delim_list, min_words, max_bytes)
     else:
-        from .process import normalize_line, get_model_and_tokenizer
+        from .process import get_model
         model_path = model or current_app.config["SEQ2SEQ_MODEL"]
         click.echo(f"Loading model: {model_path} …", err=True)
-        m, tok = get_model_and_tokenizer() if model is None else _load_model(model_path)
-        total = len(orig_chunks)
-        reg_chunks = []
-        for i, chunk in enumerate(orig_chunks, 1):
-            click.echo(f"  normalizing chunk {i}/{total} ({len(chunk.encode())} bytes) …", err=True)
-            reg_chunks.append(normalize_line(chunk, m, tok))
-            print(f"---> {reg_chunks[-1]}")
+        m = get_model() if model is None else load_model(model_path)
+        total_bytes = sum(len(c.encode()) for c in orig_chunks)
+        click.echo(f"  normalizing {len(orig_chunks)} chunks ({total_bytes} bytes) …", err=True)
+        # One batched call: unlike worker.py, this is a one-shot offline command
+        # with no progressive-UI requirement, so batching is a free throughput win.
+        reg_chunks = m.normalize(orig_chunks)
+        for r in reg_chunks:
+            print(f"---> {r}")
 
     # ── align ─────────────────────────────────────────────────────────────────
     if len(orig_chunks) != len(reg_chunks):
@@ -130,12 +133,3 @@ def change_password(username, password):
     user.set_password(password)
     db.session.commit()
     click.echo(f"Password updated for '{username}'.")
-
-
-def _load_model(model_path: str):
-    """Load model + tokenizer from an arbitrary path (bypasses current_app.config)."""
-    from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-    return (
-        AutoModelForSeq2SeqLM.from_pretrained(model_path),
-        AutoTokenizer.from_pretrained(model_path),
-    )

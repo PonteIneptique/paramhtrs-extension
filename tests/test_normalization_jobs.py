@@ -5,13 +5,28 @@
       -> processing-status / annotations endpoints
 
 These exercise the real Flask routes + SQLAlchemy models against an
-in-memory SQLite database (no real ML model — normalize_line is monkeypatched).
+in-memory SQLite database (no real ML model — a _FakeModel stub stands in for
+the penelopy NormalizerModel handed to worker.process_job).
 """
 import pytest
 from app import app as flask_app
 from app.models import db, User, Project, Folder, Document, NormalizationJob, NormalizationJobChunk
 from app.normalize_jobs import normalize_whitespace
 import worker
+
+
+class _FakeModel:
+    """Stands in for a penelopy NormalizerModel: `.normalize(texts) -> list[str]`.
+
+    worker.process_job calls it one chunk at a time, so `fn` maps a single
+    string to its normalized form.
+    """
+
+    def __init__(self, fn):
+        self.fn = fn
+
+    def normalize(self, texts):
+        return [self.fn(t) for t in texts]
 
 
 @pytest.fixture()
@@ -122,7 +137,7 @@ def test_normalize_false_paths_unaffected(app, client, folder):
 
 # ── worker.process_job ───────────────────────────────────────────────────────
 
-def test_worker_processes_chunks_incrementally(app, client, folder, monkeypatch):
+def test_worker_processes_chunks_incrementally(app, client, folder):
     _login(client)
     resp = client.post("/documents/new", json={
         "folder_id": folder.id,
@@ -136,9 +151,7 @@ def test_worker_processes_chunks_incrementally(app, client, folder, monkeypatch)
     job = doc.active_job
 
     fixes = {"Hello wrld.": "Hello world.", "Secnd line.": "Second line."}
-    monkeypatch.setattr(worker, "normalize_line", lambda text, model, tok: fixes.get(text, text))
-
-    worker.process_job(job, None, None)
+    worker.process_job(job, _FakeModel(lambda text: fixes.get(text, text)))
 
     db.session.refresh(job)
     assert job.status == "done"
@@ -147,7 +160,33 @@ def test_worker_processes_chunks_incrementally(app, client, folder, monkeypatch)
     assert doc.normalized_text == "Hello world.\nSecond line."
 
 
-def test_worker_resumes_without_reprocessing_done_chunks(app, client, folder, monkeypatch):
+def test_worker_drops_pure_punctuation_edits(app, client, folder):
+    """Punctuation must be preserved exactly as in the source, so an edit that is
+    punctuation on every side never reaches the annotator — while the genuine
+    abbreviation resolution in the same chunk does."""
+    _login(client)
+    resp = client.post("/documents/new", json={
+        "folder_id": folder.id,
+        "label": "Doc-punct",
+        "lines": [{"orig": "⁊ tunni."}],
+        "normalize": True,
+        "split_mode": "lines",
+    })
+    doc_id = int(resp.get_json()["redirect"].rstrip("/").split("/")[-1])
+    job = db.session.get(Document, doc_id).active_job
+
+    # Model resolves the Tironian et *and* modernizes the final stop to a comma.
+    worker.process_job(job, _FakeModel(lambda text: "et tunni,"))
+
+    doc = db.session.get(Document, doc_id)
+    values = [a["body"][0]["value"] for a in doc.annotations]
+    assert "et" in values, "the abbreviation resolution must survive"
+    assert "," not in values, "the '.' -> ',' punctuation edit must be discarded"
+    # Dropping the annotation means the source punctuation is what stands.
+    assert doc.normalized_text.endswith(".")
+
+
+def test_worker_resumes_without_reprocessing_done_chunks(app, client, folder):
     """A crashed/restarted worker must not re-call the model on chunks that
     already have `reg` set from a prior (partial) run."""
     _login(client)
@@ -162,19 +201,18 @@ def test_worker_resumes_without_reprocessing_done_chunks(app, client, folder, mo
     db.session.commit()
 
     calls = []
-    def counting_normalize(text, model, tok):
+    def counting_normalize(text):
         calls.append(text)
         return text.upper()
-    monkeypatch.setattr(worker, "normalize_line", counting_normalize)
 
-    worker.process_job(job, None, None)
+    worker.process_job(job, _FakeModel(counting_normalize))
 
     assert calls == ["def"]
     db.session.refresh(job)
     assert job.status == "done"
 
 
-def test_worker_marks_job_failed_on_exception(app, client, folder, monkeypatch):
+def test_worker_marks_job_failed_on_exception(app, client, folder):
     _login(client)
     resp = client.post("/documents/new", json={
         "folder_id": folder.id, "label": "Doc6",
@@ -184,12 +222,11 @@ def test_worker_marks_job_failed_on_exception(app, client, folder, monkeypatch):
     doc_id = int(resp.get_json()["redirect"].rstrip("/").split("/")[-1])
     job = db.session.get(Document, doc_id).active_job
 
-    def failing_normalize(text, model, tok):
+    def failing_normalize(text):
         raise RuntimeError("boom")
-    monkeypatch.setattr(worker, "normalize_line", failing_normalize)
 
     with pytest.raises(RuntimeError):
-        worker.process_job(job, None, None)
+        worker.process_job(job, _FakeModel(failing_normalize))
     db.session.rollback()
     job = db.session.get(NormalizationJob, job.id)
     job.status = "failed"
@@ -223,7 +260,7 @@ def _make_document(folder):
 
 # ── processing-status / annotations endpoints ────────────────────────────────
 
-def test_processing_status_endpoints(app, client, folder, monkeypatch):
+def test_processing_status_endpoints(app, client, folder):
     _login(client)
     resp = client.post("/documents/new", json={
         "folder_id": folder.id, "label": "Doc7",
@@ -239,8 +276,7 @@ def test_processing_status_endpoints(app, client, folder, monkeypatch):
     assert r.get_json() == {str(doc_id): {"status": "queued", "current": 0, "total": 2, "error": None}}
 
     job = db.session.get(Document, doc_id).active_job
-    monkeypatch.setattr(worker, "normalize_line", lambda text, model, tok: text.upper())
-    worker.process_job(job, None, None)
+    worker.process_job(job, _FakeModel(str.upper))
 
     r = client.get(f"/api/documents/{doc_id}/processing-status")
     body = r.get_json()
@@ -256,7 +292,7 @@ def test_processing_status_endpoints(app, client, folder, monkeypatch):
 
 # ── reprocess ─────────────────────────────────────────────────────────────────
 
-def test_reprocess_queues_a_new_job_and_clears_old_annotations(app, client, folder, monkeypatch):
+def test_reprocess_queues_a_new_job_and_clears_old_annotations(app, client, folder):
     _login(client)
     resp = client.post("/documents/new", json={
         "folder_id": folder.id, "label": "Doc8",
@@ -265,8 +301,7 @@ def test_reprocess_queues_a_new_job_and_clears_old_annotations(app, client, fold
     })
     doc_id = int(resp.get_json()["redirect"].rstrip("/").split("/")[-1])
     job = db.session.get(Document, doc_id).active_job
-    monkeypatch.setattr(worker, "normalize_line", lambda text, model, tok: text.upper())
-    worker.process_job(job, None, None)
+    worker.process_job(job, _FakeModel(str.upper))
 
     doc = db.session.get(Document, doc_id)
     first_run_count = len(doc.annotations)
@@ -281,7 +316,7 @@ def test_reprocess_queues_a_new_job_and_clears_old_annotations(app, client, fold
     assert new_job.id != job.id
     assert new_job.status == "queued"
 
-    worker.process_job(new_job, None, None)
+    worker.process_job(new_job, _FakeModel(str.upper))
     doc = db.session.get(Document, doc_id)
     # Same input/model behavior -> same number of annotations, not doubled.
     assert len(doc.annotations) == first_run_count
@@ -315,7 +350,7 @@ def test_normalize_whitespace_collapses_runs():
     assert normalize_whitespace("aa\tbb") == "aa bb"
 
 
-def test_double_space_in_a_line_no_longer_garbles_alignment(app, client, folder, monkeypatch):
+def test_double_space_in_a_line_no_longer_garbles_alignment(app, client, folder):
     """Regression for the /document/22 bug: a line containing a double space
     (or other multi-char whitespace run) used to desync align_words' internal
     char positions from the char_offset bookkeeping in worker.py, garbling
@@ -335,15 +370,13 @@ def test_double_space_in_a_line_no_longer_garbles_alignment(app, client, folder,
     assert doc.full_text == "aa bb typo cc"  # double space already collapsed
 
     job = doc.active_job
-    monkeypatch.setattr(worker, "normalize_line",
-                         lambda text, model, tok: text.replace("typo", "fix"))
-    worker.process_job(job, None, None)
+    worker.process_job(job, _FakeModel(lambda text: text.replace("typo", "fix")))
 
     doc = db.session.get(Document, doc_id)
     assert doc.normalized_text == "aa bb fix cc"
 
 
-def test_worker_offsets_correct_when_model_merges_across_a_line_boundary(app, client, folder, monkeypatch):
+def test_worker_offsets_correct_when_model_merges_across_a_line_boundary(app, client, folder):
     _login(client)
     resp = client.post("/documents/new", json={
         "folder_id": folder.id, "label": "Doc10",
@@ -364,9 +397,7 @@ def test_worker_offsets_correct_when_model_merges_across_a_line_boundary(app, cl
 
     # Simulate the model merging "ma" + "res" across the line boundary, the
     # exact failure mode found with the real model.
-    monkeypatch.setattr(worker, "normalize_line",
-                         lambda text, model, tok: text.replace("ma res", "mares"))
-    worker.process_job(job, None, None)
+    worker.process_job(job, _FakeModel(lambda text: text.replace("ma res", "mares")))
 
     doc = db.session.get(Document, doc_id)
     full_text = doc.full_text
