@@ -410,3 +410,21 @@ def test_worker_offsets_correct_when_model_merges_across_a_line_boundary(app, cl
             f"offset mismatch: full_text[{pos['start']}:{pos['end']}]="
             f"{full_text[pos['start']:pos['end']]!r} but exact={quo['exact']!r}"
         )
+
+
+def test_default_segmentation_is_punctuation_with_25_words(app, client, folder):
+    """With no split_mode/min_words given, sentences accumulate until 25 words
+    are reached and the chunk is cut at the next punctuation."""
+    _login(client)
+    sentence = " ".join(["mot"] * 9) + " fin."          # 10 words, ends on a delimiter
+    resp = client.post("/documents/new", json={
+        "folder_id": folder.id, "label": "Defaults",
+        "lines": [{"orig": sentence} for _ in range(4)],
+        "normalize": True,
+    })
+    doc_id = int(resp.get_json()["redirect"].rstrip("/").split("/")[-1])
+    job = db.session.get(Document, doc_id).active_job
+
+    assert job.separator == " "
+    # 10 + 10 = 20 < 25, so a third sentence is absorbed (30 words); the 4th starts a new chunk.
+    assert [len(c.orig.split()) for c in job.chunks] == [30, 10]

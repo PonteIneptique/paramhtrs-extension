@@ -254,12 +254,12 @@
       <label class="form-label fw-semibold small">Normalization batching</label>
       <div class="d-flex flex-wrap gap-3 align-items-start mb-2">
         <div class="form-check">
-          <input class="form-check-input" type="radio" v-model="splitMode" value="lines" id="sm-lines">
-          <label class="form-check-label" for="sm-lines">Per line</label>
+          <input class="form-check-input" type="radio" v-model="splitMode" value="punctuation" id="sm-punct">
+          <label class="form-check-label" for="sm-punct">Split on punctuation <span class="text-muted">(default)</span></label>
         </div>
         <div class="form-check">
-          <input class="form-check-input" type="radio" v-model="splitMode" value="punctuation" id="sm-punct">
-          <label class="form-check-label" for="sm-punct">Split on punctuation</label>
+          <input class="form-check-input" type="radio" v-model="splitMode" value="lines" id="sm-lines">
+          <label class="form-check-label" for="sm-lines">Per line</label>
         </div>
       </div>
       <div v-if="splitMode === 'punctuation'" class="d-flex flex-wrap gap-3 align-items-end ms-3 mb-2">
@@ -269,9 +269,12 @@
                  v-model="delimiters" placeholder="¶;.">
         </div>
         <div>
-          <label class="form-label form-label-sm mb-0 small">Min words</label>
+          <label class="form-label form-label-sm mb-0 small">Min words per chunk</label>
           <input type="number" class="form-control form-control-sm" style="width:72px"
                  v-model.number="minWords" min="10" max="500">
+        </div>
+        <div class="form-text mb-1">
+          Text is cut after a delimiter once a chunk reaches [[ minWords ]] words; a sentence is never split, so chunks can run longer.
         </div>
       </div>
     </div>
@@ -340,8 +343,8 @@ createApp({
       iiifSelectedCanvas: null,
       iiifLines: [],
       // normalization batching
-      splitMode: 'lines',
-      minWords: 50,
+      splitMode: 'punctuation',
+      minWords: 25,
       delimiters: '¶;.',
       // state
       saving: false,
