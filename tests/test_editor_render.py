@@ -134,7 +134,8 @@ def test_menu_items_show_their_icon(editor_page):
 def test_ambiguous_glyph_is_defined_once_and_referenced(editor_page):
     """The ambiguous state has no Font Awesome icon; it lives in the sprite."""
     assert editor_page.count('<symbol id="icon-ambiguous"') == 1
-    # 2 chips + 3 menus + the focus-mode button + the draft Type button
+    # 2 chips + 3 menus (row, focus, draft) + the focus-mode button
+    # + the draft Type button
     assert editor_page.count('<use href="#icon-ambiguous"/>') == 7
 
 
@@ -225,3 +226,20 @@ def test_draft_menu_qualifier_steps(editor_page):
     assert "markNonResolvAbbr(r)" in editor_page       # -> reason
     assert "markMarkup(tag)" in editor_page            # -> semtag
     assert "pickDraftType(t)" in editor_page
+
+
+def test_default_certainty_lives_in_the_metadata_modal(editor_page):
+    """It is no longer a toolbar menu; the shared modal carries the field and the
+    editor hands the modal its value."""
+    assert 'data-field-group="defaultCert"' in editor_page
+    assert 'id="metaDefaultCert"' in editor_page
+    assert "New annotations:" not in editor_page
+    src = open("static/js/editor.js").read()
+    assert "defaultCert: {" in src and "setDefaultCert(cert)" in src
+
+
+def test_modal_and_editor_scripts_are_version_stamped(editor_page):
+    """?v=<mtime> so a redeploy is never masked by a cached script."""
+    import re
+    assert re.search(r'js/metadata-modal\.js\?v=\d+', editor_page)
+    assert re.search(r'js/editor\.js\?v=\d+', editor_page)

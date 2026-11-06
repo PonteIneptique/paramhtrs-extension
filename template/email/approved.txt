@@ -1,0 +1,4 @@
+Hello {{ user.username }},
+
+Your {{ app_name }} account has been approved. You can now log in:
+{{ login_url }}

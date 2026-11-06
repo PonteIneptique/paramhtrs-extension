@@ -9,21 +9,22 @@ body { overflow: hidden; }
    raw [[ ]] mustaches and the focus-mode overlay rendering before JS runs). */
 [v-cloak] { display: none !important; }
 /* Full-area loading overlay shown until Vue mounts. Sits to the right of the
-   60 px fixed sidebar (base.html) so the menu stays visible while it loads. */
+   80 px fixed sidebar (base.html) so the menu stays visible while it loads. */
 #editor-loading {
-  position: fixed; top: 0; right: 0; bottom: 0; left: 60px;
+  position: fixed; top: 0; right: 0; bottom: 0; left: 80px;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 12px; background: #fff; z-index: 200; color: #6c757d;
 }
 /* Remove the mt-5 / horizontal padding from the base container,
-   but keep the 60 px left gap so the fixed sidebar never overlaps text. */
+   but keep the 80 px left gap so the fixed sidebar never overlaps text. */
+body { padding-left: 0 !important; }
 .container {
-  margin-left: 60px !important;
+  margin-left: 80px !important;
   margin-top: 0 !important;
   padding-left: 0 !important;
   padding-right: 0 !important;
-  max-width: calc(100vw - 60px) !important;
-  width: calc(100vw - 60px) !important;
+  max-width: calc(100vw - 80px) !important;
+  width: calc(100vw - 80px) !important;
 }
 
 /* ── Layout ── */
@@ -38,14 +39,43 @@ body { overflow: hidden; }
   position: sticky;
   top: 0;
   z-index: 50;
-  padding: 8px 12px;
   background: #f8f9fa;
   border-bottom: 1px solid #dee2e6;
+}
+/* Level 1 — where am I, what do I do next (navigate / work / ship) */
+.tb-row {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 6px 12px;
   flex-wrap: wrap;
 }
+/* Level 2 — how this page is set up. Quieter: smaller, tinted, icon-led. */
+.tb-row-2 {
+  padding: 3px 12px;
+  gap: 4px 14px;
+  background: #f1f3f5;
+  border-top: 1px solid #e9ecef;
+}
+/* A labelled group: icon + caps label say what the controls inside act on */
+.tb-group { display: flex; align-items: center; gap: 4px; }
+.tb-group-label {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: .65rem; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: #868e96; margin-right: 2px;
+}
+.tb-group + .tb-group { border-left: 1px solid #dee2e6; padding-left: 14px; }
+/* Colour carries meaning: slate = view, indigo = document, green = work/ship */
+.tb-group.is-view     .tb-group-label { color: #5c7080; }
+.tb-group.is-document .tb-group-label { color: #5f3dc4; }
+.tb-btn {
+  font-size: .75rem; padding: 1px 6px; line-height: 1.5;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.tb-row-2 .tb-btn { background: transparent; border-color: transparent; color: #495057; }
+.tb-row-2 .tb-btn:hover { background: #fff; border-color: #ced4da; }
+.tb-row-2 .tb-btn.is-on { background: #fff; border-color: #adb5bd; color: #212529; }
+.tb-size { min-width: 2.2em; text-align: center; font-size: .75rem; color: #6c757d; }
 #editor-panels {
   flex: 1 1 0;
   display: flex;
@@ -744,7 +774,7 @@ body { overflow: hidden; }
 
 {% block content %}
 {% if not current_user.nickname %}
-<div class="alert alert-warning mb-0 py-2 px-3 small" style="margin-left:60px; border-radius:0; position:sticky; top:0; z-index:100;">
+<div class="alert alert-warning mb-0 py-2 px-3 small" style="margin-left:80px; border-radius:0; position:sticky; top:0; z-index:100;">
   <i class="fa-solid fa-triangle-exclamation"></i>
   Your annotations will be saved without a proper identifier.
   <a href="{{ url_for('bp_auth.profile') }}" class="alert-link">Fill in your profile</a> (nickname field) so your contributions appear correctly in TEI exports.
@@ -774,8 +804,9 @@ body { overflow: hidden; }
   </svg>
 
 
-  <!-- Toolbar -->
+  <!-- Toolbar: level 1 = navigate / work / ship; level 2 = view + document settings -->
   <div id="editor-toolbar">
+   <div class="tb-row">
     <nav aria-label="breadcrumb" class="me-2">
       <ol class="breadcrumb mb-0 small">
         <li class="breadcrumb-item">
@@ -796,89 +827,99 @@ body { overflow: hidden; }
 
     <div class="btn-group btn-group-sm">
       {% if prev_page %}
-      <a href="{{ url_for('bp_document.document_editor', document_id=prev_page.id) }}" class="btn btn-outline-secondary" title="{{ prev_page.label }}">
-        &laquo; Prev
+      <a href="{{ url_for('bp_document.document_editor', document_id=prev_page.id) }}" class="btn btn-outline-secondary tb-btn" title="Previous page — {{ prev_page.label }}">
+        <i class="fa-solid fa-chevron-left"></i> Prev
       </a>
       {% else %}
-      <button class="btn btn-outline-secondary" disabled>&laquo; Prev</button>
+      <button class="btn btn-outline-secondary tb-btn" disabled><i class="fa-solid fa-chevron-left"></i> Prev</button>
       {% endif %}
       {% if next_page %}
-      <a href="{{ url_for('bp_document.document_editor', document_id=next_page.id) }}" class="btn btn-outline-secondary" title="{{ next_page.label }}">
-        Next &raquo;
+      <a href="{{ url_for('bp_document.document_editor', document_id=next_page.id) }}" class="btn btn-outline-secondary tb-btn" title="Next page — {{ next_page.label }}">
+        Next <i class="fa-solid fa-chevron-right"></i>
       </a>
       {% else %}
-      <button class="btn btn-outline-secondary" disabled>Next &raquo;</button>
+      <button class="btn btn-outline-secondary tb-btn" disabled>Next <i class="fa-solid fa-chevron-right"></i></button>
       {% endif %}
     </div>
 
-    <div class="d-flex align-items-center gap-1 ms-auto">
-      <button class="btn btn-sm btn-outline-secondary" style="font-size:.75rem;padding:1px 6px"
-              @click="fontSize = +(Math.max(0.7, fontSize - 0.1)).toFixed(1)" title="Decrease font size">A−</button>
-      <span class="small text-muted" style="min-width:2.2em;text-align:center;font-size:.75rem">[[ fontSize ]]</span>
-      <button class="btn btn-sm btn-outline-secondary" style="font-size:.75rem;padding:1px 6px"
-              @click="fontSize = +(Math.min(2.5, fontSize + 0.1)).toFixed(1)" title="Increase font size">A+</button>
-    </div>
+   </div>
 
-    <button class="btn btn-sm" style="font-size:.75rem;padding:1px 6px"
-            :class="hoverEnabled ? 'btn-secondary' : 'btn-outline-secondary'"
-            @click="hoverEnabled = !hoverEnabled"
-            :title="hoverEnabled ? 'Cross-panel hover on (click to disable)' : 'Cross-panel hover off (click to enable)'">
-      ⇄ Hover
-    </button>
-
-    <button class="btn btn-sm btn-outline-secondary" style="font-size:.75rem;padding:1px 6px" @click="openDocumentMetaModal()">
-      <i class="fa-solid fa-pen"></i> Metadata
-    </button>
-
-    <button class="btn btn-sm btn-outline-primary" style="font-size:.75rem;padding:1px 6px"
-            @click="enterFocusMode()"
-            :disabled="!focusAnnotations.length"
-            title="Focus mode — step through pending annotations">
-      <i class="fa-solid fa-crosshairs"></i> Focus
-    </button>
-
-    <div class="dropdown">
-      <button class="btn btn-sm btn-info dropdown-toggle" style="font-size:.75rem;padding:1px 6px" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-        <i class="fa-solid fa-download"></i> Export
+   <div class="tb-row tb-row-2">
+    <!-- View: how the page is displayed (this browser only) -->
+    <div class="tb-group is-view">
+      <span class="tb-group-label"><i class="fa-solid fa-eye"></i> View</span>
+      <button class="btn btn-sm tb-btn" @click="fontSize = +(Math.max(0.7, fontSize - 0.1)).toFixed(1)" title="Decrease font size">
+        <i class="fa-solid fa-font" style="font-size:.65em"></i><i class="fa-solid fa-minus" style="font-size:.6em"></i>
       </button>
-      <ul class="dropdown-menu dropdown-menu-end">
-        <li>
-          <a class="dropdown-item" href="{{ url_for('bp_document.document_export_tei', document_id=page.id) }}">
-            <i class="fa-solid fa-file-export"></i> Download TEI
-          </a>
-        </li>
-        <li>
-          <a class="dropdown-item" href="#" @click.prevent="downloadSynoptic" title="Download synoptic view (HTML)">
-            <i class="fa-solid fa-table-columns"></i> Synoptic (HTML)
-          </a>
-        </li>
-        <li>
-          <a class="dropdown-item" href="{{ url_for('bp_document.document_stats', document_id=page.id) }}" title="Download statistics report (HTML)">
-            <i class="fa-solid fa-chart-bar"></i> Stats (HTML)
-          </a>
-        </li>
-      </ul>
+      <span class="tb-size">[[ fontSize ]]</span>
+      <button class="btn btn-sm tb-btn" @click="fontSize = +(Math.min(2.5, fontSize + 0.1)).toFixed(1)" title="Increase font size">
+        <i class="fa-solid fa-font"></i><i class="fa-solid fa-plus" style="font-size:.6em"></i>
+      </button>
+      <button class="btn btn-sm tb-btn" :class="{'is-on': hoverEnabled}"
+              @click="hoverEnabled = !hoverEnabled"
+              :title="hoverEnabled ? 'Cross-panel hover on (click to disable)' : 'Cross-panel hover off (click to enable)'">
+        <i class="fa-solid fa-arrows-left-right"></i> Hover
+        <i class="fa-solid" :class="hoverEnabled ? 'fa-toggle-on text-success' : 'fa-toggle-off'"></i>
+      </button>
+      <!-- Work: step through what is left -->
+      <button class="btn btn-sm tb-btn"
+              @click="enterFocusMode()"
+              :disabled="!focusAnnotations.length"
+              title="Focus mode — step through pending annotations">
+        <i class="fa-solid fa-crosshairs text-primary"></i> Focus
+      </button>
     </div>
 
-    <!-- Document status -->
-    <div class="dropdown">
-      <button class="btn btn-sm dropdown-toggle" style="font-size:.75rem;padding:1px 6px"
-        :class="{
-          'btn-danger':  pageStatus === 'pending',
-          'btn-warning': pageStatus === 'active',
-          'btn-info':    pageStatus === 'for_review',
-          'btn-success': pageStatus === 'done'
-        }"
-        type="button" data-bs-toggle="dropdown" aria-expanded="false">
-        Status: [[ pageStatusLabel ]]
+    <!-- Document: this page's settings, progress and output -->
+    <div class="tb-group is-document ms-auto">
+      <span class="tb-group-label"><i class="fa-solid fa-file-lines"></i> Document</span>
+      <button class="btn btn-sm tb-btn" @click="openDocumentMetaModal()" title="Edit document metadata">
+        <i class="fa-solid fa-pen"></i> Metadata
       </button>
-      <ul class="dropdown-menu">
-        <li><a class="dropdown-item" href="#" @click.prevent="setPageStatus('pending')">Pending</a></li>
-        <li><a class="dropdown-item" href="#" @click.prevent="setPageStatus('active')">In progress</a></li>
-        <li><a class="dropdown-item" href="#" @click.prevent="setPageStatus('for_review')">For review</a></li>
-        <li><a class="dropdown-item" href="#" @click.prevent="setPageStatus('done')">Done</a></li>
-      </ul>
+      <!-- Progress: page status, coloured by state -->
+      <div class="dropdown">
+        <button class="btn btn-sm tb-btn dropdown-toggle"
+          type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Page status">
+          <i class="fa-solid" :class="{
+            'fa-circle-exclamation text-danger':  pageStatus === 'pending',
+            'fa-pen-to-square text-warning':      pageStatus === 'active',
+            'fa-eye text-info':                   pageStatus === 'for_review',
+            'fa-circle-check text-success':       pageStatus === 'done'
+          }"></i> [[ pageStatusLabel ]]
+        </button>
+        <ul class="dropdown-menu">
+          <li><a class="dropdown-item" href="#" @click.prevent="setPageStatus('pending')"><i class="fa-solid fa-circle-exclamation text-danger fa-fw"></i> Pending</a></li>
+          <li><a class="dropdown-item" href="#" @click.prevent="setPageStatus('active')"><i class="fa-solid fa-pen-to-square text-warning fa-fw"></i> In progress</a></li>
+          <li><a class="dropdown-item" href="#" @click.prevent="setPageStatus('for_review')"><i class="fa-solid fa-eye text-info fa-fw"></i> For review</a></li>
+          <li><a class="dropdown-item" href="#" @click.prevent="setPageStatus('done')"><i class="fa-solid fa-circle-check text-success fa-fw"></i> Done</a></li>
+        </ul>
+      </div>
+
+      <!-- Ship: leaves the editor -->
+      <div class="dropdown">
+        <button class="btn btn-sm tb-btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+          <i class="fa-solid fa-download text-secondary"></i> Export
+        </button>
+        <ul class="dropdown-menu">
+          <li>
+            <a class="dropdown-item" href="{{ url_for('bp_document.document_export_tei', document_id=page.id) }}">
+              <i class="fa-solid fa-file-export fa-fw"></i> Download TEI
+            </a>
+          </li>
+          <li>
+            <a class="dropdown-item" href="#" @click.prevent="downloadSynoptic" title="Download synoptic view (HTML)">
+              <i class="fa-solid fa-table-columns fa-fw"></i> Synoptic (HTML)
+            </a>
+          </li>
+          <li>
+            <a class="dropdown-item" href="{{ url_for('bp_document.document_stats', document_id=page.id) }}" title="Download statistics report (HTML)">
+              <i class="fa-solid fa-chart-bar fa-fw"></i> Stats (HTML)
+            </a>
+          </li>
+        </ul>
+      </div>
     </div>
+   </div>
   </div>
 
   <!-- Background normalization progress (polled — see pollProcessingStatus) -->
@@ -1340,7 +1381,8 @@ body { overflow: hidden; }
           </p>
           <p class="text-muted small mb-2" v-else>
             These unvalidated annotations share the same source &rarr; target mapping.
-            Select the ones you want to validate now:
+            Select the ones you want to validate now &mdash; they will take over the
+            certainty, tag and gap settings of the annotation you just validated:
           </p>
           <div v-for="a in bulkCandidates" :key="a.id" class="form-check mb-1">
             <input class="form-check-input" type="checkbox"
@@ -1768,6 +1810,7 @@ window.__EDITOR_CONFIG__ = {
   pageFilename:  {{ (page.original_filename or '')|tojson }},
   processing:    {{ processing|tojson }},
   currentUserId: {{ current_user.id }},
+  defaultCert:   {{ page.effective_default_cert|tojson }},
   folderId:      {{ document.id }},
   projectId:     {{ document.project_id }},
   urls: {
@@ -1775,6 +1818,7 @@ window.__EDITOR_CONFIG__ = {
     saveAnnotation:   {{ url_for('bp_norm.api_page_save_annotation',   document_id=page.id, annotation_id='__ANN_ID__')|tojson }},
     deleteAnnotation: {{ url_for('bp_norm.api_page_delete_annotation', document_id=page.id, annotation_id='__ANN_ID__')|tojson }},
     pageStatus:       {{ url_for('bp_document.api_document_status',           document_id=page.id)|tojson }},
+    defaultCert:      {{ url_for('bp_document.api_document_default_cert',     document_id=page.id)|tojson }},
     documentUpdate:   {{ url_for('bp_document.document_update',               document_id=page.id)|tojson }},
     documentDelete:   {{ url_for('bp_document.document_delete',               document_id=page.id)|tojson }},
     documentReprocess: {{ url_for('bp_document.api_document_reprocess',       document_id=page.id)|tojson }},
@@ -1796,5 +1840,5 @@ window.__EDITOR_CONFIG__ = {
 { "imports": { "vue": "{{ url_for('static', filename='js/vendor/vue.esm-browser.prod.js') }}" } }
 </script>
 
-<script type="module" src="{{ url_for('static', filename='js/editor.js') }}"></script>
+<script type="module" src="{{ static_v('js/editor.js') }}"></script>
 {% endblock %}

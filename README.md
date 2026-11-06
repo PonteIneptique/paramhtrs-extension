@@ -55,12 +55,26 @@ Copy the table below into a `.env` file at the project root. All variables have 
 | `SEQ2SEQ_MODEL` | `comma-project/normalization-byt5-small` | HuggingFace model ID or local path |
 | `MAX_CHUNK_BYTES` | `512` | Maximum bytes per normalisation chunk |
 | `TORCH_NUM_THREADS` | `4` | CPU thread limit for PyTorch |
+| `MAIL_SERVER` | *(unset)* | SMTP host. **Mail is disabled while unset.** |
+| `MAIL_PORT` / `MAIL_USE_TLS` / `MAIL_USE_SSL` | `587` / `true` / `false` | SMTP connection settings |
+| `MAIL_USERNAME` / `MAIL_PASSWORD` | *(unset)* | SMTP credentials |
+| `MAIL_DEFAULT_SENDER` | `MAIL_USERNAME` | From address |
+| `ADMIN_EMAIL` | *(unset)* | Extra recipient for sign-up notifications (admins with an email are always notified) |
+| `APP_NAME` | `Abbreviarium` | Name used in mail subjects |
+| `RESET_TOKEN_MAX_AGE` | `3600` | Lifetime of a password-reset link, in seconds |
+
+### Mail (optional)
+
+With `MAIL_SERVER` set: registration requires an email, admins are mailed when an account awaits approval, users are mailed on approval/rejection, and "Forgot your password?" sends a single-use, time-limited reset link. Accounts without an email are asked for one at login and must confirm it by link; changing it later in Profile works the same way. Passwords are changed from Profile. Without it, none of this appears and admins manage accounts from the admin panel (`flask user change-password` still works).
 
 ## Database initialisation
 
 ```bash
-flask db create      # create all tables
+flask db create      # create all tables (+ admin account); asks for the default certainty
+# flask db create --admin-email me@example.org --default-cert informed
 ```
+
+The default certainty of new annotations (Normalisation / OCR Fix, Informed, Ambiguous, Arbitrary) is a per-document setting, changed from the editor's Document metadata dialog; `--default-cert` and the admin panel set the instance default that documents fall back to. After upgrading an existing install run `flask db upgrade` (or the Alembic migrations) to add `users.email`, `app_settings` and `documents.default_cert`.
 
 Other CLI commands: `flask db reset`, `flask db drop`, `flask db upgrade`.
 

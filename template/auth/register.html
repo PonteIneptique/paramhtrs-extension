@@ -11,6 +11,10 @@
         <input type="text" class="form-control" id="username" name="username" required>
     </div>
     <div class="form-group">
+        <label for="email">Email{% if not mail_enabled %} <small class="text-muted">(optional)</small>{% endif %}</label>
+        <input type="email" class="form-control" id="email" name="email" {% if mail_enabled %}required{% endif %}>
+    </div>
+    <div class="form-group">
         <label for="password">Password</label>
         <input type="password" class="form-control" id="password" name="password" required>
     </div>

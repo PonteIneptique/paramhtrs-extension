@@ -7,6 +7,7 @@ import {
   escapeHtml, applyAnnotations,
   buildSourceHtml, computeNormalizedPositions, buildNormalizedPageHtml,
   findSimilarAnnotations,
+  withQualifiersOf,
   findSimilarByExact,
   resolveAnnotationBounds,
   findUnannotatedOccurrences,
@@ -369,6 +370,13 @@ describe('findSimilarAnnotations', () => {
     const already = makeAnnot({ id: 'v',  exact: 'foo', value: 'bar', validated_by: 1 });
     const result = findSimilarAnnotations([target, already], target);
     expect(result).toHaveLength(0);
+  });
+
+  test('groups on source + target even when qualifiers differ', () => {
+    const target = makeAnnot({ id: 't', exact: 'foo', value: 'bar' });
+    const other  = makeAnnot({ id: 'o', start: 10, end: 13, exact: 'foo', value: 'bar' });
+    other.body[0].cert = 'ambiguous';
+    expect(findSimilarAnnotations([target, other], target)).toHaveLength(1);
   });
 
   test('returns empty array when no similar annotations exist', () => {
@@ -784,5 +792,23 @@ describe('CERT_GROUPS', () => {
     expect(CERT_STATES).toEqual(['ocr_fix', 'informed', 'ambiguous', 'arbitrary']);
     expect(new Set(CERT_STATES).size).toBe(CERT_STATES.length);
     expect(Object.keys(CERT_LABELS).sort()).toEqual([...CERT_STATES].sort());
+  });
+});
+
+describe('withQualifiersOf', () => {
+  test('copies certainty, tag and gaps from the source, dropping stale ones', () => {
+    const source = makeAnnot({ id: 's' });
+    Object.assign(source.body[0], { cert: 'informed', semtag: 'persName', gap_after: true });
+    const other = makeAnnot({ id: 'o', start: 10, end: 13 });
+    Object.assign(other.body[0], { cert: 'arbitrary', gap_before: true });
+    const b = withQualifiersOf(other, source).body[0];
+    expect(b).toMatchObject({ cert: 'informed', semtag: 'persName', gap_after: true, value: 'bar' });
+    expect(b.gap_before).toBeUndefined();
+  });
+  test('clears certainty when the source has the default', () => {
+    const source = makeAnnot({ id: 's' });
+    const other = makeAnnot({ id: 'o' });
+    other.body[0].cert = 'ambiguous';
+    expect(withQualifiersOf(other, source).body[0].cert).toBeUndefined();
   });
 });

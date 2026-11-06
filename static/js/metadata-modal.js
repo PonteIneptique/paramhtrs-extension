@@ -69,6 +69,26 @@
         else window.location.reload();
       };
 
+      // ── Default certainty (document only; saved on change, not with the form) ──
+      const certGroup = document.querySelector('#metaModal [data-field-group="defaultCert"]');
+      certGroup.style.display = config.defaultCert ? '' : 'none';
+      if (config.defaultCert) {
+        const dc = config.defaultCert;
+        const select = $('metaDefaultCert');
+        const state = $('metaDefaultCertState');
+        state.style.display = 'none';
+        select.innerHTML = dc.groups.map(g =>
+          `<optgroup label="${g.label}">` +
+          g.states.map(c => `<option value="${c}">${dc.labels[c]}</option>`).join('') +
+          '</optgroup>').join('');
+        select.value = dc.value;
+        select.onchange = async () => {
+          state.style.display = 'none';
+          if (await dc.onChange(select.value)) state.style.display = '';
+          else select.value = dc.current();   // save failed: caller rolled back
+        };
+      }
+
       // ── Works ──
       const worksGroup = document.querySelector('#metaModal [data-field-group="works"]');
       worksGroup.style.display = config.works ? '' : 'none';

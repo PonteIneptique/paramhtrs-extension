@@ -6,6 +6,7 @@ from sqlalchemy import func
 
 from .models import db, Document, Part, Line, Folder, Project, User, Work, NormalizationJob, NormalizationJobChunk
 from .bp_auth import requires_access
+from .models import CERT_CHOICES
 from .annot_utils import align_to_annotations, align_to_annotations_from_chunks, build_tei_from_annotations, document_metadata
 from .normalize_jobs import build_chunks, normalize_whitespace
 
@@ -296,6 +297,17 @@ def api_document_status(document: Document):
     document.status = request.json.get("status", document.status)
     db.session.commit()
     return jsonify({"status": "ok"})
+
+
+@bp_document.route("/api/documents/<int:document_id>/default_cert", methods=["POST"])
+@requires_access(Document, 'document_id')
+def api_document_default_cert(document: Document):
+    cert = (request.json or {}).get("default_cert")
+    if cert not in CERT_CHOICES:
+        abort(400, "Unknown certainty")
+    document.default_cert = cert
+    db.session.commit()
+    return jsonify({"status": "ok", "default_cert": cert})
 
 
 # -------------------------

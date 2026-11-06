@@ -9,3 +9,4 @@ model
 *.txt
 __pycache__
 *.pyc
+!template/email/*.txt

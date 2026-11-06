@@ -1,0 +1,3 @@
+Hello {{ username }},
+
+Your {{ app_name }} registration was not approved.

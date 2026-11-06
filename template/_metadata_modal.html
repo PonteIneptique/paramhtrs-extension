@@ -54,6 +54,19 @@
           <button type="submit" class="btn btn-primary btn-sm">Save metadata</button>
         </form>
 
+        <div data-field-group="defaultCert" class="mt-4" style="display:none;">
+          <hr>
+          <h6 class="text-uppercase text-muted small fw-semibold mb-2">Annotations</h6>
+          <label class="form-label form-label-sm mb-1 small" for="metaDefaultCert">Certainty new annotations start with</label>
+          <div class="d-flex align-items-center gap-2">
+            <select class="form-select form-select-sm" id="metaDefaultCert" style="max-width:20rem;"></select>
+            <span id="metaDefaultCertState" class="small text-success" style="display:none;">
+              <i class="fa-solid fa-check"></i> Saved
+            </span>
+          </div>
+          <p class="text-muted small mt-1 mb-0">Applies to this document only; existing annotations keep their certainty. Saved as soon as you change it.</p>
+        </div>
+
         <div data-field-group="works" class="mt-4" style="display:none;">
           <hr>
           <h6 class="text-uppercase text-muted small fw-semibold mb-2">Works</h6>
@@ -116,4 +129,4 @@
     </div>
   </div>
 </div>
-<script src="{{ url_for('static', filename='js/metadata-modal.js') }}"></script>
+<script src="{{ static_v('js/metadata-modal.js') }}"></script>

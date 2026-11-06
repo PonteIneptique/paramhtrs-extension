@@ -467,6 +467,9 @@ export function isSurnormalization(annot) {
 }
 
 // ── Bulk validation: find similar unvalidated annotations ─────────────────────
+// Matches on source + target only. The qualifiers (certainty, tag, gap, N/R
+// reason) are not part of the match: validating applies the validated
+// annotation's choices to the others — see withQualifiersOf.
 export function findSimilarAnnotations(annotations, targetAnnot) {
   const srcExact = getExact(targetAnnot);
   const tgtValue = getBodyValue(targetAnnot);
@@ -474,6 +477,21 @@ export function findSimilarAnnotations(annotations, targetAnnot) {
     !a.validated_by && a.id !== targetAnnot.id &&
     getExact(a) === srcExact && getBodyValue(a) === tgtValue
   );
+}
+
+// Copy the qualifiers chosen on `source` (certainty, tag, gaps, N/R reason) onto
+// `annot`, dropping any `annot` had that `source` lacks. Used when bulk-validating
+// "the same annotation" elsewhere: the choice made once is the choice made everywhere.
+export function withQualifiersOf(annot, source) {
+  const from = source?.body?.[0] ?? {};
+  const body = { ...annot.body[0] };
+  for (const key of ['cert', 'semtag', 'reason']) {
+    if (from[key]) body[key] = from[key]; else delete body[key];
+  }
+  for (const key of ['gap_before', 'gap_after']) {
+    if (from[key]) body[key] = true; else delete body[key];
+  }
+  return { ...annot, body: [body] };
 }
 
 // ── Bulk deletion: find unvalidated annotations with same exact text ──────────

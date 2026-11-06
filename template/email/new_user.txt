@@ -1,0 +1,4 @@
+{{ username }}{% if email %} <{{ email }}>{% endif %} has registered and is waiting for approval.
+
+Review pending accounts here:
+{{ admin_url }}

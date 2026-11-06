@@ -7,6 +7,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 import click
 import json
+import sys
 
 
 db = SQLAlchemy()
@@ -16,6 +17,8 @@ class User(db.Model, UserMixin):
     __tablename__ = "users"
     id            = db.Column(db.Integer, primary_key=True)
     username      = db.Column(db.String(80),  unique=True, nullable=False)
+    # Optional: only needed for password-reset / approval mails when mail is configured.
+    email         = db.Column(db.String(255), unique=True, nullable=True)
     password_hash = db.Column(db.String(128), nullable=False)
     is_admin      = db.Column(db.Boolean, default=False)
     is_approved   = db.Column(db.Boolean, default=False)
@@ -31,6 +34,36 @@ class User(db.Model, UserMixin):
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
+
+
+class AppSetting(db.Model):
+    """Instance-wide key/value settings editable by an admin at runtime."""
+    __tablename__ = "app_settings"
+    key   = db.Column(db.String(80), primary_key=True)
+    value = db.Column(db.Text, nullable=True)
+
+    @classmethod
+    def get(cls, key, default=None):
+        row = db.session.get(cls, key)
+        return row.value if row is not None and row.value is not None else default
+
+    @classmethod
+    def set(cls, key, value):
+        row = db.session.get(cls, key)
+        if row is None:
+            db.session.add(cls(key=key, value=value))
+        else:
+            row.value = value
+
+
+# Certainty states a new normalisation can start from. 'ocr_fix' is the historical
+# default and is stored as the absence of a value (see CERT_DEFAULT in annot_utils).
+CERT_CHOICES = ("ocr_fix", "informed", "ambiguous", "arbitrary")
+
+
+def get_default_cert() -> str:
+    value = AppSetting.get("default_cert", "ocr_fix")
+    return value if value in CERT_CHOICES else "ocr_fix"
 
 
 class Work(db.Model):
@@ -319,6 +352,12 @@ class Document(HasMetadataMixin, db.Model):
     label = db.Column(db.String(200), nullable=False)
     order = db.Column(db.Integer, nullable=False, default=0)
     status = db.Column(db.String(20), nullable=False, default="pending")
+    # Certainty new annotations start with; NULL falls back to the instance default.
+    default_cert = db.Column(db.String(20), nullable=True)
+
+    @property
+    def effective_default_cert(self) -> str:
+        return self.default_cert if self.default_cert in CERT_CHOICES else get_default_cert()
 
     __table_args__ = (
         CheckConstraint(
@@ -565,12 +604,23 @@ def db_cli():
 @click.option("--admin/--no-admin", is_flag=True, default=True)
 @click.option("--admin-name", type=str, default="admin")
 @click.option("--admin-password", type=str, default="qwerty")
-def db_create(admin, admin_name, admin_password):
+@click.option("--admin-email", type=str, default=None,
+              help="Email of the admin account (receives sign-up notifications when mail is configured).")
+@click.option("--default-cert", type=click.Choice(CERT_CHOICES), default=None,
+              help="Certainty new normalisations start with. Prompted when omitted on a terminal.")
+def db_create(admin, admin_name, admin_password, admin_email, default_cert):
     with current_app.app_context():
         db.create_all()
         click.echo("DB Created")
+        if default_cert is None:
+            default_cert = (click.prompt("Default certainty for new normalisations",
+                                         type=click.Choice(CERT_CHOICES), default="ocr_fix")
+                            if sys.stdin.isatty() else "ocr_fix")
+        AppSetting.set("default_cert", default_cert)
+        db.session.commit()
+        click.echo(f"Default certainty: {default_cert}")
         if admin:
-            admin_user = User(username=admin_name, is_admin=True, is_approved=True)
+            admin_user = User(username=admin_name, email=admin_email, is_admin=True, is_approved=True)
             admin_user.set_password(admin_password)
             db.session.add(admin_user)
             db.session.commit()
@@ -635,9 +685,11 @@ def db_upgrade():
         new_columns = [
             ("users",       "first_name",        "VARCHAR(100)"),
             ("users",       "last_name",          "VARCHAR(100)"),
+            ("users",       "email",              "VARCHAR(255)"),
             ("users",       "nickname",           "VARCHAR(80)"),
             ("users",       "orcid",              "VARCHAR(30)"),
             ("users",       "institution",        "VARCHAR(200)"),
+            ("documents",   "default_cert",       "VARCHAR(20)"),
             ("annotations", "body_reason",        "VARCHAR(50)"),
             ("annotations", "body_semtag",        "VARCHAR(50)"),
             ("annotations", "body_cert",          "VARCHAR(20)"),

@@ -8,6 +8,7 @@ flask-login~=0.6.3
 Flask-Migrate>=4.0
 rapidfuzz
 python-dotenv
+Flask-Mail~=0.10.0   # optional outgoing mail (only used when MAIL_SERVER is set)
 # Normalisation model loading/inference, chunking, character-level alignment and
 # W3C annotation building all live in penelopy (extracted from this repo).
 # The [onnx] extra pulls optimum[onnxruntime]==2.1.0 for `flask quantize`.

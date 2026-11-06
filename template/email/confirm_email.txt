@@ -1,0 +1,6 @@
+Hello {{ user.username }},
+
+To confirm this address for your {{ app_name }} account, follow this link (valid for {{ minutes }} minutes):
+{{ confirm_link }}
+
+If you did not ask for this, you can ignore this message; nothing will change.

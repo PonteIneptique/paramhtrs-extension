@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}Confirm your email — Abbreviarium{% endblock %}
+
+{% block content %}
+<div style="max-width: 560px;">
+<h2 class="mb-4"><i class="fa-solid fa-envelope-circle-check text-secondary"></i> Confirm your email</h2>
+
+<div class="card mb-4">
+    <div class="card-header fw-semibold"><i class="fa-solid fa-envelope text-secondary"></i> Email address</div>
+    <div class="card-body">
+        {% if sent_to %}
+        <div class="alert alert-success mb-3">
+            We sent a confirmation link to <strong>{{ sent_to }}</strong>. Follow it to finish — it is valid for
+            {{ config.RESET_TOKEN_MAX_AGE // 60 }} minutes.
+        </div>
+        {% else %}
+        <p class="text-muted">This instance sends mail (password resets, approvals), so your account needs a confirmed email address. Enter yours and we will send you a link.</p>
+        {% endif %}
+        <form method="POST">
+            <label for="email" class="form-label">Email</label>
+            <div class="input-group">
+                <input type="email" class="form-control" id="email" name="email" value="{{ sent_to or '' }}" required autofocus>
+                <button class="btn btn-primary"><i class="fa-solid fa-paper-plane"></i> {{ 'Resend link' if sent_to else 'Send link' }}</button>
+            </div>
+        </form>
+    </div>
+</div>
+<a href="{{ url_for('bp_auth.logout') }}" class="small text-muted">Log out</a>
+</div>
+{% endblock %}

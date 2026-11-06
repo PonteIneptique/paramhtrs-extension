@@ -3,12 +3,12 @@ import {
   getSelector, getStart, getEnd, getExact, getPrefix, getSuffix, getBodyValue,
   isInsertion, isAtrNoise, isNonResolvAbbr, getNonResolvReason, isSpaceExact, isMarkup,
   getSemtag, SEMTAG_LABELS, SEMTAG_ABBREVS, ANNOT_TYPE_ICONS, ANNOT_TYPE_TITLES, isGapBefore, isGapAfter,
-  isResolution, hasQualifiers, isDeletion, getCert, CERT_DEFAULT, CERT_GROUPS, CERT_LABELS, CERT_ICONS,
+  isResolution, hasQualifiers, isDeletion, getCert, CERT_DEFAULT, CERT_STATES, CERT_GROUPS, CERT_LABELS, CERT_ICONS,
   ANNOT_TYPE_MENU, NON_RESOLV_REASONS, NON_RESOLV_REASON_LABELS, helpFor, anchorLabel,
   derivePurpose,
   escapeHtml, renderVisible, applyAnnotations,
   buildSourceHtml, computeNormalizedPositions, buildNormalizedPageHtml,
-  findSimilarAnnotations,
+  findSimilarAnnotations, withQualifiersOf,
   findSimilarByExact,
   resolveAnnotationBounds,
   findUnannotatedOccurrences,
@@ -45,6 +45,7 @@ function _textParts(str) {
 
 export function createEditorApp(config) {
   const CURRENT_USER_ID = config.currentUserId;
+  const validCert = c => CERT_STATES.includes(c) ? c : CERT_DEFAULT;
   const urls = config.urls;
 
   return createApp({
@@ -88,7 +89,9 @@ export function createEditorApp(config) {
         // qualifier list is expanded inside the draft Type menu.
         pendingTypeSubmenu:  null,
         // Certainty staged on the draft; applied by commitPending.
-        pendingCert:         CERT_DEFAULT,
+        // Certainty new annotations start with — a per-document setting.
+        defaultCert:         validCert(config.defaultCert),
+        pendingCert:         validCert(config.defaultCert),
         annotTagOpenId:      null,
         annotTypeOpenId:     null,
         annotGapOpenId:      null,
@@ -106,6 +109,7 @@ export function createEditorApp(config) {
         bulkCandidates:      [],
         bulkChecked:         {},
         bulkMode:            'validate',
+        bulkSource:          null,
         showAnnotContext:     false,
         focusMode:           false,
         focusAnnotIndex:     0,
@@ -741,7 +745,7 @@ export function createEditorApp(config) {
         this.pendingAnnot       = null;
         this.pendingTypeOpen    = false;
         this.pendingTypeSubmenu = null;
-        this.pendingCert        = CERT_DEFAULT;
+        this.pendingCert        = this.defaultCert;
       },
 
       commitPending(value) {
@@ -989,6 +993,7 @@ export function createEditorApp(config) {
         const similar = findSimilarAnnotations(this.annotations, annot);
         if (similar.length > 0) {
           this.bulkMode = 'validate';
+          this.bulkSource = updated;
           this.bulkCandidates = similar;
           this.bulkChecked = Object.fromEntries(similar.map(a => [a.id, true]));
           new bootstrap.Modal(document.getElementById('bulkValidateModal')).show();
@@ -998,9 +1003,15 @@ export function createEditorApp(config) {
         const toValidate = new Set(
           Object.entries(this.bulkChecked).filter(([,v]) => v).map(([id]) => id)
         );
+        // Same source → target means the same annotation: carry over the choices
+        // (certainty, tag, gaps…) made on the one just validated.
+        const source = this.bulkSource;
         this.annotations = this.annotations.map(a =>
-          toValidate.has(a.id) ? {...a, validated_by: CURRENT_USER_ID} : a
+          toValidate.has(a.id)
+            ? {...(source ? withQualifiersOf(a, source) : a), validated_by: CURRENT_USER_ID}
+            : a
         );
+        this.bulkSource = null;
         bootstrap.Modal.getInstance(document.getElementById('bulkValidateModal'))?.hide();
         this.bulkCandidates = [];
         this.bulkChecked = {};
@@ -1300,6 +1311,24 @@ document.querySelectorAll('.text-col').forEach(col => {
         }
       },
 
+      async setDefaultCert(cert) {
+        const previous = this.defaultCert;
+        this.defaultCert = cert;
+        if (!this.pendingAnnot) this.pendingCert = cert;
+        try {
+          const r = await fetch(urls.defaultCert, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ default_cert: cert }),
+          });
+          if (!r.ok) throw new Error(r.status);
+          return true;
+        } catch {
+          this.defaultCert = previous;
+          this.saveError = true;
+          return false;
+        }
+      },
+
       async setPageStatus(status) {
         this.pageStatus = status;
         await fetch(urls.pageStatus, {
@@ -1423,6 +1452,13 @@ document.querySelectorAll('.text-col').forEach(col => {
             original_filename: config.pageFilename,
           },
           fieldLabels: { original_filename: 'Original filename' },
+          defaultCert: {
+            value: this.defaultCert,
+            groups: this.certGroups,
+            labels: this.certLabels,
+            onChange: (cert) => this.setDefaultCert(cert),
+            current: () => this.defaultCert,
+          },
           works: config.works,
           worksAddUrl: urls.addWork,
           worksRemoveUrlTemplate: urls.removeWork,

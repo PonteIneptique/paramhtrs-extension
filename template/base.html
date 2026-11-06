@@ -16,64 +16,39 @@
         }
         body {
             display: flex;
+            padding-left: 80px;   /* room for the fixed sidebar; the editor opts out and manages its own offset */
         }
         .importedtext td {
             background-color: #D3D3D3;
         }
 
-        /* Sidebar */
+        /* Sidebar — light icon rail, label under each icon (eScriptorium-style).
+           Top: browse · bottom: account. Width is mirrored by the editor's left offset. */
         .sidebar {
-            min-width: 60px;
-            max-width: 60px;
-            height: 100vh;
-            position: fixed;
-            left: 0;
-            top: 0;
-            background-color: #343a40;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding-top: 20px;
-            transition: max-width 0.3s ease;
-            overflow: hidden;
-            z-index: 999;
+            position: fixed; inset: 0 auto 0 0; width: 80px;
+            background: #fff; border-right: 1px solid #dee2e6;
+            display: flex; flex-direction: column; align-items: stretch;
+            padding: 12px 8px; z-index: 999;
         }
-
-        .sidebar:hover {
-            max-width: 300px;
+        .sidebar .brand {
+            display: flex; align-items: center; justify-content: center;
+            height: 48px; margin-bottom: 12px; font-weight: 700; font-size: 20px;
+            letter-spacing: -1px; color: #212529; text-decoration: none;
         }
-
-        .sidebar a {
-            color: white;
-            text-decoration: none;
-            padding: 15px;
-            display: flex;
-            align-items: center;
-            width: 100%;
-            transition: background-color 0.3s;
-            white-space: nowrap;
+        .sidebar .brand b { color: #0d6efd; }
+        .sidebar a.nav-item {
+            display: flex; flex-direction: column; align-items: center; gap: 4px;
+            padding: 10px 2px; margin-bottom: 4px; border-radius: 10px;
+            color: #495057; text-decoration: none;
+            font-size: 11.5px; line-height: 1.1; text-align: center;
+            transition: background .15s, color .15s;
         }
-
-        .sidebar a:hover {
-            background-color: #495057;
-            border-radius: 10px;
-        }
-
-        .sidebar i {
-            font-size: 24px;
-            margin-right: 10px;
-        }
-
-        /* Hide text by default and show when sidebar expands */
-        .sidebar span {
-            display: none;
-            transition: opacity 0.3s ease;
-        }
-
-        .sidebar:hover span {
-            display: inline;
-            opacity: 1;
-        }
+        .sidebar a.nav-item i { font-size: 20px; height: 24px; display: flex; align-items: center; }
+        .sidebar a.nav-item:hover { background: #f1f3f5; }
+        .sidebar a.nav-item.is-active { background: #e7f1ff; color: #0d6efd; font-weight: 600; }
+        .sidebar a.nav-item.is-danger:hover { background: #fff0f0; color: #c92a2a; }
+        .sidebar .spacer { flex: 1; }
+        .sidebar hr { border: 0; border-top: 1px solid #dee2e6; margin: 8px 10px; opacity: 1; }
         #document-text-container, .junicode {
             font-family: 'JunicodeVF', serif;
         }
@@ -127,44 +102,47 @@
 
 </head>
 <body class="bg-light">
-    <div class="sidebar">
-        <a href="{{ url_for('index_route') }}" aria-label="Home">
-            <i class="fas fa-home"></i> <span>Home</span>
-        </a>
-        <a href="{{ url_for('guidelines_route') }}" aria-label="Guidelines">
-            <i class="fa-solid fa-question"></i> <span>Guidelines</span>
-        </a>
+    {% set ep = request.endpoint or '' %}
+    <nav class="sidebar" aria-label="Main">
+        <a class="brand" href="{{ url_for('index_route') }}" title="Abbreviarium" aria-label="Abbreviarium"><b>A</b>b</a>
+            <a href="{{ url_for('index_route') }}" class="nav-item{{ ' is-active' if ep == 'index_route' }}" title="Home" aria-label="Home">
+                <i class="fas fa-home"></i>Home
+            </a>
         {% if current_user.is_anonymous %}
-        <a href="{{ url_for('bp_auth.login') }}" aria-label="Login">
-            <i class="fa-solid fa-right-to-bracket"></i> <span>Login</span>
-        </a>
-        <a href="{{ url_for('bp_auth.register') }}" aria-label="Register">
-            <i class="fa-solid fa-user-plus"></i> <span>Register</span>
-        </a>
+            <a href="{{ url_for('bp_auth.login') }}" class="nav-item{{ ' is-active' if ep == 'bp_auth.login' }}" title="Login" aria-label="Login">
+                <i class="fa-solid fa-right-to-bracket"></i>Login
+            </a>
+            <a href="{{ url_for('bp_auth.register') }}" class="nav-item{{ ' is-active' if ep == 'bp_auth.register' }}" title="Register" aria-label="Register">
+                <i class="fa-solid fa-user-plus"></i>Register
+            </a>
         {% else %}
-        <a href="{{ url_for('bp_project.project_lists') }}" aria-label="Projects">
-            <i class="fa-solid fa-folder-tree"></i> <span>Projects</span>
-        </a>
-        <a href="{{ url_for('bp_project.project_create') }}" aria-label="Create a project">
-            <i class="fa-solid fa-folder-plus"></i> <span>New Project</span>
-        </a>
-        <hr />
-        <a href="{{ url_for('bp_auth.logout') }}" aria-label="Logout">
-            <i class="fa-solid fa-right-from-bracket"></i> <span>Logout</span>
-        </a>
-        <a href="{{ url_for('bp_auth.change_password') }}" aria-label="Change Password">
-            <i class="fa-solid fa-key"></i> <span>Change Password</span>
-        </a>
-        <a href="{{ url_for('bp_auth.profile') }}" aria-label="Profile">
-            <i class="fa-solid fa-id-card"></i> <span>Profile</span>
-        </a>
+            <a href="{{ url_for('bp_project.project_lists') }}" class="nav-item{{ ' is-active' if ep.startswith(('bp_project.', 'bp_folder.', 'bp_document.')) and ep != 'bp_project.project_create' }}" title="Projects" aria-label="Projects">
+                <i class="fa-solid fa-folder-tree"></i>Projects
+            </a>
+            <a href="{{ url_for('bp_project.project_create') }}" class="nav-item{{ ' is-active' if ep == 'bp_project.project_create' }}" title="New project" aria-label="New project">
+                <i class="fa-solid fa-folder-plus"></i>New
+            </a>
+        {% endif %}
+            <a href="{{ url_for('guidelines_route') }}" class="nav-item{{ ' is-active' if ep == 'guidelines_route' }}" title="Guidelines" aria-label="Guidelines">
+                <i class="fa-solid fa-circle-question"></i>Guidelines
+            </a>
+
+        <div class="spacer"></div>
+        {% if not current_user.is_anonymous %}
+        <hr>
         {% if current_user.is_admin %}
-        <a href="{{ url_for('bp_auth.admin_panel') }}" aria-label="Admin Panel">
-            <i class="fa-solid fa-users"></i> <span>Admin Panel</span>
-        </a>
+            <a href="{{ url_for('bp_auth.admin_panel') }}" class="nav-item{{ ' is-active' if ep == 'bp_auth.admin_panel' }}" title="Admin panel" aria-label="Admin panel">
+                <i class="fa-solid fa-users-gear"></i>Admin
+            </a>
         {% endif %}
+            <a href="{{ url_for('bp_auth.profile') }}" class="nav-item{{ ' is-active' if ep == 'bp_auth.profile' }}" title="Profile &amp; password" aria-label="Profile &amp; password">
+                <i class="fa-solid fa-circle-user"></i>Profile
+            </a>
+            <a href="{{ url_for('bp_auth.logout') }}" class="nav-item is-danger" title="Logout" aria-label="Logout">
+                <i class="fa-solid fa-right-from-bracket"></i>Logout
+            </a>
         {% endif %}
-    </div>
+    </nav>
     <div class="container mt-5">
 
         {% with messages = get_flashed_messages(with_categories=true) %}
